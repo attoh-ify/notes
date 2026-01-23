@@ -1,5 +1,6 @@
 package com.example.notes;
 
+import com.example.notes.feat_document.formatter.impl.CharSequenceDocumentFormatter;
 import com.example.notes.shared.document_store.DocumentStore;
 import com.example.notes.shared.document_store.impl.SimpleHashMapDocumentStore;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
@@ -18,5 +19,10 @@ public class NotesApplication {
     @Bean
     public OperationTransformations getOperationTransformations() {
         return new CharSequenceOperationTransformations();
+    }
+
+    @Bean
+    public DocumentStore getDocumentStore() {
+        return new SimpleHashMapDocumentStore(CharSequenceDocumentFormatter::new);
     }
 }
