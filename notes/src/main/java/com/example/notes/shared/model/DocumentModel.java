@@ -73,9 +73,8 @@ public class DocumentModel {
         return transformedOperations;
     }
 
-    public int incrementCollaboratorCount() {
+    public void incrementCollaboratorCount() {
         collaboratorCount++;
-        return collaboratorCount;
     }
 
     public int decrementCollaboratorCount() {

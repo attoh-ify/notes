@@ -9,14 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.function.Supplier;
 
 public abstract class DocumentStore {
-    final public Supplier<DocumentFormatter> documentFormatterSupplier;
+    final public Supplier<DocumentFormatter> documentFormatterFactory;
 
     @Getter
     @Autowired
     private OperationTransformations operationTransformations;
 
-    public DocumentStore(Supplier<DocumentFormatter> documentFormatterSupplier) {
-        this.documentFormatterSupplier = documentFormatterSupplier;
+    public DocumentStore(Supplier<DocumentFormatter> documentFormatterFactory) {
+        this.documentFormatterFactory = documentFormatterFactory;
     }
 
     public abstract DocumentModel addEmptyDocument(String userId, String docId);
