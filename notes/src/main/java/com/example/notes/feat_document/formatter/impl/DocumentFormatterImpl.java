@@ -9,9 +9,8 @@ public class DocumentFormatterImpl implements DocumentFormatter {
     @Override
     public String applyOperation(TextOperation operation) {
         return switch (operation.getOpName()) {
-            case "ins" -> applyInsert(operation);
-            case "del" -> applyRemoveChar(operation);
-            default -> "";
+            case INS -> applyInsert(operation);
+            case DEL -> applyRemoveChar(operation);
         };
     }
 

@@ -10,7 +10,7 @@ public class MessagePusher {
     @Autowired
     private SimpMessagingTemplate simpMessagingTemplate;
 
-    public void push(String type, String docId, Object payload) {
+    public void push(MessageType type, String docId, Object payload) {
         simpMessagingTemplate.convertAndSend(
                 "/topic/doc/" + docId,
                 new MessageOutPayloadWrapper<>(type, payload)

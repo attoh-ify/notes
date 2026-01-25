@@ -1,5 +1,6 @@
 package com.example.notes.shared.operation_transformations.impl;
 
+import com.example.notes.shared.model.OperationNameEnum;
 import com.example.notes.shared.model.TextOperation;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
 
@@ -13,13 +14,13 @@ public class CharSequenceOperationTransformations implements OperationTransforma
         var op1Name = op1.getOpName();
         var op2Name = op2.getOpName();
 
-        if (op1Name.equals("ins") && op2Name.equals("ins")) {
+        if (op1Name.equals(OperationNameEnum.INS) && op2Name.equals(OperationNameEnum.INS)) {
             return new TextOperation[]{transformII(op1, op2)};
-        } else if (op1Name.equals("ins") && op2Name.equals("del")) {
+        } else if (op1Name.equals(OperationNameEnum.INS) && op2Name.equals(OperationNameEnum.DEL)) {
             return new TextOperation[]{transformID(op1, op2)};
-        } else if (op1Name.equals("del") && op2Name.equals("ins")) {
+        } else if (op1Name.equals(OperationNameEnum.DEL) && op2Name.equals(OperationNameEnum.INS)) {
             return transformDI(op1, op2);
-        } else if (op1Name.equals("del") && op2Name.equals("del")) {
+        } else if (op1Name.equals(OperationNameEnum.DEL) && op2Name.equals(OperationNameEnum.DEL)) {
             return new TextOperation[]{transformDD(op1, op2)};
         } else return null;
     }

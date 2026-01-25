@@ -1,0 +1,5 @@
+server:
+  port: 8000
+
+ws:
+  allowed_origin: '${WS_ALLOWED_ORIGIN: ""}'

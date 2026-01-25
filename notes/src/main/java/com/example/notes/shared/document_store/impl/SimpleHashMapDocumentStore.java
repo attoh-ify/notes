@@ -25,11 +25,13 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
     }
 
     @Override
-    public DocumentModel addEmptyDocument(String userId, String docId) {
-        DocumentModel newDocState = new DocumentModel(docId, documentFormatterFactory.get(), getOperationTransformations());
+    public void addEmptyDocument(String userId, String docId) {
+        DocumentModel newDocState =
+                new DocumentModel(
+                        docId, documentFormatterFactory.get(),
+                        getOperationTransformations());
         store.put(docId, newDocState);
         addCollaboratorToDocument(userId, docId);
-        return newDocState;
     }
 
     @Override
@@ -43,8 +45,8 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
     }
 
     @Override
-    public DocumentModel removeDocument(String docId) {
-        return store.remove(docId);
+    public void removeDocument(String docId) {
+        store.remove(docId);
     }
 
     @Override

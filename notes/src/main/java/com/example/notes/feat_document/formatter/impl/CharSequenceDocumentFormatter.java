@@ -9,9 +9,8 @@ public class CharSequenceDocumentFormatter implements DocumentFormatter {
     @Override
     public String applyOperation(TextOperation operation) {
         return switch (operation.getOpName()) {
-            case "ins" -> applyInsert(operation);
-            case "del" -> applyDelete(operation);
-            default -> "";
+            case INS -> applyInsert(operation);
+            case DEL -> applyDelete(operation);
         };
     }
 

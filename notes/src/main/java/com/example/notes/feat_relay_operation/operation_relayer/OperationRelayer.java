@@ -1,6 +1,7 @@
 package com.example.notes.feat_relay_operation.operation_relayer;
 
 import com.example.notes.shared.message_pusher.MessagePusher;
+import com.example.notes.shared.message_pusher.MessageType;
 import com.example.notes.shared.model.message_out_payload.OperationQueueOutPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -9,6 +10,6 @@ public class OperationRelayer {
     public MessagePusher messageRelayer;
 
     public void relay(String docId, OperationQueueOutPayload outPayload) {
-        messageRelayer.push("operation", docId, outPayload);
+        messageRelayer.push(MessageType.OPERATION, docId, outPayload);
     }
 }

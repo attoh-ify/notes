@@ -6,14 +6,14 @@ import lombok.Setter;
 @Setter
 @Getter
 public class TextOperation {
-    private String opName;
+    private OperationNameEnum opName;
     private String operand;
     private int position;
 
     public TextOperation() {}
 
     public TextOperation(
-            String opName,
+            OperationNameEnum opName,
             String operand,
             int position
     ) {

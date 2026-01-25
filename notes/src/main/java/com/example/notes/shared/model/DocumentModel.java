@@ -37,14 +37,7 @@ public class DocumentModel {
     }
 
     public List<TextOperation> transformAgainstRevisionLogs(TextOperation operation, int from) {
-        class TextOperationWrapper {
-            final TextOperation operation;
-            final int transformFrom;
-
-            TextOperationWrapper(TextOperation operation, int transformFrom) {
-                this.operation = operation;
-                this.transformFrom = transformFrom;
-            }
+        record TextOperationWrapper(TextOperation operation, int transformFrom) {
         }
 
         List<TextOperation> transformedOperations = new ArrayList<>();

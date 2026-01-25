@@ -20,7 +20,7 @@ public class OperationQueueImpl implements OperationQueue {
         DocumentModel doc = documentStore.getDocumentFromDocId(message.getDocId());
 
         int serverDocRevision = doc.getRevision();
-        int messageDocRevision = message.getRevision();;
+        int messageDocRevision = message.getRevision();
 
         if (messageDocRevision < serverDocRevision) {
             //client doc version is outdated
