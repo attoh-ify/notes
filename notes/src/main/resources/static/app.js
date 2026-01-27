@@ -56,17 +56,13 @@
 
 
     function handleOperation(payload) {
-
         let ack = payload.acknowledgeTo
         let operation = payload.operation
         let revision = payload.revision
 
         if (ack === userId) {
-
             onOperationAcknowledged(operation, revision)
-
         } else {
-
             docState.transformPendingOperations(operation, revision)
             docState.lastSyncedRevision = revision
 
@@ -273,7 +269,6 @@
 
 
     function sendInsertOperation(caretPosition, substring) {
-
         docState.queueOperation(
 
             new TextOperation("INS", substring, caretPosition - 1, docState.lastSyncedRevision),
@@ -288,7 +283,6 @@
 
 
     function sendDeleteOperation(caretPosition, substring) {
-
         docState.queueOperation(
 
             new TextOperation("DEL", substring, caretPosition, docState.lastSyncedRevision),
