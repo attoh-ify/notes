@@ -7,11 +7,11 @@ public class CharSequenceDocumentFormatter implements DocumentFormatter {
     private final StringBuffer buffer = new StringBuffer();
 
     @Override
-    public String applyOperation(TextOperation operation) {
-        return switch (operation.getOpName()) {
+    public void applyOperation(TextOperation operation) {
+        switch (operation.getOpName()) {
             case INS -> applyInsert(operation);
             case DEL -> applyDelete(operation);
-        };
+        }
     }
 
     @Override
@@ -19,19 +19,17 @@ public class CharSequenceDocumentFormatter implements DocumentFormatter {
         return buffer.toString();
     }
 
-    private String applyInsert(TextOperation operation) {
+    private void applyInsert(TextOperation operation) {
         if (buffer.length() == operation.getPosition()) {
             buffer.append(operation.getOperand());
         } else {
             buffer.insert(operation.getPosition(), operation.getOperand());
         }
-        return buffer.toString();
     }
 
-    private String applyDelete(TextOperation operation) {
+    private void applyDelete(TextOperation operation) {
         var start = operation.getPosition();
         var end = start + operation.getOperand().length();
         buffer.delete(start, end);
-        return buffer.toString();
     }
 }

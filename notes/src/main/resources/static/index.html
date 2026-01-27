@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notes</title>
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.27.2/axios.js"
+            integrity="sha512-rozBdNtS7jw9BlC76YF1FQGjz17qQ0J/Vu9ZCFIW374sEy4EZRbRcUZa2RU/MZ90X2mnLU56F75VfdToGV0RiA=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.js"
+            integrity="sha512-tL4PIUsPy+Rks1go4kQG8M8/ItpRMvKnbBjQm4d2DQnFwgcBYRRN00QdyQnWSCwNMsoY/MfJY8nHp2CzlNdtZA=="
+            crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <script src="./scripts/deque.js"></script>
+    <script src="./scripts/operation_transforms.js"></script>
+    <script src="./scripts/document_state.js"></script>
+</head>
+<body>
+
+<div id="hero" class="hero">
+    <header class="header">
+        <div class="shareable_link_container">
+            <h6 class="text_caption unselectable">Collaboration link</h6>
+            <h3 id="shareable_link" class="shareable_link">Generating collaboration link...</h3>
+        </div>
+        <p id="collaborator_count" class="collaborator_count text_caption unselectable"></p>
+    </header>
+
+    <div class="editor_container">
+            <textarea id="editor" class="editor" placeholder="Write something..." ondrag="showError(); return false"
+                      autocomplete="off"></textarea>
+        <script>
+            function showError() {
+                alert('drag is not supported by cotext currently');
+            }
+            const textEditor = document.getElementById("editor");
+            textEditor.addEventListener("keyup", e => {
+                textEditor.style.height = "auto";
+                let scrollHeight = e.target.scrollHeight;
+                textEditor.style.height = `${scrollHeight}px`;
+            });
+        </script>
+    </div>
+</div>
+
+</body>
+<script src="app.js"></script>
+</html>

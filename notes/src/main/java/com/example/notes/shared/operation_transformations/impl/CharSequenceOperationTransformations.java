@@ -109,7 +109,7 @@ public class CharSequenceOperationTransformations implements OperationTransforma
                     op1.getOperand(),
                     op1.getPosition()
             );
-        } else if (op1.getPosition()> op2End) {
+        } else if (op1.getPosition() > op2End) {
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),

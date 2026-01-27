@@ -8,8 +8,6 @@ import lombok.Setter;
 public class DocumentCreateResponse {
     private String docId;
 
-    public DocumentCreateResponse() {}
-
     public DocumentCreateResponse(String docId) {
         this.docId = docId;
     }

@@ -20,10 +20,11 @@ public class HandshakeInterceptorImpl implements HandshakeInterceptor {
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
+        System.out.println("beforeHandshake: " + request.getURI());
         var q = request.getURI().getQuery();
-        if (q == null || q.isBlank()) return true;
+        if (q == null || q.isBlank() || q.isEmpty()) return true;
         String[] parts = q.split("=");
-        if (parts.length != 2 || !parts[0].equals("docId")) {
+        if (parts.length != 2 || !parts[0].equals("id")) {
             response.setStatusCode(HttpStatus.NOT_FOUND);
             response.close();
             return false;

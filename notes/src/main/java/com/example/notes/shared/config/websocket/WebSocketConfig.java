@@ -15,6 +15,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Autowired
     DocumentStore documentStore;
 
+    @Autowired
+    HandshakeInterceptorImpl handshakeInterceptor;
+
     @Value("${ws.allowed_origin}")
     String allowedOrigin;
 
@@ -23,7 +26,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addEndpoint("/relay")
                 .setAllowedOrigins(allowedOrigin)
                 .addInterceptors(new HandshakeInterceptorImpl(documentStore))
-                .setHandshakeHandler(new HandshakeHandler());
+                .setHandshakeHandler(new HandshakeHandler())
+                .withSockJS();
     }
 
     @Override

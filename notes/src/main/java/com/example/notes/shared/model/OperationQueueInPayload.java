@@ -19,4 +19,14 @@ public class OperationQueueInPayload {
     }
 
     public OperationQueueInPayload() {}
+
+    @Override
+    public String toString() {
+        return "OperationQueueInPayload{" +
+                "docId='" + docId + '\'' +
+                ", revision=" + revision +
+                ", from='" + from + '\'' +
+                ", operation=" + operation +
+                '}';
+    }
 }

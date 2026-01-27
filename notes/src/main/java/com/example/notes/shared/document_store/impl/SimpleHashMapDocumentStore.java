@@ -30,6 +30,7 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
                 new DocumentModel(
                         docId, documentFormatterFactory.get(),
                         getOperationTransformations());
+        System.out.println("Adding empty document " + newDocState);
         store.put(docId, newDocState);
         addCollaboratorToDocument(userId, docId);
     }
@@ -51,6 +52,8 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
 
     @Override
     public void addCollaboratorToDocument(String userId, String docId) {
+        System.out.println("UserId: " + userId);
+        System.out.println("DocId: " + docId);
         userIdToDocIdMap.put(userId, docId);
         getDocumentFromDocId(docId).incrementCollaboratorCount();
     }
@@ -59,7 +62,7 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
     public DocumentModel removeCollaboratorFromDocument(String userId) {
         var doc = getDocumentFromUserId(userId);
         int newCount = doc.decrementCollaboratorCount();
-        userIdToDocIdMap.remove(userId);
+//        userIdToDocIdMap.remove(userId);
         if (newCount == 0) {
             removeDocument(doc.getId());
         }

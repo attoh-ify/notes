@@ -7,11 +7,11 @@ public class DocumentFormatterImpl implements DocumentFormatter {
     private final StringBuffer buffer = new StringBuffer();
 
     @Override
-    public String applyOperation(TextOperation operation) {
-        return switch (operation.getOpName()) {
+    public void applyOperation(TextOperation operation) {
+        switch (operation.getOpName()) {
             case INS -> applyInsert(operation);
             case DEL -> applyRemoveChar(operation);
-        };
+        }
     }
 
     @Override
@@ -19,17 +19,15 @@ public class DocumentFormatterImpl implements DocumentFormatter {
         return buffer.toString();
     }
 
-    private String applyInsert(TextOperation operation) {
+    private void applyInsert(TextOperation operation) {
         if (buffer.length() == operation.getPosition()) {
             buffer.append(operation.getOperand());
         } else {
             buffer.insert(operation.getPosition(), operation.getOperand());
         }
-        return buffer.toString();
     }
 
-    private String applyRemoveChar(TextOperation operation) {
+    private void applyRemoveChar(TextOperation operation) {
         buffer.deleteCharAt(operation.getPosition());
-        return buffer.toString();
     }
 }

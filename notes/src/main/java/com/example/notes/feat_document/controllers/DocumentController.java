@@ -12,7 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/doc")
+@RequestMapping("/doc")
 public class DocumentController {
     @Autowired
     private DocumentStore documentStore;
@@ -23,6 +23,7 @@ public class DocumentController {
     @PostMapping("/create")
     public DocumentCreateResponse createDoc(@RequestBody UserModel user) {
         String docId = NanoIdUtils.randomNanoId();
+        System.out.println("Creating document " + docId);
         documentStore.addEmptyDocument(user.getUserId(), docId);
         return new DocumentCreateResponse(docId);
     }
