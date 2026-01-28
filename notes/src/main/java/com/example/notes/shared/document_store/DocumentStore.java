@@ -1,7 +1,7 @@
 package com.example.notes.shared.document_store;
 
-import com.example.notes.feat_document.formatter.DocumentFormatter;
-import com.example.notes.shared.model.DocumentModel;
+import com.example.notes.shared.formatter.DocumentFormatter;
+import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;

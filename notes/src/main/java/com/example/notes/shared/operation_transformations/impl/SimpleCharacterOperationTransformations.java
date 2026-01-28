@@ -1,7 +1,7 @@
 package com.example.notes.shared.operation_transformations.impl;
 
-import com.example.notes.shared.model.OperationNameEnum;
-import com.example.notes.shared.model.TextOperation;
+import com.example.notes.dto.ot.OperationNameEnum;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
 
 public class SimpleCharacterOperationTransformations implements OperationTransformations {

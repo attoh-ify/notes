@@ -1,9 +1,9 @@
 package com.example.notes;
 
-import com.example.notes.activemq.services.EmailService;
-import com.example.notes.feat_document.collaborator_count_notifier.CollaboratorCountNotifier;
-import com.example.notes.feat_document.formatter.impl.CharSequenceDocumentFormatter;
-import com.example.notes.feat_relay_operation.operation_relayer.OperationRelayer;
+import com.example.notes.services.impl.EmailService;
+import com.example.notes.notifier.CollaboratorCountNotifier;
+import com.example.notes.shared.formatter.impl.CharSequenceDocumentFormatter;
+import com.example.notes.notifier.OperationRelayer;
 import com.example.notes.shared.document_store.DocumentStore;
 import com.example.notes.shared.document_store.impl.SimpleHashMapDocumentStore;
 import com.example.notes.shared.operation_queue.OperationQueue;
@@ -21,7 +21,7 @@ import jakarta.jms.TextMessage;
 import jakarta.jms.DeliveryMode;
 
 import org.apache.activemq.ActiveMQConnectionFactory;
-import org.apache.activemq.jms.pool.PooledConnectionFactory;
+import org.messaginghub.pooled.jms.JmsPoolConnectionFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -46,7 +46,7 @@ public class NotesApplication implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         final ActiveMQConnectionFactory connectionFactory = createActiveMQConnectionFactory();
-        final PooledConnectionFactory pooledConnectionFactory = createPooledConnectionFactory(connectionFactory);
+        final JmsPoolConnectionFactory pooledConnectionFactory = createPooledConnectionFactory(connectionFactory);
 
         sendMessage(pooledConnectionFactory);
         receiveMessage(connectionFactory);
@@ -54,7 +54,7 @@ public class NotesApplication implements CommandLineRunner {
         pooledConnectionFactory.stop();
 	}
 
-    private void sendMessage(PooledConnectionFactory pooledConnectionFactory) throws JMSException {
+    private void sendMessage(JmsPoolConnectionFactory pooledConnectionFactory) throws JMSException {
         // establish a connection for the producer
         final Connection producerConnection;
         try {
@@ -75,7 +75,7 @@ public class NotesApplication implements CommandLineRunner {
         producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
 
         // create a message
-        final String text = "Welcome to notes app!";
+        final String text = "Welcome to notes app! Hope you have a productive session.";
         final TextMessage producerMessage = producerSession.createTextMessage(text);
 
         // send the message
@@ -109,10 +109,14 @@ public class NotesApplication implements CommandLineRunner {
         // receive the message when it arrives
         final TextMessage consumerTextMessage = (TextMessage) consumerMessage;
         System.out.println("Message received: " + consumerTextMessage.getText());
-        emailService.sendEmail(
-                "alexander.attoh22@gmail.com",
-                "Welcome to notes!",
-                consumerTextMessage.getText());
+        try {
+            emailService.sendEmail(
+                    "alexander.attoh22@gmail.com",
+                    "Welcome to notes!",
+                    consumerTextMessage.getText());
+        } catch (Exception e) {
+            System.err.println("Email failed to send, but JMS worked! Error: " + e.getMessage());
+        }
 
         // clean up the consumer
         consumer.close();
@@ -127,8 +131,8 @@ public class NotesApplication implements CommandLineRunner {
         return connectionFactory;
     }
 
-    private static PooledConnectionFactory createPooledConnectionFactory(ActiveMQConnectionFactory connectionFactory) {
-        final PooledConnectionFactory pooledConnectionFactory = new PooledConnectionFactory();
+    private static JmsPoolConnectionFactory createPooledConnectionFactory(ActiveMQConnectionFactory connectionFactory) {
+        final JmsPoolConnectionFactory pooledConnectionFactory = new JmsPoolConnectionFactory();
         pooledConnectionFactory.setConnectionFactory(connectionFactory);
         pooledConnectionFactory.setMaxConnections(10);
         return pooledConnectionFactory;

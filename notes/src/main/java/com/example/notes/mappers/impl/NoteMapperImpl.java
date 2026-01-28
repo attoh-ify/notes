@@ -1,0 +1,61 @@
+package com.example.notes.mappers.impl;
+
+import com.example.notes.dto.note.NoteDto;
+import com.example.notes.entities.note.Note;
+import com.example.notes.entities.noteAccess.NoteAccessRole;
+import com.example.notes.entities.user.User;
+import com.example.notes.exceptions.BadRequestException;
+import com.example.notes.mappers.NoteMapper;
+import com.example.notes.repositories.UserRepository;
+import com.example.notes.services.impl.NotePolicyService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+@Component
+public class NoteMapperImpl implements NoteMapper {
+    private final UserRepository userRepository;
+    private final NotePolicyService notePolicyService;
+
+    private static final Logger log =
+            LoggerFactory.getLogger(NoteMapperImpl.class);
+
+    public NoteMapperImpl(UserRepository userRepository, NotePolicyService notePolicyService) {
+        this.userRepository = userRepository;
+        this.notePolicyService = notePolicyService;
+    }
+
+    @Override
+    public Note fromDto(NoteDto noteDto) {
+        User user = userRepository.findById(noteDto.userId())
+                .orElseThrow(() -> {
+                    log.warn("User with id {} not found", noteDto.userId());
+                    return new BadRequestException("User with id not found");
+                });
+        return new Note(
+                noteDto.id(),
+                user,
+                noteDto.title(),
+                null,
+                noteDto.visibility(),
+                null,
+                noteDto.currentNoteVersion(),
+                null
+        );
+    }
+
+    @Override
+    public NoteDto toDto(Note note) {
+        NoteAccessRole accessRole = notePolicyService.resolveRole(note.getUser().getEmail(), note);
+        return new NoteDto(
+                note.getId(),
+                note.getUser().getId(),
+                note.getTitle(),
+                note.getVisibility(),
+                accessRole,
+                note.getCurrentNoteVersion(),
+                note.getCreatedAt(),
+                note.getUpdatedAt()
+        );
+    }
+}

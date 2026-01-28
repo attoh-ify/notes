@@ -1,10 +1,10 @@
 package com.example.notes.shared.operation_queue.impl;
 
-import com.example.notes.feat_relay_operation.operation_relayer.OperationRelayer;
+import com.example.notes.notifier.OperationRelayer;
 import com.example.notes.shared.document_store.DocumentStore;
-import com.example.notes.shared.model.DocumentModel;
-import com.example.notes.shared.model.OperationQueueInPayload;
-import com.example.notes.shared.model.message_out_payload.OperationQueueOutPayload;
+import com.example.notes.dto.note.DocumentModel;
+import com.example.notes.dto.enqueue.OperationQueueInPayload;
+import com.example.notes.dto.enqueue.OperationQueueOutPayload;
 import com.example.notes.shared.operation_queue.OperationQueue;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -23,7 +23,7 @@ public class OperationQueueImpl implements OperationQueue {
         int messageDocRevision = message.getRevision();
 
         if (messageDocRevision < serverDocRevision) {
-            //client doc version is outdated
+            // client doc version is outdated
             // in this case, transform this message against all committed revisions after serverDocVersion
             var transformedOperations = doc.transformAgainstRevisionLogs(message.getOperation(), messageDocRevision);
             if (transformedOperations == null || transformedOperations.isEmpty()) {

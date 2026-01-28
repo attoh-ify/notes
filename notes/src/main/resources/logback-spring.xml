@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ===== Common properties ===== -->
+    <property name="APP_NAME" value="notes"/>
+    <property name="LOG_PATH" value="logs"/>
+
+    <!-- ===== Console appender ===== -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>
+                %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level
+                %logger{36} - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <!-- ===== File appender (rolling) ===== -->
+    <appender name="FILE"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+
+        <file>${LOG_PATH}/${APP_NAME}.log</file>
+
+        <rollingPolicy
+                class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- daily rotation -->
+            <fileNamePattern>
+                ${LOG_PATH}/${APP_NAME}.%d{yyyy-MM-dd}.log
+            </fileNamePattern>
+
+            <!-- keep 30 days -->
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>
+                %d{yyyy-MM-dd HH:mm:ss.SSS}
+                %-5level
+                %logger{36}
+                - %msg%n
+            </pattern>
+        </encoder>
+    </appender>
+
+    <!-- ===== Log levels ===== -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+    <!-- Reduce noise -->
+    <logger name="org.springframework" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+
+</configuration>

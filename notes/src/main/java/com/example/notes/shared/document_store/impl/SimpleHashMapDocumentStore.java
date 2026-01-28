@@ -1,9 +1,8 @@
 package com.example.notes.shared.document_store.impl;
 
-import com.example.notes.feat_document.formatter.DocumentFormatter;
+import com.example.notes.shared.formatter.DocumentFormatter;
 import com.example.notes.shared.document_store.DocumentStore;
-import com.example.notes.shared.model.DocumentModel;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.example.notes.dto.note.DocumentModel;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
