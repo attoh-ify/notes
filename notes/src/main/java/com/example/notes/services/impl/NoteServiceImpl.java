@@ -74,7 +74,7 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 user,
                 "Untitled",
-                null,
+                new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 null,
                 null,

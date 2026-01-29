@@ -42,11 +42,11 @@ public class NotePolicyService {
     }
 
     public NoteAccessRole resolveRole(String actorEmail, Note note) {
-        NoteAccessRole accessRole;
+        NoteAccessRole accessRole = null;
 
-        accessRole = note.getUser().getEmail().equals(actorEmail) ? NoteAccessRole.SUPER : null;
-
-        if (accessRole != null) return accessRole;
+        if (note.getUser().getEmail().equals(actorEmail)) {
+            return NoteAccessRole.OWNER;
+        }
 
         for (NoteAccess noteAccess : note.getNoteAccesses()) {
             if (noteAccess.getEmail().equals(actorEmail)) {
@@ -71,7 +71,7 @@ public class NotePolicyService {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.SUPER)) {
+        if (!accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.OWNER)) {
             log.warn("User with the email={} does not have super user access control of this note", userEmail);
             throw new BadRequestException("User with the email  does not have super user access control of this note");
         }
@@ -82,7 +82,7 @@ public class NotePolicyService {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR)) {
+        if (!accessRole.equals(NoteAccessRole.OWNER) && !accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR)) {
             log.warn("User with the email={} is not allowed to edit this note", userEmail);
             throw new BadRequestException("User with the email is not allowed to edit this note");
         }
@@ -93,7 +93,7 @@ public class NotePolicyService {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR) && !accessRole.equals(NoteAccessRole.VIEWER)) {
+        if (!accessRole.equals(NoteAccessRole.OWNER) && !accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR) && !accessRole.equals(NoteAccessRole.VIEWER)) {
             log.warn("User with the email={} is not allowed to view this note", userEmail);
             throw new BadRequestException("User with the email is not allowed to view this note");
         }

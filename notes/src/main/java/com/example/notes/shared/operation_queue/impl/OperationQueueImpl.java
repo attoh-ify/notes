@@ -1,7 +1,7 @@
 package com.example.notes.shared.operation_queue.impl;
 
 import com.example.notes.notifier.OperationRelayer;
-import com.example.notes.shared.document_store.DocumentStore;
+import com.example.notes.shared.document_store.NoteStore;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.enqueue.OperationQueueOutPayload;
@@ -10,14 +10,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 public class OperationQueueImpl implements OperationQueue {
     @Autowired
-    private DocumentStore documentStore;
+    private NoteStore documentStore;
 
     @Autowired
     private OperationRelayer operationRelayer;
 
     @Override
     public void enqueue(OperationQueueInPayload message) {
-        DocumentModel doc = documentStore.getDocumentFromDocId(message.getDocId());
+        DocumentModel doc = documentStore.getNoteFromNoteId(message.getNoteId());
 
         int serverDocRevision = doc.getRevision();
         int messageDocRevision = message.getRevision();
@@ -32,7 +32,7 @@ public class OperationQueueImpl implements OperationQueue {
 
             for (var operation : transformedOperations) {
                 if (operation == null) continue;
-                operationRelayer.relay(message.getDocId(), new OperationQueueOutPayload(
+                operationRelayer.relay(message.getNoteId(), new OperationQueueOutPayload(
                         message.getFrom(),
                         operation,
                         doc.getRevision() + 1
@@ -41,7 +41,7 @@ public class OperationQueueImpl implements OperationQueue {
                 doc.applyOperation(operation);
             }
         } else if (messageDocRevision == serverDocRevision) {
-            operationRelayer.relay(message.getDocId(), new OperationQueueOutPayload(
+            operationRelayer.relay(message.getNoteId(), new OperationQueueOutPayload(
                     message.getFrom(),
                     message.getOperation(),
                     doc.getRevision() + 1

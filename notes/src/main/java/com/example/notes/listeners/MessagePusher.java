@@ -6,14 +6,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import java.util.UUID;
+
 @Component
 public class MessagePusher {
     @Autowired
     private SimpMessagingTemplate simpMessagingTemplate;
 
-    public void push(MessageType type, String docId, Object payload) {
+    public void push(MessageType type, UUID noteId, Object payload) {
         simpMessagingTemplate.convertAndSend(
-                "/topic/doc/" + docId,
+                "/topic/note/" + noteId,
                 new MessageOutPayloadWrapper<>(type, payload)
         );
     }

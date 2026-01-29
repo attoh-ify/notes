@@ -6,30 +6,31 @@ import com.example.notes.shared.operation_transformations.OperationTransformatio
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.UUID;
 import java.util.function.Supplier;
 
-public abstract class DocumentStore {
+public abstract class NoteStore {
     final public Supplier<DocumentFormatter> documentFormatterFactory;
 
     @Getter
     @Autowired
     private OperationTransformations operationTransformations;
 
-    public DocumentStore(Supplier<DocumentFormatter> documentFormatterFactory) {
+    public NoteStore(Supplier<DocumentFormatter> documentFormatterFactory) {
         this.documentFormatterFactory = documentFormatterFactory;
     }
 
-    public abstract void addEmptyDocument(String userId, String docId);
+    public abstract void addEmptyNote(UUID userId, UUID noteId);
 
-    public abstract DocumentModel getDocumentFromDocId(String docId);
+    public abstract DocumentModel getNoteFromNoteId(UUID noteId);
 
-    public abstract DocumentModel getDocumentFromUserId(String userId);
+    public abstract DocumentModel getNoteFromUserId(UUID userId);
 
-    public abstract void removeDocument(String docId);
+    public abstract void removeNote(UUID docId);
 
-    public abstract void addCollaboratorToDocument(String userId, String docId);
+    public abstract void addCollaboratorToNote(UUID userId, UUID noteId);
 
-    public abstract DocumentModel removeCollaboratorFromDocument(String userId);
+    public abstract DocumentModel removeCollaboratorFromNote(UUID userId);
 
-    public abstract boolean hasDocument(String docId);
+    public abstract boolean hasDocument(UUID noteId);
 }

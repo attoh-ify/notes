@@ -4,7 +4,7 @@ import com.example.notes.services.impl.EmailService;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.shared.formatter.impl.CharSequenceDocumentFormatter;
 import com.example.notes.notifier.OperationRelayer;
-import com.example.notes.shared.document_store.DocumentStore;
+import com.example.notes.shared.document_store.NoteStore;
 import com.example.notes.shared.document_store.impl.SimpleHashMapDocumentStore;
 import com.example.notes.shared.operation_queue.OperationQueue;
 import com.example.notes.shared.operation_queue.impl.OperationQueueImpl;
@@ -48,8 +48,8 @@ public class NotesApplication implements CommandLineRunner {
         final ActiveMQConnectionFactory connectionFactory = createActiveMQConnectionFactory();
         final JmsPoolConnectionFactory pooledConnectionFactory = createPooledConnectionFactory(connectionFactory);
 
-        sendMessage(pooledConnectionFactory);
-        receiveMessage(connectionFactory);
+//        sendMessage(pooledConnectionFactory);
+//        receiveMessage(connectionFactory);
 
         pooledConnectionFactory.stop();
 	}
@@ -154,7 +154,7 @@ public class NotesApplication implements CommandLineRunner {
     }
 
     @Bean
-    public DocumentStore getDocumentStore() {
+    public NoteStore getDocumentStore() {
         return new SimpleHashMapDocumentStore(CharSequenceDocumentFormatter::new);
     }
 

@@ -1,16 +1,17 @@
 package com.example.notes.shared.document_store.impl;
 
 import com.example.notes.shared.formatter.DocumentFormatter;
-import com.example.notes.shared.document_store.DocumentStore;
+import com.example.notes.shared.document_store.NoteStore;
 import com.example.notes.dto.note.DocumentModel;
 
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
-public class SimpleHashMapDocumentStore extends DocumentStore {
-    // DocId -> DocState
-    private final ConcurrentHashMap<String, DocumentModel> store = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, String> userIdToDocIdMap = new ConcurrentHashMap<>();
+public class SimpleHashMapDocumentStore extends NoteStore {
+    // noteId -> DocState
+    private final ConcurrentHashMap<UUID, DocumentModel> store = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, UUID> userIdTonoteIdMap = new ConcurrentHashMap<>();
 
     public SimpleHashMapDocumentStore(Supplier<DocumentFormatter> documentFormatterFactory) {
         super(documentFormatterFactory);
@@ -20,57 +21,57 @@ public class SimpleHashMapDocumentStore extends DocumentStore {
     public String toString() {
         return "SimpleHashMapDocumentStore{" +
                 "store=" + store +
-                ", userIdToDocIdMap=" + userIdToDocIdMap +
+                ", userIdTonoteIdMap=" + userIdTonoteIdMap +
                 '}';
     }
 
     @Override
-    public void addEmptyDocument(String userId, String docId) {
+    public void addEmptyNote(UUID userId, UUID noteId) {
         DocumentModel newDocState =
                 new DocumentModel(
-                        docId, documentFormatterFactory.get(),
+                        noteId, documentFormatterFactory.get(),
                         getOperationTransformations());
         System.out.println("Adding empty document " + newDocState);
-        store.put(docId, newDocState);
-        addCollaboratorToDocument(userId, docId);
+        store.put(noteId, newDocState);
+        addCollaboratorToNote(userId, noteId);
     }
 
     @Override
-    public DocumentModel getDocumentFromDocId(String docId) {
-        return store.get(docId);
+    public DocumentModel getNoteFromNoteId(UUID noteId) {
+        return store.get(noteId);
     }
 
     @Override
-    public DocumentModel getDocumentFromUserId(String userId) {
-        return store.get(userIdToDocIdMap.get(userId));
+    public DocumentModel getNoteFromUserId(UUID userId) {
+        return store.get(userIdTonoteIdMap.get(userId));
     }
 
     @Override
-    public void removeDocument(String docId) {
-        store.remove(docId);
+    public void removeNote(UUID noteId) {
+        store.remove(noteId);
     }
 
     @Override
-    public void addCollaboratorToDocument(String userId, String docId) {
+    public void addCollaboratorToNote(UUID userId, UUID noteId) {
         System.out.println("UserId: " + userId);
-        System.out.println("DocId: " + docId);
-        userIdToDocIdMap.put(userId, docId);
-        getDocumentFromDocId(docId).incrementCollaboratorCount();
+        System.out.println("noteId: " + noteId);
+        userIdTonoteIdMap.put(userId, noteId);
+        getNoteFromNoteId(noteId).incrementCollaboratorCount();
     }
 
     @Override
-    public DocumentModel removeCollaboratorFromDocument(String userId) {
-        var doc = getDocumentFromUserId(userId);
+    public DocumentModel removeCollaboratorFromNote(UUID userId) {
+        var doc = getNoteFromUserId(userId);
         int newCount = doc.decrementCollaboratorCount();
-//        userIdToDocIdMap.remove(userId);
+//        userIdTonoteIdMap.remove(userId);
         if (newCount == 0) {
-            removeDocument(doc.getId());
+            removeNote(doc.getId());
         }
         return doc;
     }
 
     @Override
-    public boolean hasDocument(String docId) {
-        return store.containsKey(docId);
+    public boolean hasDocument(UUID noteId) {
+        return store.containsKey(noteId);
     }
 }

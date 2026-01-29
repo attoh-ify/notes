@@ -4,14 +4,16 @@ import com.example.notes.dto.ot.TextOperation;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.UUID;
+
 @Getter
 @Setter
 public class EnqueueOperationPayload {
     private TextOperation operation;
     private int revision;
-    private String from;
+    private UUID from;
 
-    public EnqueueOperationPayload(TextOperation operation, int revision, String from) {
+    public EnqueueOperationPayload(TextOperation operation, int revision, UUID from) {
         this.operation = operation;
         this.revision = revision;
         this.from = from;

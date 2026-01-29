@@ -5,23 +5,20 @@ import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
 import lombok.Getter;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Queue;
+import java.util.*;
 
 public class DocumentModel {
     final List<TextOperation> revisionLog = new ArrayList<>();
     private final OperationTransformations operationTransformations;
     @Getter
-    private final String id;
+    private final UUID id;
     private final DocumentFormatter documentFormatter;
     @Getter
     private int revision = 0;
     @Getter
     private int collaboratorCount = 0;
 
-    public DocumentModel(String id, DocumentFormatter documentFormatter, OperationTransformations operationTransformations) {
+    public DocumentModel(UUID id, DocumentFormatter documentFormatter, OperationTransformations operationTransformations) {
         this.id = id;
         this.documentFormatter = documentFormatter;
         this.operationTransformations = operationTransformations;

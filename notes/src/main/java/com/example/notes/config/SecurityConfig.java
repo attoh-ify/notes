@@ -55,9 +55,8 @@ public class SecurityConfig {
                                 "/js/**"
                         ).permitAll()
                         .requestMatchers(
-                                "/ws/**",
-                                "/yjs/**",
-                                "/ws/info",
+                                "/relay/**",
+                                "/relay/info",
                                 "/api/users/login",
                                 "/api/users/register"
                         ).permitAll()

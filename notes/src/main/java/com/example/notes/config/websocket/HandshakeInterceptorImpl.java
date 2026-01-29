@@ -1,46 +1,83 @@
 package com.example.notes.config.websocket;
 
-import com.example.notes.shared.document_store.DocumentStore;
+import com.example.notes.shared.document_store.NoteStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.http.server.ServletServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class HandshakeInterceptorImpl implements HandshakeInterceptor {
-    private final DocumentStore documentStore;
+    private final NoteStore documentStore;
 
-    public HandshakeInterceptorImpl(DocumentStore documentStore) {
+    private static final Logger log = LoggerFactory.getLogger(HandshakeInterceptorImpl.class);
+
+    public HandshakeInterceptorImpl(NoteStore documentStore) {
         this.documentStore = documentStore;
     }
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
-        System.out.println("beforeHandshake: " + request.getURI());
-        var q = request.getURI().getQuery();
-        if (q == null || q.isBlank() || q.isEmpty()) return true;
-        String[] parts = q.split("=");
-        if (parts.length != 2 || !parts[0].equals("id")) {
-            response.setStatusCode(HttpStatus.NOT_FOUND);
-            response.close();
-            return false;
+//        var uri = request.getURI().toString();
+//        var noteId = extractNoteId(uri);
+//        var hasDoc = documentStore.hasDocument(noteId);
+//        System.out.println("Document: " + documentStore.getNoteFromNoteId(noteId));
+//        if (!hasDoc) {
+//            response.setStatusCode(HttpStatus.NOT_FOUND);
+//            response.close();
+//            return false;
+//        } else {
+//            return true;
+//        }
+        if (request instanceof ServletServerHttpRequest servletRequest) {
+            var httpServletRequest = servletRequest.getServletRequest();
+
+            if (httpServletRequest.getCookies() != null) {
+                for (var cookie : httpServletRequest.getCookies()) {
+                    attributes.put(cookie.getName(), cookie.getValue());
+                }
+            }
         }
-        var hasDoc = documentStore.hasDocument(parts[1]);
-        if (!hasDoc) {
-            response.setStatusCode(HttpStatus.NOT_FOUND);
-            response.close();
-            return false;
-        } else {
-            return true;
-        }
+        return true;
     }
 
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Exception exception) {
 
+    }
+
+    private UUID extractNoteId(String destination) {
+        try {
+            URI uri = new URI(destination);
+            String query = uri.getQuery();
+
+            if (query == null) return null;
+
+            String noteId = Arrays.stream(query.split("&"))
+                    .map(param -> param.split("=", 2))
+                    .filter(pair -> pair.length == 2 && pair[0].equals("noteId"))
+                    .map(pair -> URLDecoder.decode(pair[1], StandardCharsets.UTF_8))
+                    .findFirst()
+                    .orElse(null);
+
+            if (noteId == null) return null;
+
+            return UUID.fromString(noteId);
+        } catch (Exception e) {
+            log.error("Invalid or missing noteId");
+            throw new IllegalArgumentException("Invalid or missing noteId");
+        }
     }
 }

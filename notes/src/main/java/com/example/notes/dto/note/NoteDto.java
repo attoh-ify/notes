@@ -19,7 +19,7 @@ public record NoteDto(
                 description = "Unique identifier of the user that owns the note",
                 example = "d290f1ee-6c54-4b01-90e6-d701748f0851"
         )
-        UUID userId,
+        UUID userId,  // TODO: return owners email instead
 
         @Schema(
                 description = "Title of the note",

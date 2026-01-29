@@ -4,6 +4,7 @@ import com.example.notes.services.JwtService;
 import com.example.notes.services.impl.MyUserDetailsService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.ApplicationContext;
@@ -30,19 +31,31 @@ public class JwtFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         if (SecurityContextHolder.getContext().getAuthentication() == null) {
-            String authorizationHeader = request.getHeader("Authorization");
             String token = null;
             String username = null;
 
-            if (request.getRequestURI().startsWith("/ws")) {
+            if (request.getRequestURI().startsWith("/relay")) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
-                token = authorizationHeader.substring(7);
-                username = jwtService.extractUsername(token);
+            if (request.getCookies() != null) {
+                for (Cookie cookie : request.getCookies()) {
+                    if (cookie.getName().equals("access_token"))  {
+                        token = cookie.getValue();
+                        break;
+                    }
+                }
             }
+
+            if (token == null){
+                String authorizationHeader = request.getHeader("Authorization");
+                if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+                    token = authorizationHeader.substring(7);
+                }
+            }
+
+            username = jwtService.extractUsername(token);
 
             if (username != null) {
                 UserDetails userDetails = context.getBean(MyUserDetailsService.class).loadUserByUsername(username);

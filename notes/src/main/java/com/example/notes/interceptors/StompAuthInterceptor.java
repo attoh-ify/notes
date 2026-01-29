@@ -15,6 +15,7 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.security.Principal;
+import java.util.Map;
 import java.util.UUID;
 
 public class StompAuthInterceptor implements ChannelInterceptor {
@@ -40,14 +41,23 @@ public class StompAuthInterceptor implements ChannelInterceptor {
         StompCommand command = accessor.getCommand();
 
         if (StompCommand.CONNECT.equals(command)) {
-            String authHeader = accessor.getFirstNativeHeader("Authorization");
+            String token = null;
+            Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
 
-            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                log.warn("Authorization header not found");
-                throw new IllegalStateException("Authorization header not found");
+            if (sessionAttributes != null && sessionAttributes.containsKey("access_token")) {
+                token = (String) sessionAttributes.get("access_token");
             }
 
-            String token = authHeader.substring(7);
+            if (token == null) {
+                String authHeader = accessor.getFirstNativeHeader("Authorization");
+
+                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                    log.warn("Authorization header not found");
+                    throw new IllegalStateException("Authorization header not found");
+                }
+
+                token = authHeader.substring(7);
+            }
 
             String username = jwtService.extractUsername(token);
             UserDetails userDetails = context.getBean(MyUserDetailsService.class).loadUserByUsername(username);
@@ -71,24 +81,18 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 throw new IllegalStateException("Unauthenticated subscription attempt");
             }
 
-            if (destination.startsWith("/topic/public/")) {
+            if (destination.startsWith("/topic/note/")) {
                 UUID noteId = extractNoteId(destination);
                 String userEmail = principal.getName();
 
                 log.debug("Authorizing SUBSCRIBE user={} noteId={}", userEmail, noteId);
 
-                if (notePolicyService.validateEditor(userEmail, noteId) == null) {
-                    log.warn("User does not have note access");
-                    throw new IllegalStateException("User does not have note access");
-                }
+                notePolicyService.validateEditor(userEmail, noteId);
             }
         }
 
         if (StompCommand.SEND.equals(command)) {
-            System.out.println("I got here!");
-            System.out.println(accessor.getUser());
             if (accessor.getUser() == null) {
-                log.warn("No user found");
                 throw new IllegalStateException("No user found");
             }
         }
@@ -97,7 +101,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 
     private UUID extractNoteId(String destination) {
         try {
-            String id = destination.substring("/topic/public/".length());
+            String id = destination.substring("/topic/note/".length());
             return UUID.fromString(id);
         } catch (Exception e) {
             log.error("Invalid note topic destination");

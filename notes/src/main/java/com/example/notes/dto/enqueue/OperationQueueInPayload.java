@@ -4,16 +4,18 @@ import com.example.notes.dto.ot.TextOperation;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.UUID;
+
 @Setter
 @Getter
 public class OperationQueueInPayload {
-    private String docId;
+    private UUID noteId;
     private int revision;
-    private String from;
+    private UUID from;
     private TextOperation operation;
 
-    public  OperationQueueInPayload(String docId, int revision, String from, TextOperation operation) {
-        this.docId = docId;
+    public  OperationQueueInPayload(UUID noteId, int revision, UUID from, TextOperation operation) {
+        this.noteId = noteId;
         this.revision = revision;
         this.from = from;
         this.operation = operation;
@@ -24,7 +26,7 @@ public class OperationQueueInPayload {
     @Override
     public String toString() {
         return "OperationQueueInPayload{" +
-                "docId='" + docId + '\'' +
+                "noteId='" + noteId + '\'' +
                 ", revision=" + revision +
                 ", from='" + from + '\'' +
                 ", operation=" + operation +

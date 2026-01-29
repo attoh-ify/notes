@@ -33,7 +33,7 @@ public class Note {
 
     @Convert(converter = TextOperationListConverter.class)
     @Column(name = "revision_log", nullable = false, columnDefinition = "json")
-    private List<TextOperation> revisionLog = new ArrayList<>();
+    private List<TextOperation> revisionLog;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "visibility", nullable = false)
