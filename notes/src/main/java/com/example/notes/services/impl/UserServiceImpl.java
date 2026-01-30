@@ -1,6 +1,7 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.user.LoginDto;
+import com.example.notes.dto.user.LoginResponseDto;
 import com.example.notes.dto.user.UserDto;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
@@ -67,7 +68,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public String loginUser(LoginDto user) {
+    public LoginResponseDto loginUser(LoginDto user) {
         log.info("Login attempt email={}", user.email());
 
         Authentication authentication =
@@ -80,7 +81,8 @@ public class UserServiceImpl implements UserService {
         if (authentication.isAuthenticated()) {
             User userExists = userPolicyService.userExists(user.email());
             log.info("Authentication successful email={}", user.email());
-            return jwtService.generateToken(user.email(), userExists.getId());
+            String token = jwtService.generateToken(user.email(), userExists.getId());
+            return new LoginResponseDto(token, userExists.getId());
         }
 
         log.warn("Authentication failed email={}", user.email());

@@ -1,7 +1,6 @@
 package com.example.notes.controllers;
 
 import com.example.notes.dto.message_payload.CollaborationCountPayload;
-import com.example.notes.dto.note.DocumentJoinResponse;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.response.ResponseDto;
@@ -78,6 +77,7 @@ public class NoteController {
     public ResponseDto getAllNotes(
             @CurrentUser UserPrincipal currentUser
     ) {
+        System.out.println("Fetching all notes for user " + currentUser.getEmail());
         List<NoteDto> notes = noteService.fetchNotes(currentUser.getEmail());
         return new ResponseDto("Notes fetched", notes);
     }

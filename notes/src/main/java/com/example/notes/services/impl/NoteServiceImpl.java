@@ -45,7 +45,7 @@ public class NoteServiceImpl implements NoteService {
         List<NoteDto> noteDtos = new ArrayList<>();
         if (notes.isEmpty()) return List.of();
         for (Note note : notes) {
-            NoteDto noteDto = noteMapper.toDto(note);
+            NoteDto noteDto = noteMapper.toDto(note, actorEmail);
             noteDtos.add(noteDto);
         }
         return noteDtos;
@@ -62,7 +62,7 @@ public class NoteServiceImpl implements NoteService {
             }
         }
 
-        return noteMapper.toDto(note);
+        return noteMapper.toDto(note, actorEmail);
     }
 
     @Transactional
@@ -97,7 +97,7 @@ public class NoteServiceImpl implements NoteService {
         newNote.getNoteVersions().add(firstNoteVersion);
 
         noteRepository.save(newNote);
-        return noteMapper.toDto(newNote);
+        return noteMapper.toDto(newNote, actorEmail);
     }
 
     @Transactional

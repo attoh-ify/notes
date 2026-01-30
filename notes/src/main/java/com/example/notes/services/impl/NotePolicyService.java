@@ -12,8 +12,10 @@ import com.example.notes.repositories.NoteVersionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -71,18 +73,19 @@ public class NotePolicyService {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.OWNER)) {
+        if (!Set.of(NoteAccessRole.OWNER, NoteAccessRole.SUPER).contains(accessRole)) {
             log.warn("User with the email={} does not have super user access control of this note", userEmail);
             throw new BadRequestException("User with the email  does not have super user access control of this note");
         }
         return note;
     }
 
+    @Transactional
     public Note validateEditor(String userEmail, UUID noteId) {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.OWNER) && !accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR)) {
+        if (!Set.of(NoteAccessRole.OWNER, NoteAccessRole.SUPER,  NoteAccessRole.EDITOR).contains(accessRole)) {
             log.warn("User with the email={} is not allowed to edit this note", userEmail);
             throw new BadRequestException("User with the email is not allowed to edit this note");
         }
@@ -93,7 +96,7 @@ public class NotePolicyService {
         Note note = findNoteById(noteId);
         NoteAccessRole accessRole = resolveRole(userEmail, note);
 
-        if (!accessRole.equals(NoteAccessRole.OWNER) && !accessRole.equals(NoteAccessRole.SUPER) && !accessRole.equals(NoteAccessRole.EDITOR) && !accessRole.equals(NoteAccessRole.VIEWER)) {
+        if (!Set.of(NoteAccessRole.OWNER, NoteAccessRole.SUPER,  NoteAccessRole.EDITOR, NoteAccessRole.VIEWER).contains(accessRole)) {
             log.warn("User with the email={} is not allowed to view this note", userEmail);
             throw new BadRequestException("User with the email is not allowed to view this note");
         }

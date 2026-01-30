@@ -38,7 +38,7 @@ public class UserMapperImpl implements UserMapper {
                 user.getPassword(),
                 Optional.ofNullable(user.getNotes())
                                 .map(notes -> notes.stream()
-                                        .map(noteMapper::toDto)
+                                        .map(note -> noteMapper.toDto(note, user.getEmail()))
                                         .toList()
                                 ).orElse(null),
                 user.getCreatedAt(),

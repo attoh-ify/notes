@@ -45,8 +45,8 @@ public class NoteMapperImpl implements NoteMapper {
     }
 
     @Override
-    public NoteDto toDto(Note note) {
-        NoteAccessRole accessRole = notePolicyService.resolveRole(note.getUser().getEmail(), note);
+    public NoteDto toDto(Note note, String actorEmail) {
+        NoteAccessRole accessRole = notePolicyService.resolveRole(actorEmail, note);
         return new NoteDto(
                 note.getId(),
                 note.getUser().getId(),

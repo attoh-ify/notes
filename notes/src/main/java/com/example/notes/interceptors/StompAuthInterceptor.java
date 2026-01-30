@@ -36,7 +36,6 @@ public class StompAuthInterceptor implements ChannelInterceptor {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
         if (accessor == null) return message;
-        System.out.println(accessor);
 
         StompCommand command = accessor.getCommand();
 
@@ -60,6 +59,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
             }
 
             String username = jwtService.extractUsername(token);
+            String userId = jwtService.extractUserId(token).toString();
             UserDetails userDetails = context.getBean(MyUserDetailsService.class).loadUserByUsername(username);
 
             if (!jwtService.validateToken(token, userDetails)) {
@@ -67,8 +67,11 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 throw new IllegalStateException("Invalid token");
             }
 
-            Principal principal = () -> username;
-            accessor.setUser(principal);
+            if (sessionAttributes != null) {
+                sessionAttributes.put("userId", userId);
+            }
+
+            accessor.setUser(() -> username);
             log.info("WebSocket authenticated user={}", username);
         }
 

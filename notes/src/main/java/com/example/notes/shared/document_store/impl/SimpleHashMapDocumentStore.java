@@ -31,7 +31,6 @@ public class SimpleHashMapDocumentStore extends NoteStore {
                 new DocumentModel(
                         noteId, documentFormatterFactory.get(),
                         getOperationTransformations());
-        System.out.println("Adding empty document " + newDocState);
         store.put(noteId, newDocState);
         addCollaboratorToNote(userId, noteId);
     }
@@ -53,8 +52,6 @@ public class SimpleHashMapDocumentStore extends NoteStore {
 
     @Override
     public void addCollaboratorToNote(UUID userId, UUID noteId) {
-        System.out.println("UserId: " + userId);
-        System.out.println("noteId: " + noteId);
         userIdTonoteIdMap.put(userId, noteId);
         getNoteFromNoteId(noteId).incrementCollaboratorCount();
     }

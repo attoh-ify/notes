@@ -2,6 +2,7 @@ package com.example.notes.controllers;
 
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.dto.user.LoginDto;
+import com.example.notes.dto.user.LoginResponseDto;
 import com.example.notes.dto.user.UserDto;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
@@ -46,9 +47,9 @@ public class UserController {
             @RequestBody LoginDto dto,
             HttpServletResponse response
     ) {
-        String token = userService.loginUser(dto);
+        LoginResponseDto result = userService.loginUser(dto);
 
-        Cookie cookie = new Cookie("access_token", token);
+        Cookie cookie = new Cookie("access_token", result.token());
         cookie.setHttpOnly(true);
         cookie.setSecure(false);
         cookie.setPath("/");
@@ -57,7 +58,7 @@ public class UserController {
         response.addCookie(cookie);
 
         return ResponseEntity.ok(
-                new ResponseDto("User logged in", token)
+                new ResponseDto("User logged in", result)
         );
     }
 

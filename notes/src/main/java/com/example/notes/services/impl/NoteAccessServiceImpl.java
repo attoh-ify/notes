@@ -4,6 +4,7 @@ import com.example.notes.dto.noteAccess.NoteAccessPayload;
 import com.example.notes.dto.noteAccess.NoteAccessDto;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteAccess.NoteAccess;
+import com.example.notes.entities.noteAccess.NoteAccessRole;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteAccessMapper;
@@ -43,6 +44,11 @@ public class NoteAccessServiceImpl implements NoteAccessService {
         if (noteAccess.email().equals(userEmail)) {
             log.warn("Owner already has access to this note");
             throw new BadRequestException("Owner already has access to this note");
+        }
+
+        if (noteAccess.role().equals(NoteAccessRole.OWNER)) {
+            log.warn("User can not be granted owner role");
+            throw new BadRequestException("User can not be granted owner role");
         }
 
         User newAccessUser = userPolicyService.userExists(noteAccess.email());
@@ -89,7 +95,7 @@ public class NoteAccessServiceImpl implements NoteAccessService {
     @Transactional(readOnly = true)
     @Override
     public List<NoteAccessDto> getAllAccess(String userEmail, UUID noteId) {
-        notePolicyService.validateSuper(userEmail, noteId);
+        notePolicyService.validateEditor(userEmail, noteId);
         return noteAccessRepository.findByNoteId(noteId)
                 .stream()
                 .map(noteAccessMapper::toDto)

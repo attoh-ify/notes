@@ -5,5 +5,5 @@ import com.example.notes.entities.note.Note;
 
 public interface NoteMapper {
     Note fromDto(NoteDto noteDto);
-    NoteDto toDto(Note note);
+    NoteDto toDto(Note note, String actorEmail);
 }

@@ -75,7 +75,6 @@
         }
     }
 
-
     function handleCollaboratorCount(payload) {
         let count = payload.count;
         setCollaboratorCount(count)
@@ -135,7 +134,7 @@
         docState.lastSyncedRevision = data.documentRevision
         docState.setDocumentText(data.text || "")
 
-        document.getElementById("editor").value = docState.document
+        document.getElementById("editor").value = docState.document  // check later
         document.getElementById("shareable_link").textContent = `${origin}?noteId=${noteId}`
         setCollaboratorCount(data.collaboratorCount)
 

@@ -6,7 +6,6 @@ import com.example.notes.shared.document_store.NoteStore;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.shared.operation_queue.OperationQueue;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
