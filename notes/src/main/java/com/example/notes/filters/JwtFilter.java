@@ -30,43 +30,43 @@ public class JwtFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        if (SecurityContextHolder.getContext().getAuthentication() == null) {
-            String token = null;
-            String username = null;
+        String token = null;
+        String username = null;
 
-            if (request.getRequestURI().startsWith("/relay")) {
-                filterChain.doFilter(request, response);
-                return;
-            }
-
-            if (request.getCookies() != null) {
-                for (Cookie cookie : request.getCookies()) {
-                    if (cookie.getName().equals("access_token"))  {
-                        token = cookie.getValue();
-                        break;
-                    }
-                }
-            }
-
-            if (token == null){
-                String authorizationHeader = request.getHeader("Authorization");
-                if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
-                    token = authorizationHeader.substring(7);
-                }
-            }
-
-            username = jwtService.extractUsername(token);
-
-            if (username != null) {
-                UserDetails userDetails = context.getBean(MyUserDetailsService.class).loadUserByUsername(username);
-                if (jwtService.validateToken(token, userDetails)) {
-                    UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
-                }
-            }
-
+        if (request.getRequestURI().startsWith("/relay")) {
             filterChain.doFilter(request, response);
+            return;
         }
+
+        if (request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if (cookie.getName().equals("access_token"))  {
+                    token = cookie.getValue();
+                    break;
+                }
+            }
+        }
+
+        if (token == null){
+            String authorizationHeader = request.getHeader("Authorization");
+            if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+                token = authorizationHeader.substring(7);
+            }
+        }
+
+        if (token != null) {
+            username = jwtService.extractUsername(token);
+        }
+
+        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+            UserDetails userDetails = context.getBean(MyUserDetailsService.class).loadUserByUsername(username);
+            if (jwtService.validateToken(token, userDetails)) {
+                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authToken);
+            }
+        }
+
+        filterChain.doFilter(request, response);
     }
 }

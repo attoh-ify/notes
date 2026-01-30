@@ -43,7 +43,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Transactional(readOnly = true)
     @Override
     public NoteVersionDto fetchVersion(String actorEmail, UUID noteId, UUID noteVersionId) {
-        notePolicyService.validateSuper(actorEmail, noteId);
+        notePolicyService.validateEditor(actorEmail, noteId);
         return noteVersionMapper.toDto(noteVersionRepository.findByIdAndNote_Id(noteVersionId, noteId)
                 .orElseThrow(() -> {
                     log.warn("Note version with id={} not found", noteVersionId);

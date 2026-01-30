@@ -54,6 +54,7 @@ public class UserController {
         cookie.setSecure(false);
         cookie.setPath("/");
         cookie.setMaxAge(60 * 60 * 24);
+        response.setHeader("Set-Cookie", "access_token=" + result.token() + "; Path=/; HttpOnly; Max-Age=86400; SameSite=Lax");
 
         response.addCookie(cookie);
 
