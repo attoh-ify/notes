@@ -53,6 +53,7 @@ public class SimpleHashMapDocumentStore extends NoteStore {
     @Override
     public void addCollaboratorToNote(UUID userId, UUID noteId) {
         userIdTonoteIdMap.put(userId, noteId);
+        System.out.println(userIdTonoteIdMap);
         getNoteFromNoteId(noteId).incrementCollaboratorCount();
     }
 
@@ -60,7 +61,7 @@ public class SimpleHashMapDocumentStore extends NoteStore {
     public DocumentModel removeCollaboratorFromNote(UUID userId) {
         var doc = getNoteFromUserId(userId);
         int newCount = doc.decrementCollaboratorCount();
-//        userIdTonoteIdMap.remove(userId);
+        userIdTonoteIdMap.remove(userId);
         if (newCount == 0) {
             removeNote(doc.getId());
         }

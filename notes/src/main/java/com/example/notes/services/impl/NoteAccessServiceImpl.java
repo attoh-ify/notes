@@ -9,6 +9,7 @@ import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteAccessMapper;
 import com.example.notes.repositories.NoteAccessRepository;
+import com.example.notes.services.EmailService;
 import com.example.notes.services.NoteAccessService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,15 +26,17 @@ public class NoteAccessServiceImpl implements NoteAccessService {
     private final NoteAccessMapper noteAccessMapper;
     private final NotePolicyService notePolicyService;
     private final UserPolicyService userPolicyService;
+    private final EmailService emailService;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteAccessServiceImpl.class);
 
-    public NoteAccessServiceImpl(NoteAccessRepository noteAccessRepository, NoteAccessMapper noteAccessMapper, NotePolicyService notePolicyService, UserPolicyService userPolicyService) {
+    public NoteAccessServiceImpl(NoteAccessRepository noteAccessRepository, NoteAccessMapper noteAccessMapper, NotePolicyService notePolicyService, UserPolicyService userPolicyService, EmailService emailService) {
         this.noteAccessRepository = noteAccessRepository;
         this.noteAccessMapper = noteAccessMapper;
         this.userPolicyService = userPolicyService;
         this.notePolicyService = notePolicyService;
+        this.emailService = emailService;
     }
 
     @Transactional
@@ -52,6 +55,7 @@ public class NoteAccessServiceImpl implements NoteAccessService {
         }
 
         User newAccessUser = userPolicyService.userExists(noteAccess.email());
+        emailService.sendAccessGrantedEmail(noteAccess.email(), note.getTitle(), noteAccess.role());
 
         try {
             return noteAccessMapper.toDto(
@@ -73,7 +77,7 @@ public class NoteAccessServiceImpl implements NoteAccessService {
     @Transactional
     @Override
     public NoteAccessDto updateAccess(String userEmail, UUID noteId, UUID noteAccessId, NoteAccessPayload noteAccess) {
-        notePolicyService.validateSuper(userEmail, noteId);
+        Note note = notePolicyService.validateSuper(userEmail, noteId);
         NoteAccess updateNoteAccess = noteAccessRepository.findById(noteAccessId)
                 .orElseThrow(() -> {
                     log.warn("Note access not found id={}", noteAccessId);
@@ -82,14 +86,23 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                     );
                 });
         updateNoteAccess.setRole(noteAccess.role());
+        emailService.sendAccessUpdatedEmail(noteAccess.email(), note.getTitle(), noteAccess.role());
         return noteAccessMapper.toDto(noteAccessRepository.save(updateNoteAccess));
     }
 
     @Transactional
     @Override
     public void deleteAccess(String userEmail, UUID noteId, UUID noteAccessId) {
-        notePolicyService.validateSuper(userEmail, noteId);
+        Note note = notePolicyService.validateSuper(userEmail, noteId);
+        NoteAccess noteAccess = noteAccessRepository.findById(noteAccessId)
+                .orElseThrow(() -> {
+                    log.warn("Note access not found id={}", noteAccessId);
+                    return new BadRequestException(
+                            "Note access with this id is not registered."
+                    );
+                });
         noteAccessRepository.deleteById(noteAccessId);
+        emailService.sendAccessDeletedEmail(noteAccess.getEmail(), note.getTitle());
     }
 
     @Transactional(readOnly = true)

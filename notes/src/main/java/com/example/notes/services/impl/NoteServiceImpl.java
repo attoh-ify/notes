@@ -1,5 +1,6 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.note.NoteVisibility;
@@ -10,6 +11,7 @@ import com.example.notes.mappers.NoteMapper;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.NoteService;
+import com.example.notes.shared.document_store.NoteStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,16 +28,18 @@ public class NoteServiceImpl implements NoteService {
     private final NoteVersionRepository noteVersionRepository;
     private final NotePolicyService notePolicyService;
     private final UserPolicyService userPolicyService;
+    private final NoteStore  noteStore;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteServiceImpl.class);
 
-    public NoteServiceImpl(NoteRepository noteRepository, NoteMapper noteMapper, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, UserPolicyService userPolicyService) {
+    public NoteServiceImpl(NoteRepository noteRepository, NoteMapper noteMapper, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, UserPolicyService userPolicyService, NoteStore noteStore) {
         this.noteRepository = noteRepository;
         this.noteMapper = noteMapper;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
         this.userPolicyService = userPolicyService;
+        this.noteStore = noteStore;
     }
 
     @Transactional(readOnly = true)
@@ -98,6 +102,21 @@ public class NoteServiceImpl implements NoteService {
 
         noteRepository.save(newNote);
         return noteMapper.toDto(newNote, actorEmail);
+    }
+
+    @Override
+    public void saveNote(String actorEmail, UUID noteId) {
+        Note note = notePolicyService.validateEditor(actorEmail, noteId);
+        NoteVersion noteVersion = noteVersionRepository.findById(note.getCurrentNoteVersion())
+                .orElseThrow(() -> {
+                    log.warn("Note version with id={} not found", note.getCurrentNoteVersion());
+                    return new BadRequestException("Note version not found");
+                });
+        System.out.println(noteVersion.getContent());
+        DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
+        noteVersion.setContent(doc.getDocText());
+        noteVersionRepository.save(noteVersion);
+        System.out.println(noteVersion.getContent());
     }
 
     @Transactional

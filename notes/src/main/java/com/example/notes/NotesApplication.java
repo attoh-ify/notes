@@ -1,6 +1,6 @@
 package com.example.notes;
 
-import com.example.notes.services.impl.EmailService;
+import com.example.notes.services.impl.EmailServiceImpl;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.shared.formatter.impl.CharSequenceDocumentFormatter;
 import com.example.notes.notifier.OperationRelayer;
@@ -33,10 +33,10 @@ public class NotesApplication implements CommandLineRunner {
     private final static String ACTIVEMQ_USERNAME = "admin";
     private final static String ACTIVEMQ_PASSWORD = "admin";
 
-    private final EmailService emailService;
+    private final EmailServiceImpl emailServiceImpl;
 
-    public NotesApplication(EmailService emailService) {
-        this.emailService = emailService;
+    public NotesApplication(EmailServiceImpl emailServiceImpl) {
+        this.emailServiceImpl = emailServiceImpl;
     }
 
     public static void main(String[] args) {
@@ -109,14 +109,6 @@ public class NotesApplication implements CommandLineRunner {
         // receive the message when it arrives
         final TextMessage consumerTextMessage = (TextMessage) consumerMessage;
         System.out.println("Message received: " + consumerTextMessage.getText());
-        try {
-            emailService.sendEmail(
-                    "alexander.attoh22@gmail.com",
-                    "Welcome to notes!",
-                    consumerTextMessage.getText());
-        } catch (Exception e) {
-            System.err.println("Email failed to send, but JMS worked! Error: " + e.getMessage());
-        }
 
         // clean up the consumer
         consumer.close();

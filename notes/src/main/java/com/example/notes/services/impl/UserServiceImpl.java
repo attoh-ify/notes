@@ -7,6 +7,7 @@ import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.UserMapper;
 import com.example.notes.repositories.UserRepository;
+import com.example.notes.services.EmailService;
 import com.example.notes.services.JwtService;
 import com.example.notes.services.UserService;
 import com.example.notes.utils.Helpers;
@@ -27,16 +28,18 @@ public class UserServiceImpl implements UserService {
     private final AuthenticationManager authenticationManager;
     private final UserPolicyService userPolicyService;
     private final UserMapper userMapper;
+    private final EmailService emailService;
 
     private static final Logger log =
             LoggerFactory.getLogger(UserServiceImpl.class);
 
-    public UserServiceImpl(UserRepository userRepository, JwtService jwtService, AuthenticationManager authenticationManager, UserPolicyService userPolicyService, UserMapper userMapper) {
+    public UserServiceImpl(UserRepository userRepository, JwtService jwtService, AuthenticationManager authenticationManager, UserPolicyService userPolicyService, UserMapper userMapper, EmailService emailService) {
         this.userRepository = userRepository;
         this.jwtService = jwtService;
         this.authenticationManager = authenticationManager;
         this.userPolicyService = userPolicyService;
         this.userMapper = userMapper;
+        this.emailService = emailService;
     }
 
     @Override
@@ -52,6 +55,7 @@ public class UserServiceImpl implements UserService {
                         null
                 )
         );
+        emailService.sendRegisterEmail(user.email());
 
         log.info("User registered successfully userId={} email={}",
                 saved.getId(), saved.getEmail());

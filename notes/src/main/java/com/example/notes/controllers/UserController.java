@@ -73,4 +73,23 @@ public class UserController {
     ) {
         return new ResponseDto("User fetched", userService.getUserDetails(currentUser.getUsername()));
     }
+
+    @PostMapping("/logout")
+    @Operation(summary = "Logout user", description = "Logs out the user by clearing authentication cookies")
+    public ResponseEntity<ResponseDto> logoutUser(HttpServletResponse response) {
+        Cookie cookie = new Cookie("access_token", null);
+        cookie.setHttpOnly(true);
+        cookie.setSecure(false);
+        cookie.setPath("/");
+        cookie.setMaxAge(0);
+        response.addCookie(cookie);
+        response.setHeader(
+                "Set-Cookie",
+                "access_token=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax"
+        );
+
+        return ResponseEntity.ok(
+                new ResponseDto("User logged out successfully", null)
+        );
+    }
 }

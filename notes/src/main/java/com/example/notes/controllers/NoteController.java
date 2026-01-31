@@ -60,6 +60,7 @@ public class NoteController {
         DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
 
         noteStore.addCollaboratorToNote(userId, noteId);
+        System.out.println("JD count: " + doc.getCollaboratorCount());
         collaboratorCountNotifier.notifyCount(noteId, new CollaborationCountPayload(doc.getCollaboratorCount()));
 
         return new ResponseDto(
@@ -70,6 +71,13 @@ public class NoteController {
                     "revision", doc.getRevision()
                 )
         );
+    }
+
+    @PostMapping("/{noteId}/save")
+    @Operation(summary = "Save note", description = "Saves current note version with new note content")
+    public ResponseDto saveNote(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) {
+        noteService.saveNote(currentUser.getEmail(), noteId);
+        return new ResponseDto(true, "Note saved", null);
     }
 
     @GetMapping
