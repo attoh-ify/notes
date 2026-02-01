@@ -11,7 +11,7 @@ import java.util.function.Supplier;
 public class SimpleHashMapDocumentStore extends NoteStore {
     // noteId -> DocState
     private final ConcurrentHashMap<UUID, DocumentModel> store = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, UUID> userIdTonoteIdMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, UUID> userIdToNoteIdMap = new ConcurrentHashMap<>();
 
     public SimpleHashMapDocumentStore(Supplier<DocumentFormatter> documentFormatterFactory) {
         super(documentFormatterFactory);
@@ -21,7 +21,7 @@ public class SimpleHashMapDocumentStore extends NoteStore {
     public String toString() {
         return "SimpleHashMapDocumentStore{" +
                 "store=" + store +
-                ", userIdTonoteIdMap=" + userIdTonoteIdMap +
+                ", userIdToNoteIdMap=" + userIdToNoteIdMap +
                 '}';
     }
 
@@ -32,7 +32,6 @@ public class SimpleHashMapDocumentStore extends NoteStore {
                         noteId, documentFormatterFactory.get(),
                         getOperationTransformations());
         store.put(noteId, newDocState);
-        addCollaboratorToNote(userId, noteId);
     }
 
     @Override
@@ -42,7 +41,7 @@ public class SimpleHashMapDocumentStore extends NoteStore {
 
     @Override
     public DocumentModel getNoteFromUserId(UUID userId) {
-        return store.get(userIdTonoteIdMap.get(userId));
+        return store.get(userIdToNoteIdMap.get(userId));
     }
 
     @Override
@@ -52,16 +51,16 @@ public class SimpleHashMapDocumentStore extends NoteStore {
 
     @Override
     public void addCollaboratorToNote(UUID userId, UUID noteId) {
-        userIdTonoteIdMap.put(userId, noteId);
-        System.out.println(userIdTonoteIdMap);
-        getNoteFromNoteId(noteId).incrementCollaboratorCount();
+        var doc = getNoteFromNoteId(noteId);
+        userIdToNoteIdMap.put(userId, noteId);
+        doc.setCollaboratorCount(countCollaborators(noteId));
     }
 
     @Override
     public DocumentModel removeCollaboratorFromNote(UUID userId) {
         var doc = getNoteFromUserId(userId);
         int newCount = doc.decrementCollaboratorCount();
-        userIdTonoteIdMap.remove(userId);
+        userIdToNoteIdMap.remove(userId);
         if (newCount == 0) {
             removeNote(doc.getId());
         }
@@ -71,5 +70,12 @@ public class SimpleHashMapDocumentStore extends NoteStore {
     @Override
     public boolean hasDocument(UUID noteId) {
         return store.containsKey(noteId);
+    }
+
+    private int countCollaborators(UUID noteId) {
+        return (int) userIdToNoteIdMap.values()
+                .stream()
+                .filter(id -> id.equals(noteId))
+                .count();
     }
 }

@@ -1,6 +1,7 @@
 package com.example.notes.controllers;
 
 import com.example.notes.dto.message_payload.CollaborationCountPayload;
+import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.response.ResponseDto;
@@ -42,12 +43,14 @@ public class NoteController {
     @PostMapping
     @Operation(summary = "Create a new note", description = "Create a new note for user")
     public ResponseDto createNote(
-            @CurrentUser UserPrincipal currentUser
+            @CurrentUser UserPrincipal currentUser,
+            @RequestBody CreateNotePayload payload
     ) {
-        NoteDto note = noteService.createNote(currentUser.getEmail());
+        NoteDto note = noteService.createNote(currentUser.getEmail(), payload);
 
         System.out.println("Creating document " + note.id());
         noteStore.addEmptyNote(note.userId(), note.id());
+        noteStore.addCollaboratorToNote(currentUser.getUserId(), note.id());
 
         return new ResponseDto("Note created", note);
     }
@@ -60,8 +63,8 @@ public class NoteController {
         DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
 
         noteStore.addCollaboratorToNote(userId, noteId);
-        System.out.println("JD count: " + doc.getCollaboratorCount());
-        collaboratorCountNotifier.notifyCount(noteId, new CollaborationCountPayload(doc.getCollaboratorCount()));
+
+        collaboratorCountNotifier.notifyCount(noteId, new CollaborationCountPayload(noteStore.getNoteFromNoteId(noteId).getCollaboratorCount()));
 
         return new ResponseDto(
                 true, "User joined the note successfully",

@@ -17,7 +17,6 @@ public class EmailServiceImpl implements EmailService {
 
     private final JavaMailSender javaMailSender;
 
-    // Common UI Components
     private final String emailHeader = """
         <div style="text-align: center; padding: 25px 0; background-color: #f8fbf9; border-radius: 8px 8px 0 0; border-bottom: 1px solid #e2e8f0;">
             <h1 style="color: #2F855A; margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; letter-spacing: 4px; font-weight: 800;">NOTES</h1>

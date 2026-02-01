@@ -4,6 +4,7 @@ import com.example.notes.shared.formatter.DocumentFormatter;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.shared.operation_transformations.OperationTransformations;
 import lombok.Getter;
+import lombok.Setter;
 
 import java.util.*;
 
@@ -16,6 +17,7 @@ public class DocumentModel {
     @Getter
     private int revision = 0;
     @Getter
+    @Setter
     private int collaboratorCount = 0;
 
     public DocumentModel(UUID id, DocumentFormatter documentFormatter, OperationTransformations operationTransformations) {
@@ -61,10 +63,6 @@ public class DocumentModel {
         }
 
         return transformedOperations;
-    }
-
-    public void incrementCollaboratorCount() {
-        collaboratorCount++;
     }
 
     public int decrementCollaboratorCount() {

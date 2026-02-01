@@ -1,5 +1,6 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.entities.note.Note;
@@ -71,13 +72,13 @@ public class NoteServiceImpl implements NoteService {
 
     @Transactional
     @Override
-    public NoteDto createNote(String actorEmail) {
+    public NoteDto createNote(String actorEmail, CreateNotePayload payload) {
         User user = userPolicyService.userExists(actorEmail);
 
         Note newNote = new Note(
                 null,
                 user,
-                "Untitled",
+                payload.title(),
                 new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 null,
@@ -115,6 +116,7 @@ public class NoteServiceImpl implements NoteService {
         System.out.println(noteVersion.getContent());
         DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
         noteVersion.setContent(doc.getDocText());
+        noteVersion.setRevision(doc.getRevision());
         noteVersionRepository.save(noteVersion);
         System.out.println(noteVersion.getContent());
     }
