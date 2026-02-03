@@ -10,14 +10,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 public class OperationQueueImpl implements OperationQueue {
     @Autowired
-    private NoteStore documentStore;
+    private NoteStore noteStore;
 
     @Autowired
     private OperationRelayer operationRelayer;
 
     @Override
     public void enqueue(OperationQueueInPayload message) {
-        DocumentModel doc = documentStore.getNoteFromNoteId(message.getNoteId());
+        DocumentModel doc = noteStore.getNoteFromNoteId(message.getNoteId());
 
         int serverDocRevision = doc.getRevision();
         int messageDocRevision = message.getRevision();

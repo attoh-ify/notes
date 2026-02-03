@@ -1,6 +1,5 @@
 package com.example.notes;
 
-import com.example.notes.services.impl.EmailServiceImpl;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.shared.formatter.impl.CharSequenceDocumentFormatter;
 import com.example.notes.notifier.OperationRelayer;
@@ -33,11 +32,6 @@ public class NotesApplication implements CommandLineRunner {
     private final static String ACTIVEMQ_USERNAME = "admin";
     private final static String ACTIVEMQ_PASSWORD = "admin";
 
-    private final EmailServiceImpl emailServiceImpl;
-
-    public NotesApplication(EmailServiceImpl emailServiceImpl) {
-        this.emailServiceImpl = emailServiceImpl;
-    }
 
     public static void main(String[] args) {
         SpringApplication.run(NotesApplication.class, args);
