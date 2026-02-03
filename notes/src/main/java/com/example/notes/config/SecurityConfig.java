@@ -24,10 +24,7 @@ import java.util.List;
 @Configuration
 @EnableWebSecurity // Enables Spring Security filter chain integration
 public class SecurityConfig {
-    // Custom UserDetailsService used by Spring Security to load users from DB
     private final MyUserDetailsService userDetailsService;
-
-    // Custom JWT filter that validates JWT on each request
     private final JwtFilter jwtFilter;
 
     public SecurityConfig(MyUserDetailsService userDetailsService, JwtFilter jwtFilter) {
@@ -35,58 +32,51 @@ public class SecurityConfig {
         this.jwtFilter = jwtFilter;
     }
 
-    /**
-     * Defines the main Spring Security filter chain.
-     * This controls:
-     *  - which routes require authentication
-     *  - which authentication mechanisms are enabled
-     *  - session behavior
-     *  - custom filters (JWT)
-     */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
+                // 1. Disable CSRF (standard for Stateless APIs)
                 .csrf(AbstractHttpConfigurer::disable)
+                // 2. Enable CORS with the bean defined below
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(request -> request
                         .requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
-                                "/swagger-ui.html"
-                        ).permitAll()
-                        .requestMatchers(
+                                "/swagger-ui.html",
                                 "/",
                                 "/index.html",
                                 "/css/**",
-                                "/js/**"
-                        ).permitAll()
-                        .requestMatchers(
+                                "/js/**",
                                 "/relay/**",
-                                "/relay/info",
                                 "/api/users/login",
                                 "/api/users/register"
                         ).permitAll()
+                        // 3. Ensure OPTIONS requests are permitted for the preflight handshake
+                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated()
                 )
-                .sessionManagement(
-                        session ->
-                                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
 
     @Bean
-    public UrlBasedCorsConfigurationSource corsConfigurationSource() {
+    public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
-        // Ensure this matches your frontend URL EXACTLY
+
+        // Use setAllowedOriginPatterns if you have any trouble with exact matches
         config.setAllowedOrigins(List.of(
                 "http://localhost:3000",
                 "https://notes-ui-production.up.railway.app"
         ));
-        config.setAllowedHeaders(List.of("*"));
+
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
+        config.setAllowCredentials(true);
+
+        // This is crucial for some browsers to read the response after a CORS request
+        config.setExposedHeaders(List.of("Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
