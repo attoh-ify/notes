@@ -49,15 +49,6 @@ public class UserController {
     ) {
         LoginResponseDto result = userService.loginUser(dto);
 
-        Cookie cookie = new Cookie("access_token", result.token());
-        cookie.setHttpOnly(true);
-        cookie.setSecure(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(60 * 60);
-        response.setHeader("Set-Cookie", "access_token=" + result.token() + "; Path=/; HttpOnly; Max-Age=3600; SameSite=None");
-
-        response.addCookie(cookie);
-
         return ResponseEntity.ok(
                 new ResponseDto("User logged in", result)
         );
