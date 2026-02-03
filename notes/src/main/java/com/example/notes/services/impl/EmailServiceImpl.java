@@ -4,6 +4,8 @@ import com.example.notes.entities.noteAccess.NoteAccessRole;
 import com.example.notes.services.EmailService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -16,6 +18,9 @@ public class EmailServiceImpl implements EmailService {
     private String fromEmailId;
 
     private final JavaMailSender javaMailSender;
+
+    private static final Logger log =
+            LoggerFactory.getLogger(EmailServiceImpl.class);
 
     private final String emailHeader = """
         <div style="text-align: center; padding: 25px 0; background-color: #f8fbf9; border-radius: 8px 8px 0 0; border-bottom: 1px solid #e2e8f0;">
@@ -50,7 +55,7 @@ public class EmailServiceImpl implements EmailService {
             javaMailSender.send(message);
         } catch (MessagingException e) {
             // Consider using a logger here (e.g., log.error)
-            throw new RuntimeException("Failed to send HTML email to " + recipient, e);
+            log.error("Failed to send HTML email to {}", recipient, e);
         }
     }
 
