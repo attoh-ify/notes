@@ -30,6 +30,10 @@ public class DocumentModel {
         return documentFormatter.getText();
     }
 
+    public void setDocText(String docText) {
+        documentFormatter.setText(docText);
+    }
+
     public void applyOperation(TextOperation operation) {
         documentFormatter.applyOperation(operation);
         revisionLog.add(revision, operation);

@@ -19,6 +19,11 @@ public class DocumentFormatterImpl implements DocumentFormatter {
         return buffer.toString();
     }
 
+    @Override
+    public void setText(String text) {
+        buffer.replace(0, buffer.length(), text);
+    }
+
     private void applyInsert(TextOperation operation) {
         if (buffer.length() == operation.getPosition()) {
             buffer.append(operation.getOperand());

@@ -1,29 +1,37 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.message_payload.CollaborationCountPayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteMapper;
+import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.NoteService;
 import com.example.notes.shared.document_store.NoteStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class NoteServiceImpl implements NoteService {
+    @Autowired
+    private CollaboratorCountNotifier collaboratorCountNotifier;
+
     private final NoteRepository noteRepository;
     private final NoteMapper noteMapper;
     private final NoteVersionRepository noteVersionRepository;
@@ -103,6 +111,31 @@ public class NoteServiceImpl implements NoteService {
 
         noteRepository.save(newNote);
         return noteMapper.toDto(newNote, actorEmail);
+    }
+
+    @Override
+    public Object joinNote(UUID userId, String actorEmail, UUID noteId) {
+        DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
+        if (noteStore.getNoteFromNoteId(noteId) == null) {
+            noteStore.addEmptyNote(userId, noteId);
+            Note note = notePolicyService.validateEditor(actorEmail, noteId);
+            NoteVersion noteVersion = noteVersionRepository.findById(note.getCurrentNoteVersion())
+                    .orElseThrow(() -> {
+                        log.warn("Note version not found with id={}", note.getCurrentNoteVersion());
+                        return new BadRequestException("Not version not found");
+                    });
+            doc.setDocText(noteVersion.getContent());
+        }
+
+        noteStore.addCollaboratorToNote(userId, noteId);
+
+        collaboratorCountNotifier.notifyCount(noteId, new CollaborationCountPayload(noteStore.getNoteFromNoteId(noteId).getCollaboratorCount()));
+
+        return Map.of(
+                "collaboratorCount", doc.getCollaboratorCount(),
+                "text", doc.getDocText(),
+                "revision", doc.getRevision()
+        );
     }
 
     @Override

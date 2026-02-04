@@ -1,13 +1,10 @@
 package com.example.notes.controllers;
 
-import com.example.notes.dto.message_payload.CollaborationCountPayload;
 import com.example.notes.dto.note.CreateNotePayload;
-import com.example.notes.dto.note.DocumentModel;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
-import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.security.CurrentUser;
 import com.example.notes.services.NoteService;
 import com.example.notes.shared.document_store.NoteStore;
@@ -18,7 +15,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -30,9 +26,6 @@ import java.util.UUID;
 public class NoteController {
     @Autowired
     private NoteStore noteStore;
-
-    @Autowired
-    private CollaboratorCountNotifier collaboratorCountNotifier;
 
     private final NoteService noteService;
 
@@ -48,7 +41,6 @@ public class NoteController {
     ) {
         NoteDto note = noteService.createNote(currentUser.getEmail(), payload);
 
-        System.out.println("Creating document " + note.id());
         noteStore.addEmptyNote(note.userId(), note.id());
         noteStore.addCollaboratorToNote(currentUser.getUserId(), note.id());
 
@@ -56,23 +48,10 @@ public class NoteController {
     }
 
     @GetMapping("/{noteId}/join/{userId}")
-    public ResponseDto joinDoc(@PathVariable UUID noteId, @PathVariable UUID userId) {
-        if (noteStore.getNoteFromNoteId(noteId) == null) {
-            noteStore.addEmptyNote(userId, noteId);
-        }
-        DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
-
-        noteStore.addCollaboratorToNote(userId, noteId);
-
-        collaboratorCountNotifier.notifyCount(noteId, new CollaborationCountPayload(noteStore.getNoteFromNoteId(noteId).getCollaboratorCount()));
-
+    public ResponseDto joinDoc(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) {
         return new ResponseDto(
                 true, "User joined the note successfully",
-                Map.of(
-                    "collaboratorCount", doc.getCollaboratorCount(),
-                    "text", doc.getDocText(),
-                    "revision", doc.getRevision()
-                )
+                noteService.joinNote(currentUser.getUserId(), currentUser.getEmail(), noteId)
         );
     }
 
