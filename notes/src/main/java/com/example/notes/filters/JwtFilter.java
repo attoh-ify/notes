@@ -32,7 +32,6 @@ public class JwtFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String path = request.getRequestURI();
-        System.out.println("I got here. Authenticating...");
 
         if (path.startsWith("/api/users/register") ||
                 path.startsWith("/api/users/login")) {
@@ -49,8 +48,6 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         if (request.getCookies() != null) {
-            System.out.println("I have cookies");
-            System.out.println(Arrays.toString(request.getCookies()));
             for (Cookie cookie : request.getCookies()) {
                 if (cookie.getName().equals("access_token"))  {
                     token = cookie.getValue();
