@@ -79,7 +79,7 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 user,
                 payload.title(),
-                new ArrayList<>(),
+//                new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 null,
                 null,

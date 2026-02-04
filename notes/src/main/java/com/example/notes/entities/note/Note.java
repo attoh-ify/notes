@@ -1,16 +1,16 @@
 package com.example.notes.entities.note;
 
-import com.example.notes.converter.TextOperationListConverter;
+//import com.example.notes.converter.TextOperationListConverter;
 import com.example.notes.entities.noteAccess.NoteAccess;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.entities.user.User;
-import com.example.notes.dto.ot.TextOperation;
+//import com.example.notes.dto.ot.TextOperation;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+//import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -31,9 +31,9 @@ public class Note {
     @Column(name = "title", nullable = false)
     private String title;
 
-    @Convert(converter = TextOperationListConverter.class)
-    @Column(name = "revision_log", nullable = false, columnDefinition = "json")
-    private List<TextOperation> revisionLog;
+//    @Convert(converter = TextOperationListConverter.class)
+//    @Column(name = "revision_log", nullable = false, columnDefinition = "json")
+//    private List<TextOperation> revisionLog;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "visibility", nullable = false)
@@ -56,11 +56,11 @@ public class Note {
 
     public Note() {}
 
-    public Note(UUID id, User user, String title, List<TextOperation> revisionLog, NoteVisibility visibility,  List<NoteAccess> noteAccesses, UUID currentNoteVersion, List<NoteVersion> noteVersions) {
+    public Note(UUID id, User user, String title, NoteVisibility visibility,  List<NoteAccess> noteAccesses, UUID currentNoteVersion, List<NoteVersion> noteVersions) {
         this.id = id;
         this.user = user;
         this.title = title;
-        this.revisionLog = revisionLog;
+//        this.revisionLog = revisionLog;
         this.visibility = visibility;
         this.noteAccesses = noteAccesses;
         this.currentNoteVersion = currentNoteVersion;
@@ -83,6 +83,7 @@ public class Note {
         return "Note{" +
                 "id=" + id +
                 ", user=" + user.getId() +
+                ", title='" + title + '\'' +
                 ", visibility=" + visibility +
                 ", noteAccesses=" + noteAccesses +
                 ", currentNoteVersion=" + currentNoteVersion +

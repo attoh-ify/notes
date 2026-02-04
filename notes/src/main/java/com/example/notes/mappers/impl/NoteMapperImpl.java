@@ -36,7 +36,7 @@ public class NoteMapperImpl implements NoteMapper {
                 noteDto.id(),
                 user,
                 noteDto.title(),
-                null,
+//                null,
                 noteDto.visibility(),
                 null,
                 noteDto.currentNoteVersion(),
