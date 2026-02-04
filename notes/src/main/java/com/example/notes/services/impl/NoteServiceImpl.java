@@ -117,6 +117,7 @@ public class NoteServiceImpl implements NoteService {
     public Object joinNote(UUID userId, String actorEmail, UUID noteId) {
         DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
         if (noteStore.getNoteFromNoteId(noteId) == null) {
+            System.out.println("Note with id=" + noteId + " not found");
             noteStore.addEmptyNote(userId, noteId);
             Note note = notePolicyService.validateEditor(actorEmail, noteId);
             NoteVersion noteVersion = noteVersionRepository.findById(note.getCurrentNoteVersion())
@@ -125,6 +126,7 @@ public class NoteServiceImpl implements NoteService {
                         return new BadRequestException("Not version not found");
                     });
             doc.setDocText(noteVersion.getContent());
+            System.out.println(doc.getDocText());
         }
 
         noteStore.addCollaboratorToNote(userId, noteId);
