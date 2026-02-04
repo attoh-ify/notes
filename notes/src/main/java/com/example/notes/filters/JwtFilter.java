@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Arrays;
 
 @Component
 public class JwtFilter extends OncePerRequestFilter {
@@ -48,9 +49,12 @@ public class JwtFilter extends OncePerRequestFilter {
         }
 
         if (request.getCookies() != null) {
+            System.out.println("I have cookies");
+            System.out.println(Arrays.toString(request.getCookies()));
             for (Cookie cookie : request.getCookies()) {
                 if (cookie.getName().equals("access_token"))  {
                     token = cookie.getValue();
+                    System.out.println(token);
                     break;
                 }
             }
