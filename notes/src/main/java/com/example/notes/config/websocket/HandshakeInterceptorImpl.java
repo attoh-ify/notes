@@ -20,32 +20,18 @@ import java.util.UUID;
 
 @Component
 public class HandshakeInterceptorImpl implements HandshakeInterceptor {
-    private final NoteStore documentStore;
-
     private static final Logger log = LoggerFactory.getLogger(HandshakeInterceptorImpl.class);
-
-    public HandshakeInterceptorImpl(NoteStore documentStore) {
-        this.documentStore = documentStore;
-    }
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
-//        var uri = request.getURI().toString();
-//        var noteId = extractNoteId(uri);
-//        var hasDoc = documentStore.hasDocument(noteId);
-//        System.out.println("Document: " + documentStore.getNoteFromNoteId(noteId));
-//        if (!hasDoc) {
-//            response.setStatusCode(HttpStatus.NOT_FOUND);
-//            response.close();
-//            return false;
-//        } else {
-//            return true;
-//        }
         if (request instanceof ServletServerHttpRequest servletRequest) {
+            System.out.println("Yes I am an instance of ServletServerHttpRequest");
             var httpServletRequest = servletRequest.getServletRequest();
 
             if (httpServletRequest.getCookies() != null) {
+                System.out.println("Yes httpServletRequest.getCookies() is not null");
                 for (var cookie : httpServletRequest.getCookies()) {
+                    System.out.println("Yes httpServletRequest.getCookies() is " + cookie);
                     attributes.put(cookie.getName(), cookie.getValue());
                 }
             }
