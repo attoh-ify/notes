@@ -48,7 +48,7 @@ public class SecurityConfig {
                                 "/index.html",
                                 "/css/**",
                                 "/js/**",
-                                "/api/relay/**",
+                                "/api/relay/info/**",
                                 "/api/users/login",
                                 "/api/users/register"
                         ).permitAll()
