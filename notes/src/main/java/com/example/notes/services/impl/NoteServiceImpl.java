@@ -126,7 +126,8 @@ public class NoteServiceImpl implements NoteService {
                         return new BadRequestException("Not version not found");
                     });
             doc.setDocText(noteVersion.getContent());
-            System.out.println(doc.getDocText());
+            System.out.print("Note version text: " + noteVersion.getContent());
+            System.out.println("Doc text: " + doc.getDocText());
         }
 
         noteStore.addCollaboratorToNote(userId, noteId);
