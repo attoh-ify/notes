@@ -75,7 +75,6 @@ public class SecurityConfig {
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Cache-Control"));
         config.setAllowCredentials(true);
 
-        // This is crucial for some browsers to read the response after a CORS request
         config.setExposedHeaders(List.of("Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
