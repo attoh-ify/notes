@@ -3,9 +3,6 @@ package com.example.notes.config.websocket;
 import com.example.notes.interceptors.StompAuthInterceptor;
 import com.example.notes.services.JwtService;
 import com.example.notes.services.impl.NotePolicyService;
-import com.example.notes.shared.document_store.NoteStore;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -17,12 +14,6 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
-    @Autowired
-    NoteStore noteStore;
-
-    @Value("${ws.allowed_origin}")
-    String allowedOrigin;
-
     private final NotePolicyService notePolicyService;
     private final JwtService jwtService;
     private final ApplicationContext context;
@@ -37,7 +28,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/relay")
                 .setAllowedOrigins("http://localhost:3000")
-                .addInterceptors(new HandshakeInterceptorImpl(noteStore))
+                .addInterceptors(new HandshakeInterceptorImpl())
                 .setHandshakeHandler(new HandshakeHandler())
                 .withSockJS();
     }
