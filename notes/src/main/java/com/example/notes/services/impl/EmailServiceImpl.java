@@ -43,20 +43,20 @@ public class EmailServiceImpl implements EmailService {
     }
 
     private void sendHtmlEmail(String recipient, String subject, String htmlContent) {
-        try {
-            MimeMessage message = javaMailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-
-            helper.setFrom(fromEmailId);
-            helper.setTo(recipient);
-            helper.setSubject(subject);
-            helper.setText(htmlContent, true);
-
-            javaMailSender.send(message);
-        } catch (MessagingException e) {
-            // Consider using a logger here (e.g., log.error)
-            log.error("Failed to send HTML email to {}", recipient, e);
-        }
+//        try {
+//            MimeMessage message = javaMailSender.createMimeMessage();
+//            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+//
+//            helper.setFrom(fromEmailId);
+//            helper.setTo(recipient);
+//            helper.setSubject(subject);
+//            helper.setText(htmlContent, true);
+//
+//            javaMailSender.send(message);
+//        } catch (MessagingException e) {
+//            // Consider using a logger here (e.g., log.error)
+//            log.error("Failed to send HTML email to {}", recipient, e);
+//        }
     }
 
     @Override
