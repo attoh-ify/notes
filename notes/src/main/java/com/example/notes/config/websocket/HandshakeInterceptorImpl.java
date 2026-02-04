@@ -25,13 +25,10 @@ public class HandshakeInterceptorImpl implements HandshakeInterceptor {
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
         if (request instanceof ServletServerHttpRequest servletRequest) {
-            System.out.println("Yes I am an instance of ServletServerHttpRequest");
             var httpServletRequest = servletRequest.getServletRequest();
 
             if (httpServletRequest.getCookies() != null) {
-                System.out.println("Yes httpServletRequest.getCookies() is not null");
                 for (var cookie : httpServletRequest.getCookies()) {
-                    System.out.println("Yes httpServletRequest.getCookies() is " + cookie);
                     attributes.put(cookie.getName(), cookie.getValue());
                 }
             }

@@ -44,7 +44,6 @@ public class StompAuthInterceptor implements ChannelInterceptor {
             Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
 
             if (sessionAttributes != null && sessionAttributes.containsKey("access_token")) {
-                System.out.println("Yes the interceptor contains the token");
                 token = (String) sessionAttributes.get("access_token");
             }
 
