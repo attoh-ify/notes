@@ -48,7 +48,7 @@ public class SecurityConfig {
                                 "/index.html",
                                 "/css/**",
                                 "/js/**",
-                                "/relay/**",
+                                "/api/relay/**",
                                 "/api/users/login",
                                 "/api/users/register"
                         ).permitAll()
@@ -65,7 +65,6 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Use setAllowedOriginPatterns if you have any trouble with exact matches
         config.setAllowedOrigins(List.of(
                 "http://localhost:3000",
                 "https://notes-ui-production.up.railway.app"

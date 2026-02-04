@@ -106,7 +106,7 @@ public class UserServiceImpl implements UserService {
         userRepository.findByEmail(user.email()).ifPresent(existing -> {
             log.warn("Duplicate user registration email={}", user.email());
             throw new BadRequestException(
-                    "This email is already registered to a patient."
+                    "This email is already registered to a User."
             );
         });
     }
