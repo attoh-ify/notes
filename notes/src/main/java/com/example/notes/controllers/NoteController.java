@@ -47,7 +47,7 @@ public class NoteController {
         return new ResponseDto("Note created", note);
     }
 
-    @GetMapping("/{noteId}/join/{userId}")
+    @GetMapping("/{noteId}/join")
     public ResponseDto joinDoc(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) {
         return new ResponseDto(
                 true, "User joined the note successfully",
