@@ -25,16 +25,26 @@ public class CharSequenceDocumentFormatter implements DocumentFormatter {
     }
 
     private void applyInsert(TextOperation operation) {
-        if (buffer.length() == operation.getPosition()) {
-            buffer.append(operation.getOperand());
-        } else {
-            buffer.insert(operation.getPosition(), operation.getOperand());
+        int pos = operation.getPosition();
+        int len = buffer.length();
+
+        if (pos > len) {
+            pos = len;
+        } else if (pos < 0) {
+            pos = 0;
         }
+
+        buffer.insert(pos, operation.getOperand());
     }
 
     private void applyDelete(TextOperation operation) {
-        var start = operation.getPosition();
-        var end = start + operation.getOperand().length();
+        int start = operation.getPosition();
+        int end = start + operation.getOperand().length();
+        int len = buffer.length();
+
+        if (start >= len) return; // Nothing to delete
+        if (end > len) end = len;
+
         buffer.delete(start, end);
     }
 }

@@ -33,7 +33,7 @@ public class CharSequenceOperationTransformations implements OperationTransforma
         } else {
             newPos = op1.getPosition() + op2.getOperand().length();
         }
-        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos);
+        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos, op1.getActorId());
     }
 
     // insert-delete
@@ -43,19 +43,22 @@ public class CharSequenceOperationTransformations implements OperationTransforma
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),
-                    op1.getPosition()
+                    op1.getPosition(),
+                    op1.getActorId()
             );
         } else if (op1.getPosition() > op2.getPosition() && op1.getPosition() <= op2End) {
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),
-                    op2.getPosition()
+                    op2.getPosition(),
+                    op1.getActorId()
             );
         } else {
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),
-                    op1.getPosition() - op2.getOperand().length()
+                    op1.getPosition() - op2.getOperand().length(),
+                    op1.getActorId()
             );
         }
     }
@@ -69,7 +72,8 @@ public class CharSequenceOperationTransformations implements OperationTransforma
                         new TextOperation(
                                 op1.getOpName(),
                                 op1.getOperand(),
-                                op1.getPosition()
+                                op1.getPosition(),
+                                op1.getActorId()
                         )
                 };
             } else {
@@ -81,11 +85,13 @@ public class CharSequenceOperationTransformations implements OperationTransforma
                         new TextOperation(
                                 op1.getOpName(),
                                 left,
-                                op1.getPosition()),
+                                op1.getPosition(),
+                                op1.getActorId()),
                         new TextOperation(
                                 op1.getOpName(),
                                 right,
-                                op1.getPosition() + left.length() + op2.getOperand().length())
+                                op1.getPosition() + left.length() + op2.getOperand().length(),
+                                op1.getActorId())
                 };
             }
         } else {
@@ -93,7 +99,8 @@ public class CharSequenceOperationTransformations implements OperationTransforma
                     new TextOperation(
                             op1.getOpName(),
                             op1.getOperand(),
-                            op1.getPosition() + op2.getOperand().length())
+                            op1.getPosition() + op2.getOperand().length(),
+                            op1.getActorId())
             };
         }
     }
@@ -107,20 +114,23 @@ public class CharSequenceOperationTransformations implements OperationTransforma
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),
-                    op1.getPosition()
+                    op1.getPosition(),
+                    op1.getActorId()
             );
         } else if (op1.getPosition() > op2End) {
             return new TextOperation(
                     op1.getOpName(),
                     op1.getOperand(),
-                    op1.getPosition() - op2.getOperand().length());
+                    op1.getPosition() - op2.getOperand().length(),
+                    op1.getActorId());
         } else if (op1.getPosition() < op2.getPosition() && op1End >= op2.getPosition()) {
             var diff = op2.getPosition() - op1.getPosition();
             var operand = op1.getOperand().substring(0,diff);
             return new TextOperation(
                     op1.getOpName(),
                     operand,
-                    op1.getPosition()
+                    op1.getPosition(),
+                    op1.getActorId()
             );
         }  else if (op1.getPosition() <= op2End && op1End > op2End) {
             var diff =
@@ -129,7 +139,8 @@ public class CharSequenceOperationTransformations implements OperationTransforma
             return new TextOperation(
                     op1.getOpName(),
                     operand,
-                    op2.getPosition());
+                    op2.getPosition(),
+                    op1.getActorId());
         } else {
             return null;
         }

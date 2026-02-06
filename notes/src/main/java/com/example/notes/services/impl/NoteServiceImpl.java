@@ -87,7 +87,7 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 user,
                 payload.title(),
-//                new ArrayList<>(),
+                new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 null,
                 null,
@@ -150,12 +150,14 @@ public class NoteServiceImpl implements NoteService {
                     log.warn("Note version with id={} not found", note.getCurrentNoteVersion());
                     return new BadRequestException("Note version not found");
                 });
-        System.out.println(noteVersion.getContent());
         DocumentModel doc = noteStore.getNoteFromNoteId(noteId);
+
         noteVersion.setContent(doc.getDocText());
         noteVersion.setRevision(doc.getRevision());
         noteVersionRepository.save(noteVersion);
-        System.out.println(noteVersion.getContent());
+
+        note.setRevisionLog(doc.getRevisionLog());
+        noteRepository.save(note);
     }
 
     @Transactional

@@ -9,6 +9,7 @@ import lombok.Setter;
 import java.util.*;
 
 public class DocumentModel {
+    @Getter
     final List<TextOperation> revisionLog = new ArrayList<>();
     private final OperationTransformations operationTransformations;
     @Getter

@@ -25,9 +25,9 @@ public class SimpleCharacterOperationTransformations implements OperationTransfo
     // insert-insert
     private TextOperation transformII(TextOperation op1, TextOperation op2) {
         if (op1.getPosition() < op2.getPosition()) {
-            return new TextOperation(op1.getOpName(), op1.getOperand(), op1.getPosition());
+            return new TextOperation(op1.getOpName(), op1.getOperand(), op1.getPosition(), op1.getActorId());
         } else {
-            return new TextOperation(op1.getOpName(), op1.getOperand(), op1.getPosition() + 1);
+            return new TextOperation(op1.getOpName(), op1.getOperand(), op1.getPosition() + 1, op1.getActorId());
         }
     }
 
@@ -36,7 +36,7 @@ public class SimpleCharacterOperationTransformations implements OperationTransfo
         int newPos;
         if (op1.getPosition() <= op2.getPosition()) newPos = op1.getPosition();
         else newPos = op1.getPosition() - 1;
-        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos);
+        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos, op1.getActorId());
     }
 
     // delete-insert
@@ -44,7 +44,7 @@ public class SimpleCharacterOperationTransformations implements OperationTransfo
         int newPos;
         if (op1.getPosition() < op2.getPosition()) newPos = op1.getPosition();
         else newPos = op1.getPosition() + 1;
-        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos);
+        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos, op1.getActorId());
     }
 
     // delete-delete
@@ -53,6 +53,6 @@ public class SimpleCharacterOperationTransformations implements OperationTransfo
         if (op1.getPosition() < op2.getPosition()) newPos = op1.getPosition();
         else if (op1.getPosition() > op2.getPosition()) newPos = op1.getPosition() - 1;
         else return null;
-        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos);
+        return new TextOperation(op1.getOpName(), op1.getOperand(), newPos, op1.getActorId());
     }
 }
