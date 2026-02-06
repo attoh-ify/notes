@@ -1,6 +1,5 @@
 package com.example.notes.entities.note;
 
-import com.example.notes.converter.TextOperationListConverter;
 import com.example.notes.entities.noteAccess.NoteAccess;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.entities.user.User;
@@ -8,6 +7,8 @@ import com.example.notes.dto.ot.TextOperation;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -31,9 +32,9 @@ public class Note {
     @Column(name = "title", nullable = false)
     private String title;
 
-    @Convert(converter = TextOperationListConverter.class)
-    @Column(name = "revision_log", nullable = false, columnDefinition = "json")
-    private List<TextOperation> revisionLog;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "revision_log", nullable = false)
+    private List<TextOperation> revisionLog = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)
     @Column(name = "visibility", nullable = false)
