@@ -43,6 +43,17 @@ public class NotePolicyService {
                 });
     }
 
+    public NoteVersion findNoteVersionByNoteId(UUID noteId) {
+        Note note = findNoteById(noteId);
+        return noteVersionRepository.findById(note.getCurrentNoteVersion())
+                .orElseThrow(() -> {
+                    log.warn("Note version not found id={}", note.getCurrentNoteVersion());
+                    return new BadRequestException(
+                            "Note version with this id does not exist."
+                    );
+                });
+    }
+
     public NoteAccessRole resolveRole(String actorEmail, Note note) {
         NoteAccessRole accessRole = null;
 

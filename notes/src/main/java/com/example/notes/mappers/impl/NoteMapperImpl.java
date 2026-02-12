@@ -27,10 +27,10 @@ public class NoteMapperImpl implements NoteMapper {
 
     @Override
     public Note fromDto(NoteDto noteDto) {
-        User user = userRepository.findById(noteDto.userId())
+        User user = userRepository.findByEmail(noteDto.ownerEmail())
                 .orElseThrow(() -> {
-                    log.warn("User with id {} not found", noteDto.userId());
-                    return new BadRequestException("User with id not found");
+                    log.warn("User with email {} not found", noteDto.ownerEmail());
+                    return new BadRequestException("User with email not found");
                 });
         return new Note(
                 noteDto.id(),
@@ -49,7 +49,7 @@ public class NoteMapperImpl implements NoteMapper {
         NoteAccessRole accessRole = notePolicyService.resolveRole(actorEmail, note);
         return new NoteDto(
                 note.getId(),
-                note.getUser().getId(),
+                note.getUser().getEmail(),
                 note.getTitle(),
                 note.getVisibility(),
                 accessRole,

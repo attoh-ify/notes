@@ -7,11 +7,9 @@ import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
 import com.example.notes.services.NoteService;
-import com.example.notes.shared.document_store.NoteStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,9 +22,6 @@ import java.util.UUID;
         description = "Manage Notes"
 )
 public class NoteController {
-    @Autowired
-    private NoteStore noteStore;
-
     private final NoteService noteService;
 
     public NoteController(NoteService noteService) {
@@ -40,10 +35,6 @@ public class NoteController {
             @RequestBody CreateNotePayload payload
     ) {
         NoteDto note = noteService.createNote(currentUser.getEmail(), payload);
-
-        noteStore.addEmptyNote(note.userId(), note.id());
-        noteStore.addCollaboratorToNote(currentUser.getUserId(), note.id());
-
         return new ResponseDto("Note created", note);
     }
 

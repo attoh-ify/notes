@@ -1,15 +1,17 @@
 package com.example.notes.dto.note;
 
+import java.util.List;
+
 public record DocumentJoinResponse(
-        int collaboratorCount,
+        List<String> collaborators,
         boolean hasError,
         String errorMessage,
         String text,
         int documentRevision
 ) {
-    public static DocumentJoinResponse noError(int collaboratorCount, String text, int documentRevision) {
+    public static DocumentJoinResponse noError(List<String> collaborators, String text, int documentRevision) {
         return new DocumentJoinResponse(
-                collaboratorCount,
+                collaborators,
                 false,
                 null,
                 text,
@@ -19,7 +21,7 @@ public record DocumentJoinResponse(
 
     public static DocumentJoinResponse withError(String errorMessage) {
         return new DocumentJoinResponse(
-                -1,
+                null,
                 true,
                 errorMessage,
                 null,

@@ -1,14 +1,7 @@
 package com.example.notes;
 
 import com.example.notes.notifier.CollaboratorCountNotifier;
-import com.example.notes.shared.formatter.impl.CharSequenceDocumentFormatter;
 import com.example.notes.notifier.OperationRelayer;
-import com.example.notes.shared.document_store.NoteStore;
-import com.example.notes.shared.document_store.impl.SimpleHashMapDocumentStore;
-import com.example.notes.shared.operation_queue.OperationQueue;
-import com.example.notes.shared.operation_queue.impl.OperationQueueImpl;
-import com.example.notes.shared.operation_transformations.OperationTransformations;
-import com.example.notes.shared.operation_transformations.impl.CharSequenceOperationTransformations;
 import jakarta.jms.Connection;
 import jakarta.jms.Destination;
 import jakarta.jms.JMSException;
@@ -125,23 +118,8 @@ public class NotesApplication implements CommandLineRunner {
     }
 
     @Bean
-    public OperationQueue getOperationQueue() {
-        return new OperationQueueImpl();
-    }
-
-    @Bean
     public OperationRelayer getOperationRelayer() {
         return new OperationRelayer();
-    }
-
-    @Bean
-    public OperationTransformations getOperationTransformations() {
-        return new CharSequenceOperationTransformations();
-    }
-
-    @Bean
-    public NoteStore getDocumentStore() {
-        return new SimpleHashMapDocumentStore(CharSequenceDocumentFormatter::new);
     }
 
     @Bean

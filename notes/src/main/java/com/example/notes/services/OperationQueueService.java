@@ -1,7 +1,7 @@
-package com.example.notes.shared.operation_queue;
+package com.example.notes.services;
 
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 
-public interface OperationQueue {
+public interface OperationQueueService {
     void enqueue(OperationQueueInPayload inPayload);
 }
