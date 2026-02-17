@@ -2,6 +2,7 @@ package com.example.notes.services.impl;
 
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.note.CreateNotePayload;
+import com.example.notes.dto.note.JoinNoteResponse;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.ot.Delta;
 import com.example.notes.entities.note.Note;
@@ -110,15 +111,15 @@ public class NoteServiceImpl implements NoteService {
 
         noteRepository.save(newNote);
 
-        redisService.initializeNote(newNote.getId());
+        redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
 
         return noteMapper.toDto(newNote, actorEmail);
     }
 
     @Override
-    public Object joinNote(UUID userId, String actorEmail, UUID noteId) {
-        redisService.initializeNote(noteId);
+    public JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId) {
+        redisService.initializeNote(actorEmail, noteId);
         NoteVersion noteVersion = redisService.getNoteVersion(noteId);
 
         redisService.addCollaboratorToNote(noteId, actorEmail);
@@ -126,11 +127,7 @@ public class NoteServiceImpl implements NoteService {
         List<String> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
-        return Map.of(
-                "collaborators", collaborators,
-                "delta", noteVersion.getMasterDelta(),
-                "revision", noteVersion.getRevision()
-        );
+        return new JoinNoteResponse(collaborators, noteVersion.getMasterDelta(), noteVersion.getRevision());
     }
 
     @Override

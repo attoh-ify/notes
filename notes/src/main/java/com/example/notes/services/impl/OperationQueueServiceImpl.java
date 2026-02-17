@@ -5,10 +5,9 @@ import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.notifier.OperationRelayer;
-import com.example.notes.repositories.NoteRepository;
-import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.services.OperationQueueService;
+import com.example.notes.services.RedisService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -16,23 +15,19 @@ import java.util.ArrayList;
 
 @Service
 public class OperationQueueServiceImpl implements OperationQueueService {
-    private final NotePolicyService notePolicyService;
-    private final NoteVersionRepository noteVersionRepository;
-    private final NoteRepository noteRepository;
+    private final RedisService redisService;
 
     @Autowired
     private OperationRelayer operationRelayer;
 
-    public OperationQueueServiceImpl(NotePolicyService notePolicyService, NoteVersionRepository noteVersionRepository, NoteRepository noteRepository) {
-        this.notePolicyService = notePolicyService;
-        this.noteVersionRepository = noteVersionRepository;
-        this.noteRepository = noteRepository;
+    public OperationQueueServiceImpl(RedisService redisService) {
+        this.redisService = redisService;
     }
 
     @Override
     public synchronized void enqueue(OperationQueueInPayload message) {
-        Note note = notePolicyService.findNoteById(message.getNoteId());
-        NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(message.getNoteId());
+        Note note = redisService.getNote(message.getNoteId());
+        NoteVersion noteVersion = redisService.getNoteVersion(message.getNoteId());
 
         int serverRevision = noteVersion.getRevision();
         int clientRevision = message.getRevision();
@@ -56,17 +51,19 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         operationRelayer.relay(message.getNoteId(), newTextOperation);
 
-        // update master delta
 
         // update revision log
         if (note.getRevisionLog() == null) {
             note.setRevisionLog(new ArrayList<>());
         }
         note.getRevisionLog().add(newTextOperation);
-        noteRepository.save(note);
 
+        // update master delta
+        Delta updateMaster = noteVersion.getMasterDelta().compose(transformedDelta);
+        noteVersion.setMasterDelta(updateMaster);
         // update current revision
         noteVersion.setRevision(serverRevision + 1);
-        noteVersionRepository.save(noteVersion);
+
+        redisService.updateNote(note, noteVersion);
     }
 }

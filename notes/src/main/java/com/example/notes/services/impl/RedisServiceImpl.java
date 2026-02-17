@@ -3,9 +3,11 @@ package com.example.notes.services.impl;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.services.RedisService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -17,50 +19,113 @@ public class RedisServiceImpl implements RedisService {
             LoggerFactory.getLogger(RedisServiceImpl.class);
 
     private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
     private final NotePolicyService notePolicyService;
 
-    public RedisServiceImpl(StringRedisTemplate redisTemplate, NotePolicyService notePolicyService) {
+    public RedisServiceImpl(StringRedisTemplate redisTemplate, ObjectMapper objectMapper, NotePolicyService notePolicyService) {
         this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
         this.notePolicyService = notePolicyService;
     }
 
     @Override
     public void initializeNote(String actorEmail, UUID noteId) {
+        String noteKey = "note:" + noteId;
 
+        if (redisTemplate.hasKey(noteKey)) return;
+
+        Note note = notePolicyService.validateEditor(actorEmail, noteId);
+        NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
+
+        String noteVersionKey = "note-version:" + note.getId();
+
+        try {
+            String jsonNote = objectMapper.writeValueAsString(note);
+            String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
+
+            redisTemplate.opsForValue().set(noteKey, jsonNote);
+            redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to initialize note in Redis: {}", noteId, e);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
-    public void updateNote(String actorEmail, UUID noteId, Note note, NoteVersion noteVersion) {
+    public void updateNote(Note note, NoteVersion noteVersion) {
+        String noteKey = "note:" + note.getId();
+        String noteVersionKey = "note-version:" + note.getId();
 
+        if (redisTemplate.opsForValue().get(noteKey) == null) return;
+
+        try {
+            String jsonNote = objectMapper.writeValueAsString(note);
+            String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
+
+            redisTemplate.opsForValue().set(noteKey, jsonNote);
+            redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
+        } catch (Exception e) {
+            log.error("Failed to update note: {}", note.getId(), e);
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
-    public Note getNote(String actorEmail, UUID noteId) {
-        return null;
+    public Note getNote(UUID noteId) {
+        String key = "note:" + noteId;
+        String jsonNote = redisTemplate.opsForValue().get(key);
+
+        if (jsonNote == null) return null;
+
+        try {
+            return objectMapper.readValue(jsonNote, Note.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Error parsing Note", e);
+        }
     }
 
     @Override
-    public void deleteNote(String actorEmail, UUID noteId) {
+    public void deleteNote(UUID noteId) {
+        String noteKey = "note:" + noteId;
+        String noteVersionKey = "note-version:" + noteId;
+        String noteCollaboratorKey = "note-collaborators:" + noteId;
 
+        redisTemplate.delete(List.of(noteKey, noteVersionKey, noteCollaboratorKey));
     }
 
     @Override
-    public NoteVersion getNoteVersion(String actorEmail, UUID noteId) {
-        return null;
+    public NoteVersion getNoteVersion(UUID noteId) {
+        String key = "note-version:" + noteId;
+        String jsonNoteVersion = redisTemplate.opsForValue().get(key);
+
+        if (jsonNoteVersion == null) return null;
+
+        try {
+            return objectMapper.readValue(jsonNoteVersion, NoteVersion.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Error parsing NoteVersion", e);
+        }
     }
 
     @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
+        String key = "note-collaborators:" + noteId;
+        List<String> collaborators = getCollaborators(noteId);
 
+        if (!collaborators.contains(actorEmail)) {
+            redisTemplate.opsForList().rightPush(key, actorEmail);
+        }
     }
 
     @Override
     public void removeCollaboratorFromNote(UUID noteId, String actorEmail) {
-
+        String key = "note-collaborators:" + noteId;
+        redisTemplate.opsForList().remove(key, 0, actorEmail);
     }
 
     @Override
-    public List<String> getCollaborators(String actorEmail, UUID noteId) {
-        return List.of();
+    public List<String> getCollaborators(UUID noteId) {
+        String key = "note-collaborators:" + noteId;
+        return redisTemplate.opsForList().range(key, 0, -1);
     }
 }
