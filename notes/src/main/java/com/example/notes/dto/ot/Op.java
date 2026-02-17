@@ -7,11 +7,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Setter
+@Getter
 public class Op {
-    @Getter
     private Object insert;
     private Integer delete;
-    private Integer retain;
+    private Object retain;
     private Map<String, Object> attributes;
 
     public Op() {}
@@ -30,13 +30,10 @@ public class Op {
 
     public Integer length() {
         if (delete != null) return delete;
-        if (retain != null) return retain;
+        if (retain instanceof Integer) return (Integer) retain;
+        if (retain != null) return 1;
         if (insert instanceof String) return ((String) insert).length();
         if (insert != null) return 1;
         return 0;
-    }
-
-    public Map<String, Object> getAttributes() {
-        return attributes != null ? attributes : new HashMap<>();
     }
 }
