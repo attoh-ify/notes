@@ -25,7 +25,6 @@ public class NotesApplication implements CommandLineRunner {
     private final static String ACTIVEMQ_USERNAME = "admin";
     private final static String ACTIVEMQ_PASSWORD = "admin";
 
-
     public static void main(String[] args) {
         SpringApplication.run(NotesApplication.class, args);
     }

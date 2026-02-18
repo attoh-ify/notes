@@ -88,6 +88,11 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 UUID noteId = extractNoteId(destination);
                 String userEmail = principal.getName();
 
+                Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+                if (sessionAttributes != null) {
+                    sessionAttributes.put("noteId", extractNoteIdString(destination));
+                }
+
                 log.debug("Authorizing SUBSCRIBE user={} noteId={}", userEmail, noteId);
 
                 notePolicyService.validateEditor(userEmail, noteId);
@@ -106,6 +111,15 @@ public class StompAuthInterceptor implements ChannelInterceptor {
         try {
             String id = destination.substring("/topic/note/".length());
             return UUID.fromString(id);
+        } catch (Exception e) {
+            log.error("Invalid note topic destination");
+            throw new IllegalArgumentException("Invalid note topic destination");
+        }
+    }
+
+    private String extractNoteIdString(String destination) {
+        try {
+            return destination.substring("/topic/note/".length());
         } catch (Exception e) {
             log.error("Invalid note topic destination");
             throw new IllegalArgumentException("Invalid note topic destination");

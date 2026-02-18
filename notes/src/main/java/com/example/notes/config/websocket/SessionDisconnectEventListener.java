@@ -35,7 +35,7 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
 
-        if (sessionAttributes != null && sessionAttributes.containsKey("noteId")) {
+        if (sessionAttributes != null && sessionAttributes.containsKey("userId")) {
             Principal principal = accessor.getUser();
 
             if (principal == null) {

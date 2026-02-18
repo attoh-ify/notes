@@ -34,6 +34,7 @@ public class RedisServiceImpl implements RedisService {
         if (redisTemplate.hasKey(noteKey)) return;
 
         Note note = notePolicyService.validateEditor(actorEmail, noteId);
+        note.setNoteVersions(null);
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = "note-version:" + note.getId();
@@ -71,14 +72,19 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public Note getNote(UUID noteId) {
+        System.out.println(8);
         String key = "note:" + noteId;
         String jsonNote = redisTemplate.opsForValue().get(key);
+        System.out.println(9);
 
         if (jsonNote == null) return null;
+        System.out.println(10);
 
         try {
+            System.out.println(11);
             return objectMapper.readValue(jsonNote, Note.class);
         } catch (Exception e) {
+            System.out.println(1100);
             throw new RuntimeException("Error parsing Note", e);
         }
     }
@@ -115,7 +121,7 @@ public class RedisServiceImpl implements RedisService {
     @Override
     public void removeCollaboratorFromNote(UUID noteId, String actorEmail) {
         String key = "note-collaborators:" + noteId;
-        redisTemplate.opsForList().remove(key, 0, actorEmail);
+        redisTemplate.opsForSet().remove(key, actorEmail);
     }
 
     @Override

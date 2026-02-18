@@ -46,7 +46,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         TextOperation newTextOperation = new TextOperation(
                 transformedDelta,
                 message.getFrom(),
-                message.getRevision()
+                noteVersion.getRevision() + 1
         );
 
         operationRelayer.relay(message.getNoteId(), newTextOperation);

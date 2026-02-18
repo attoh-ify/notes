@@ -70,6 +70,7 @@ public class NoteVersion {
     @PrePersist
     public void onCreate() {
         this.createdAt = LocalDateTime.now();
+        this.updatedAt = this.createdAt;
     }
 
     @PreUpdate
@@ -77,4 +78,17 @@ public class NoteVersion {
         this.updatedAt = LocalDateTime.now();
     }
 
+    @Override
+    public String toString() {
+        return "NoteVersion{" +
+                "id=" + id +
+                ", note=" + note +
+                ", masterDelta=" + masterDelta +
+                ", revision=" + revision +
+                ", createdBy=" + createdBy +
+                ", versionNumber=" + versionNumber +
+                ", createdAt=" + createdAt +
+                ", updatedAt=" + updatedAt +
+                '}';
+    }
 }
