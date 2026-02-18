@@ -1,6 +1,7 @@
 package com.example.notes.controllers;
 
 import com.example.notes.dto.note.CreateNotePayload;
+import com.example.notes.dto.note.CursorDto;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
@@ -43,6 +44,18 @@ public class NoteController {
         return new ResponseDto(
                 true, "User joined the note successfully",
                 noteService.joinNote(currentUser.getUserId(), currentUser.getEmail(), noteId)
+        );
+    }
+
+    @PostMapping("/{noteId}/cursor")
+    public ResponseDto changeCursor(
+            @CurrentUser UserPrincipal currentUser,
+            @PathVariable UUID noteId,
+            @RequestBody CursorDto payload
+    ) {
+        noteService.changeCursor(payload, noteId, currentUser.getEmail());
+        return new ResponseDto(
+                true, "Ok", null
         );
     }
 

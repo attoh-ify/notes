@@ -4,6 +4,7 @@ import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public interface RedisService {
@@ -16,5 +17,6 @@ public interface RedisService {
 
     void addCollaboratorToNote(UUID noteId, String actorEmail);
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);
-    List<String> getCollaborators(UUID noteId);
+    Map<Object, Object> getCollaborators(UUID noteId);
+    Boolean isCollaborator(String actorEmail);
 }

@@ -21,6 +21,18 @@ public class RedisServiceImpl implements RedisService {
     private final ObjectMapper objectMapper;
     private final NotePolicyService notePolicyService;
 
+    private static final String[] COLLABORATOR_COLORS = {
+            "#4285F4", // Google Blue
+            "#F4B400", // Google Yellow
+            "#0F9D58", // Google Green
+            "#9C27B0", // Deep Purple
+            "#FF7043", // Deep Orange
+            "#00BCD4", // Cyan
+            "#795548", // Brown
+            "#607D8B", // Blue Grey
+            "#E91E63"  // Pink
+    };
+
     public RedisServiceImpl(StringRedisTemplate redisTemplate, ObjectMapper objectMapper, NotePolicyService notePolicyService) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
@@ -35,6 +47,8 @@ public class RedisServiceImpl implements RedisService {
 
         Note note = notePolicyService.validateEditor(actorEmail, noteId);
         note.setNoteVersions(null);
+        note.setUser(null);
+        note.setNoteAccesses(null);
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = "note-version:" + note.getId();
@@ -75,16 +89,12 @@ public class RedisServiceImpl implements RedisService {
         System.out.println(8);
         String key = "note:" + noteId;
         String jsonNote = redisTemplate.opsForValue().get(key);
-        System.out.println(9);
 
         if (jsonNote == null) return null;
-        System.out.println(10);
 
         try {
-            System.out.println(11);
             return objectMapper.readValue(jsonNote, Note.class);
         } catch (Exception e) {
-            System.out.println(1100);
             throw new RuntimeException("Error parsing Note", e);
         }
     }
@@ -115,19 +125,29 @@ public class RedisServiceImpl implements RedisService {
     @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
         String key = "note-collaborators:" + noteId;
-        redisTemplate.opsForSet().add(key, actorEmail);
+
+        Object existingColor = redisTemplate.opsForHash().get(key, actorEmail);
+        if (existingColor != null) return;
+
+        String assignColor = COLLABORATOR_COLORS[Math.abs(actorEmail.hashCode() % COLLABORATOR_COLORS.length)];
+
+        redisTemplate.opsForHash().put(key, actorEmail, assignColor);
     }
 
     @Override
     public void removeCollaboratorFromNote(UUID noteId, String actorEmail) {
         String key = "note-collaborators:" + noteId;
-        redisTemplate.opsForSet().remove(key, actorEmail);
+        redisTemplate.opsForHash().delete(key, actorEmail);
     }
 
     @Override
-    public List<String> getCollaborators(UUID noteId) {
+    public Map<Object, Object> getCollaborators(UUID noteId) {
         String key = "note-collaborators:" + noteId;
-        Set<String> members = redisTemplate.opsForSet().members(key);
-        return members != null ? new ArrayList<>(members) : Collections.emptyList();
+        return redisTemplate.opsForHash().entries(key);
+    }
+
+    @Override
+    public Boolean isCollaborator(String actorEmail) {
+        return null;
     }
 }

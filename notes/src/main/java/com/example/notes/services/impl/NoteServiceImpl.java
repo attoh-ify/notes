@@ -1,7 +1,9 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
+import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.note.CreateNotePayload;
+import com.example.notes.dto.note.CursorDto;
 import com.example.notes.dto.note.JoinNoteResponse;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.ot.Delta;
@@ -12,6 +14,7 @@ import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteMapper;
 import com.example.notes.notifier.CollaboratorCountNotifier;
+import com.example.notes.notifier.CursorNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.NoteService;
@@ -31,6 +34,9 @@ import java.util.UUID;
 public class NoteServiceImpl implements NoteService {
     @Autowired
     private CollaboratorCountNotifier collaboratorCountNotifier;
+
+    @Autowired
+    private CursorNotifier cursorNotifier;
 
     private final NoteRepository noteRepository;
     private final NoteMapper noteMapper;
@@ -124,10 +130,15 @@ public class NoteServiceImpl implements NoteService {
 
         redisService.addCollaboratorToNote(noteId, actorEmail);
 
-        List<String> collaborators = redisService.getCollaborators(noteId);
+        Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
         return new JoinNoteResponse(collaborators, noteVersion.getMasterDelta(), noteVersion.getRevision());
+    }
+
+    @Override
+    public void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail) {
+        cursorNotifier.notifyCursorChange(noteId, new CursorPayload(actorEmail, cursorDto.position()));
     }
 
     @Override

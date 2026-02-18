@@ -48,13 +48,17 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
 
             redisService.removeCollaboratorFromNote(noteId, userEmail);
             Note note = redisService.getNote(noteId);
-            List<String> collaborators = redisService.getCollaborators(noteId);
+            Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
-            if (note != null && !collaborators.isEmpty()) {
-                collaboratorCountNotifier.notifyCount(
-                        noteId,
-                        new CollaboratorsPayload(collaborators)
-                );
+            if (note != null) {
+                if (!collaborators.isEmpty()) {
+                    collaboratorCountNotifier.notifyCount(
+                            noteId,
+                            new CollaboratorsPayload(collaborators)
+                    );
+                } else {
+                    redisService.deleteNote(noteId);
+                }
             }
         }
     }

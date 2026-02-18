@@ -1,6 +1,7 @@
 package com.example.notes;
 
 import com.example.notes.notifier.CollaboratorCountNotifier;
+import com.example.notes.notifier.CursorNotifier;
 import com.example.notes.notifier.OperationRelayer;
 import jakarta.jms.Connection;
 import jakarta.jms.Destination;
@@ -124,5 +125,10 @@ public class NotesApplication implements CommandLineRunner {
     @Bean
     public CollaboratorCountNotifier getCollaboratorCountNotifier() {
         return new CollaboratorCountNotifier();
+    }
+
+    @Bean
+    public CursorNotifier getCursorNotifier() {
+        return new CursorNotifier();
     }
 }
