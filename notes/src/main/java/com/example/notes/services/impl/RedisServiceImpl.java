@@ -10,8 +10,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class RedisServiceImpl implements RedisService {
@@ -110,11 +109,7 @@ public class RedisServiceImpl implements RedisService {
     @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
         String key = "note-collaborators:" + noteId;
-        List<String> collaborators = getCollaborators(noteId);
-
-        if (!collaborators.contains(actorEmail)) {
-            redisTemplate.opsForList().rightPush(key, actorEmail);
-        }
+        redisTemplate.opsForSet().add(key, actorEmail);
     }
 
     @Override
@@ -126,6 +121,7 @@ public class RedisServiceImpl implements RedisService {
     @Override
     public List<String> getCollaborators(UUID noteId) {
         String key = "note-collaborators:" + noteId;
-        return redisTemplate.opsForList().range(key, 0, -1);
+        Set<String> members = redisTemplate.opsForSet().members(key);
+        return members != null ? new ArrayList<>(members) : Collections.emptyList();
     }
 }

@@ -420,10 +420,24 @@ public class Delta {
 
     private static Op deepCopyOp(Op op) {
         Op copy = new Op();
-        copy.setInsert(op.getInsert()); // strings are immutable; maps should be deep-copied in real use
+
+        if (op.getInsert() instanceof Map) {
+            copy.setInsert(new HashMap<>((Map<?, ?>) op.getInsert()));
+        } else {
+            copy.setInsert(op.getInsert()); // strings are immutable; maps should be deep-copied in real use
+        }
+
         copy.setDelete(op.getDelete());
-        copy.setRetain(op.getRetain());
-        copy.setAttributes(op.getAttributes() != null ? new HashMap<>(op.getAttributes()) : null);
+
+        if (op.getRetain() instanceof Map) {
+            copy.setRetain(new HashMap<>((Map<?, ?>) op.getRetain()));
+        } else {
+            copy.setRetain(op.getRetain());
+        }
+
+        if (op.getAttributes() != null) {
+            copy.setAttributes(new HashMap<>(op.getAttributes()));
+        }
         return copy;
     }
 }

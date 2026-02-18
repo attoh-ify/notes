@@ -59,7 +59,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         note.getRevisionLog().add(newTextOperation);
 
         // update master delta
-        Delta updateMaster = noteVersion.getMasterDelta().compose(transformedDelta);
+        Delta updateMaster = noteVersion.getMasterDelta().compose(transformedDelta);  // TODO: handle null;
         noteVersion.setMasterDelta(updateMaster);
         // update current revision
         noteVersion.setRevision(serverRevision + 1);
