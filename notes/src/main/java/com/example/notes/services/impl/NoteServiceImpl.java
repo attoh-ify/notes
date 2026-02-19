@@ -120,6 +120,8 @@ public class NoteServiceImpl implements NoteService {
         redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
 
+        System.out.println("New note: " + newNote);
+
         return noteMapper.toDto(newNote, actorEmail);
     }
 

@@ -57,6 +57,11 @@ public class NotePolicyService {
     public NoteAccessRole resolveRole(String actorEmail, Note note) {
         NoteAccessRole accessRole = null;
 
+        if (note == null) {
+            log.warn("Note is required");
+            throw new BadRequestException("Note is required");
+        }
+
         if (note.getUser().getEmail().equals(actorEmail)) {
             return NoteAccessRole.OWNER;
         }
