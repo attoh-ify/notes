@@ -88,7 +88,6 @@ public class NoteServiceImpl implements NoteService {
     @Override
     public NoteDto createNote(String actorEmail, CreateNotePayload payload) {
         User user = userPolicyService.userExists(actorEmail);
-        System.out.println("User: " + user);
 
         Note newNote = new Note(
                 null,
@@ -100,8 +99,7 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 null
         );
-        noteRepository.save(newNote);
-        System.out.println("newNote: " + newNote);
+        newNote = noteRepository.save(newNote);
 
         NoteVersion firstNoteVersion = new NoteVersion(
                 null,
@@ -111,15 +109,14 @@ public class NoteServiceImpl implements NoteService {
                 user.getId(),
                 1
         );
-        noteVersionRepository.save(firstNoteVersion);
-        System.out.println("firstNoteVersion: " + firstNoteVersion.toString());
 
-        newNote.setCurrentNoteVersion(firstNoteVersion.getId());
-        newNote.setNoteVersions(new ArrayList<>());
         newNote.getNoteVersions().add(firstNoteVersion);
 
+        noteVersionRepository.save(firstNoteVersion);
+        
+        newNote.setCurrentNoteVersion(firstNoteVersion.getId());
+
         noteRepository.save(newNote);
-        System.out.println("New note: " + newNote.toString());
 
         redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
