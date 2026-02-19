@@ -61,11 +61,11 @@ public class Note {
         this.id = id;
         this.user = user;
         this.title = title;
-        this.revisionLog = revisionLog;
+        this.revisionLog = revisionLog != null ? revisionLog : new ArrayList<>();
         this.visibility = visibility;
-        this.noteAccesses = noteAccesses;
+        this.noteAccesses = noteAccesses != null ? noteAccesses : new ArrayList<>();
         this.currentNoteVersion = currentNoteVersion;
-        this.noteVersions = noteVersions;
+        this.noteVersions = noteVersions != null ? noteVersions : new ArrayList<>();
     }
 
     @PrePersist

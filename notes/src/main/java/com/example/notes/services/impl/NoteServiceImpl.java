@@ -95,9 +95,9 @@ public class NoteServiceImpl implements NoteService {
                 payload.title(),
                 new ArrayList<>(),
                 NoteVisibility.PUBLIC,
+                new ArrayList<>(),
                 null,
-                null,
-                null
+                new ArrayList<>()
         );
         newNote = noteRepository.save(newNote);
 
@@ -109,7 +109,7 @@ public class NoteServiceImpl implements NoteService {
                 user.getId(),
                 1
         );
-        
+
         firstNoteVersion = noteVersionRepository.save(firstNoteVersion);
 
         newNote.getNoteVersions().add(firstNoteVersion);
