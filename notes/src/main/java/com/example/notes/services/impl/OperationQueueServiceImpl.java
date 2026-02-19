@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.UUID;
 
 @Service
 public class OperationQueueServiceImpl implements OperationQueueService {
@@ -25,45 +26,58 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     }
 
     @Override
-    public synchronized void enqueue(OperationQueueInPayload message) {
-        Note note = redisService.getNote(message.getNoteId());
-        NoteVersion noteVersion = redisService.getNoteVersion(message.getNoteId());
+    public void enqueue(OperationQueueInPayload message) {
+        UUID noteId = message.getNoteId();
+        int retries = 0;
+        int maxRetries = 100;
 
-        int serverRevision = noteVersion.getRevision();
-        int clientRevision = message.getRevision();
-
-        Delta transformedDelta = message.getDelta();
-
-        if (clientRevision < serverRevision) {
-            for (int i = clientRevision; i < serverRevision; i++) {
-                TextOperation textOperation = note.getRevisionLog().get(i);
-
-                boolean priority = message.getFrom().compareTo(textOperation.getActorId()) > 0;
-                transformedDelta = textOperation.getDelta().transform(transformedDelta, !priority);
+        while (!redisService.acquireLock(noteId)) {
+            try {
+                Thread.sleep(20);
+                retries++;
+                if (retries > maxRetries) {
+                    throw new RuntimeException("Could not acquire lock for note: " + noteId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
             }
         }
 
-        TextOperation newTextOperation = new TextOperation(
-                transformedDelta,
-                message.getFrom(),
-                noteVersion.getRevision() + 1
-        );
+        try {
+            Note note = redisService.getNote(noteId);
+            NoteVersion noteVersion = redisService.getNoteVersion(noteId);
 
-        operationRelayer.relay(message.getNoteId(), newTextOperation);
+            int serverRevision = noteVersion.getRevision();
+            int clientRevision = message.getRevision();
+            Delta transformedDelta = message.getDelta();
 
+            if (clientRevision < serverRevision) {
+                for (int i = clientRevision; i < serverRevision; i++) {
+                    TextOperation historyOp = note.getRevisionLog().get(i);
+                    boolean priority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
+                    transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
+                }
+            }
 
-        // update revision log
-        if (note.getRevisionLog() == null) {
-            note.setRevisionLog(new ArrayList<>());
+            TextOperation newTextOperation = new TextOperation(
+                    transformedDelta,
+                    message.getFrom(),
+                    serverRevision + 1
+            );
+
+            if (note.getRevisionLog() == null) note.setRevisionLog(new ArrayList<>());
+            note.getRevisionLog().add(newTextOperation);
+
+            Delta updatedMaster = noteVersion.getMasterDelta().compose(transformedDelta);
+            noteVersion.setMasterDelta(updatedMaster);
+            noteVersion.setRevision(serverRevision + 1);
+
+            redisService.updateNote(note, noteVersion);
+            operationRelayer.relay(noteId, newTextOperation);
+
+        } finally {
+            redisService.releaseLock(noteId);
         }
-        note.getRevisionLog().add(newTextOperation);
-
-        // update master delta
-        Delta updateMaster = noteVersion.getMasterDelta().compose(transformedDelta);  // TODO: handle null;
-        noteVersion.setMasterDelta(updateMaster);
-        // update current revision
-        noteVersion.setRevision(serverRevision + 1);
-
-        redisService.updateNote(note, noteVersion);
     }
 }

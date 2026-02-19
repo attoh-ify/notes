@@ -19,4 +19,7 @@ public interface RedisService {
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);
     Map<Object, Object> getCollaborators(UUID noteId);
     Boolean isCollaborator(String actorEmail);
+
+    boolean acquireLock(UUID noteId);
+    void releaseLock(UUID noteId);
 }
