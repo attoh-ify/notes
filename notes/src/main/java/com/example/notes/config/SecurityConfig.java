@@ -45,7 +45,6 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/",
-                                "/index.html",
                                 "/css/**",
                                 "/js/**",
                                 "/api/relay/**",
