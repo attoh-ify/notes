@@ -14,6 +14,7 @@ public interface RedisService {
     void deleteNote(UUID noteId);
 
     NoteVersion getNoteVersion(UUID noteId);
+    int getInitialRevision();
 
     void addCollaboratorToNote(UUID noteId, String actorEmail);
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);

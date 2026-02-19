@@ -54,7 +54,19 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
             if (clientRevision < serverRevision) {
                 for (int i = clientRevision; i < serverRevision; i++) {
-                    TextOperation historyOp = note.getRevisionLog().get(i);
+                    int logIndex = i - redisService.getInitialRevision();
+
+                    if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
+                        // client is behind what we have in memory - can't transform
+                        throw new RuntimeException("Client revision too stale, revision log doesn't go back that far");
+                    }
+
+                    TextOperation historyOp = note.getRevisionLog().get(logIndex);
+
+                    if (historyOp.getActorId().equals(message.getFrom())) {
+                        continue;
+                    }
+
                     boolean priority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
                     transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
                 }

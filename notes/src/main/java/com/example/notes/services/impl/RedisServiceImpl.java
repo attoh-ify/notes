@@ -15,6 +15,7 @@ import java.util.*;
 
 @Service
 public class RedisServiceImpl implements RedisService {
+    private int initialRevision;
     private static final Logger log =
             LoggerFactory.getLogger(RedisServiceImpl.class);
 
@@ -53,6 +54,7 @@ public class RedisServiceImpl implements RedisService {
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = getNoteVersionKey(note.getId());
+        initialRevision = noteVersion.getRevision();
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
@@ -120,6 +122,11 @@ public class RedisServiceImpl implements RedisService {
         } catch (Exception e) {
             throw new RuntimeException("Error parsing NoteVersion", e);
         }
+    }
+
+    @Override
+    public int getInitialRevision() {
+        return initialRevision;
     }
 
     @Override
