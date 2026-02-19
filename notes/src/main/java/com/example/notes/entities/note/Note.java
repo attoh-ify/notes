@@ -47,7 +47,7 @@ public class Note {
     private UUID currentNoteVersion;
 
     @OneToMany(mappedBy = "note", cascade = {CascadeType.REMOVE, CascadeType.PERSIST}, fetch = FetchType.LAZY)
-    private List<NoteVersion> noteVersions;
+    private List<NoteVersion> noteVersions = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

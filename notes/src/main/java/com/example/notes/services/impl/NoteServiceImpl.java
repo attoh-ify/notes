@@ -109,11 +109,10 @@ public class NoteServiceImpl implements NoteService {
                 user.getId(),
                 1
         );
+        
+        firstNoteVersion = noteVersionRepository.save(firstNoteVersion);
 
         newNote.getNoteVersions().add(firstNoteVersion);
-
-        noteVersionRepository.save(firstNoteVersion);
-        
         newNote.setCurrentNoteVersion(firstNoteVersion.getId());
 
         noteRepository.save(newNote);
