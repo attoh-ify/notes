@@ -41,7 +41,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void initializeNote(String actorEmail, UUID noteId) {
-        String noteKey = "note:" + noteId;
+        String noteKey = getNoteKey(noteId);
 
         if (redisTemplate.hasKey(noteKey)) return;
 
@@ -51,7 +51,7 @@ public class RedisServiceImpl implements RedisService {
         note.setNoteAccesses(null);
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
-        String noteVersionKey = "note-version:" + note.getId();
+        String noteVersionKey = getNoteVersionKey(note.getId());
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
@@ -67,8 +67,8 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void updateNote(Note note, NoteVersion noteVersion) {
-        String noteKey = "note:" + note.getId();
-        String noteVersionKey = "note-version:" + note.getId();
+        String noteKey = getNoteVersionKey(note.getId());
+        String noteVersionKey = getNoteVersionKey(note.getId());
 
         if (redisTemplate.opsForValue().get(noteKey) == null) return;
 
@@ -86,8 +86,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public Note getNote(UUID noteId) {
-        System.out.println(8);
-        String key = "note:" + noteId;
+        String key = getNoteKey(noteId);
         String jsonNote = redisTemplate.opsForValue().get(key);
 
         if (jsonNote == null) return null;
@@ -101,16 +100,16 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void deleteNote(UUID noteId) {
-        String noteKey = "note:" + noteId;
-        String noteVersionKey = "note-version:" + noteId;
-        String noteCollaboratorKey = "note-collaborators:" + noteId;
+        String noteKey = getNoteKey(noteId);
+        String noteVersionKey = getNoteVersionKey(noteId);
+        String noteCollaboratorKey = getNoteCollaboratorsKey(noteId);
 
         redisTemplate.delete(List.of(noteKey, noteVersionKey, noteCollaboratorKey));
     }
 
     @Override
     public NoteVersion getNoteVersion(UUID noteId) {
-        String key = "note-version:" + noteId;
+        String key = getNoteVersionKey(noteId);
         String jsonNoteVersion = redisTemplate.opsForValue().get(key);
 
         if (jsonNoteVersion == null) return null;
@@ -124,30 +123,46 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
-        String key = "note-collaborators:" + noteId;
+        String key = getNoteCollaboratorsKey(noteId);
 
         Object existingColor = redisTemplate.opsForHash().get(key, actorEmail);
         if (existingColor != null) return;
 
-        String assignColor = COLLABORATOR_COLORS[Math.abs(actorEmail.hashCode() % COLLABORATOR_COLORS.length)];
+        long currentSize = redisTemplate.opsForHash().size(key);
+
+        int index = (int) currentSize % COLLABORATOR_COLORS.length;
+
+        String assignColor = COLLABORATOR_COLORS[index];
 
         redisTemplate.opsForHash().put(key, actorEmail, assignColor);
     }
 
     @Override
     public void removeCollaboratorFromNote(UUID noteId, String actorEmail) {
-        String key = "note-collaborators:" + noteId;
+        String key = getNoteCollaboratorsKey(noteId);
         redisTemplate.opsForHash().delete(key, actorEmail);
     }
 
     @Override
     public Map<Object, Object> getCollaborators(UUID noteId) {
-        String key = "note-collaborators:" + noteId;
+        String key = getNoteCollaboratorsKey(noteId);
         return redisTemplate.opsForHash().entries(key);
     }
 
     @Override
     public Boolean isCollaborator(String actorEmail) {
         return null;
+    }
+
+    private String getNoteKey(UUID noteId) {
+        return "note:" + noteId;
+    }
+
+    private String getNoteVersionKey(UUID noteId) {
+        return "note-version:" + noteId;
+    }
+
+    private String getNoteCollaboratorsKey(UUID noteId) {
+        return "note-collaborators:" + noteId;
     }
 }
