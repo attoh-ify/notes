@@ -100,8 +100,8 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 null
         );
-        System.out.println("newNote: " + newNote);
         noteRepository.save(newNote);
+        System.out.println("newNote: " + newNote);
 
         NoteVersion firstNoteVersion = new NoteVersion(
                 null,
@@ -111,8 +111,8 @@ public class NoteServiceImpl implements NoteService {
                 user.getId(),
                 1
         );
-        System.out.println("firstNoteVersion: " + firstNoteVersion);
         noteVersionRepository.save(firstNoteVersion);
+        System.out.println("firstNoteVersion: " + firstNoteVersion);
 
         newNote.setCurrentNoteVersion(firstNoteVersion.getId());
         newNote.setNoteVersions(new ArrayList<>());
