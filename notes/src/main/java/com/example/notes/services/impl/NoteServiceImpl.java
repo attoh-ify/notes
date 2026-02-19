@@ -112,14 +112,14 @@ public class NoteServiceImpl implements NoteService {
                 1
         );
         noteVersionRepository.save(firstNoteVersion);
-        System.out.println("firstNoteVersion: " + firstNoteVersion);
+        System.out.println("firstNoteVersion: " + firstNoteVersion.toString());
 
         newNote.setCurrentNoteVersion(firstNoteVersion.getId());
         newNote.setNoteVersions(new ArrayList<>());
         newNote.getNoteVersions().add(firstNoteVersion);
 
         noteRepository.save(newNote);
-        System.out.println("New note: " + newNote);
+        System.out.println("New note: " + newNote.toString());
 
         redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
