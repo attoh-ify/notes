@@ -4,9 +4,6 @@ import java.util.*;
 import java.util.function.*;
 
 public class Delta {
-
-    // --- Embed handler registry ---
-
     public interface EmbedHandler {
         Object compose(Object a, Object b, boolean keepNull);
         Object invert(Object a, Object b);
@@ -32,13 +29,11 @@ public class Delta {
     // --- Embed type extraction ---
 
     private static Object[] getEmbedTypeAndData(Object a, Object b) {
-        if (!(a instanceof Map))
+        if (!(a instanceof Map<?, ?> aMap))
             throw new IllegalArgumentException("cannot retain a " + (a == null ? "null" : a.getClass()));
-        if (!(b instanceof Map))
+        if (!(b instanceof Map<?, ?> bMap))
             throw new IllegalArgumentException("cannot retain a " + (b == null ? "null" : b.getClass()));
 
-        Map<?, ?> aMap = (Map<?, ?>) a;
-        Map<?, ?> bMap = (Map<?, ?>) b;
         String embedType = (String) aMap.keySet().iterator().next();
         if (embedType == null || !embedType.equals(bMap.keySet().iterator().next())) {
             throw new IllegalArgumentException(
@@ -48,7 +43,6 @@ public class Delta {
     }
 
     // --- Fields ---
-
     public List<Op> ops;
 
     public Delta() {
@@ -60,7 +54,6 @@ public class Delta {
     }
 
     // --- Mutation helpers ---
-
     public Delta insert(Object arg, Map<String, Object> attributes) {
         if (arg instanceof String && ((String) arg).isEmpty()) return this;
         Op newOp = new Op();

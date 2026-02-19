@@ -39,7 +39,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 TextOperation textOperation = note.getRevisionLog().get(i);
 
                 boolean priority = message.getFrom().compareTo(textOperation.getActorId()) > 0;
-                transformedDelta = transformedDelta.transform(textOperation.getDelta(), priority);
+                transformedDelta = textOperation.getDelta().transform(transformedDelta, !priority);
             }
         }
 
