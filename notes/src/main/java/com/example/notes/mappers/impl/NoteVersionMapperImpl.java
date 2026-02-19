@@ -12,7 +12,7 @@ public class NoteVersionMapperImpl implements NoteVersionMapper {
         return new NoteVersion(
                 noteVersionDto.id(),
                 null,
-                noteVersionDto.content(),
+                noteVersionDto.masterDelta(),
                 noteVersionDto.revision(),
                 noteVersionDto.createdBy(),
                 noteVersionDto.versionNumber()
@@ -23,7 +23,7 @@ public class NoteVersionMapperImpl implements NoteVersionMapper {
     public NoteVersionDto toDto(NoteVersion noteVersion) {
         return new NoteVersionDto(
                 noteVersion.getId(),
-                noteVersion.getContent(),
+                noteVersion.getMasterDelta(),
                 noteVersion.getRevision(),
                 noteVersion.getCreatedBy(),
                 noteVersion.getVersionNumber(),

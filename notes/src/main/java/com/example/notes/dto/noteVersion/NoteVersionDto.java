@@ -1,5 +1,6 @@
 package com.example.notes.dto.noteVersion;
 
+import com.example.notes.dto.ot.Delta;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
@@ -14,9 +15,9 @@ public record NoteVersionDto(
         UUID id,
 
         @Schema(
-                description = "Content of the note for this version"
+                description = "Quill Delta for the note for this version"
         )
-        String content,
+        Delta masterDelta,
 
         @Schema(
                 description = ""

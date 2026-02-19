@@ -8,31 +8,28 @@ import java.util.UUID;
 @Setter
 @Getter
 public class TextOperation {
-    private OperationNameEnum opName;
-    private String operand;
-    private int position;
+    private Delta delta;
     private UUID actorId;
+    private int revision;
 
     public TextOperation() {}
 
     public TextOperation(
-            OperationNameEnum opName,
-            String operand,
-            int position,
-            UUID actorId
+            Delta delta,
+            UUID actorId,
+            int revision
     ) {
-        this.opName = opName;
-        this.operand = operand;
-        this.position = position;
+        this.delta = delta;
         this.actorId = actorId;
+        this.revision = revision;
     }
 
     @Override
     public String toString() {
         return "TextOperation{" +
-                "opName='" + opName + '\'' +
-                ", operand='" + operand + '\'' +
-                ", position=" + position +
+                "delta='" + delta + '\'' +
+                ", actorId='" + actorId + '\'' +
+                ", revision=" + revision +
                 '}';
     }
 }
