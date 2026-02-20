@@ -54,8 +54,9 @@ public class RedisServiceImpl implements RedisService {
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = getNoteVersionKey(note.getId());
+
         String key = getInitialRevisionKey(noteId);
-        redisTemplate.opsForValue().set(key, String.valueOf(noteVersion));
+        redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
