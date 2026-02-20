@@ -54,7 +54,8 @@ public class RedisServiceImpl implements RedisService {
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = getNoteVersionKey(note.getId());
-        initialRevision = noteVersion.getRevision();
+        String key = getInitialRevisionKey(noteId);
+        redisTemplate.opsForValue().set(key, String.valueOf(noteVersion));
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
@@ -125,8 +126,10 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public int getInitialRevision() {
-        return initialRevision;
+    public int getInitialRevision(UUID noteId) {
+        String key = getInitialRevisionKey(noteId);
+        String val = redisTemplate.opsForValue().get(key);
+        return val != null ? Integer.parseInt(val) : 0;
     }
 
     @Override
@@ -174,6 +177,10 @@ public class RedisServiceImpl implements RedisService {
     public void releaseLock(UUID noteId) {
         String lockKey = getNoteLockKey(noteId);
         redisTemplate.delete(lockKey);
+    }
+
+    private String getInitialRevisionKey(UUID noteId) {
+        return "note-initial-revision:" + noteId;
     }
 
     private String getNoteLockKey(UUID noteId) {

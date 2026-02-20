@@ -54,7 +54,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
             if (clientRevision < serverRevision) {
                 for (int i = clientRevision; i < serverRevision; i++) {
-                    int logIndex = i - redisService.getInitialRevision();
+                    int logIndex = i - redisService.getInitialRevision(noteId);
 
                     if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
                         // client is behind what we have in memory - can't transform
