@@ -140,11 +140,7 @@ public class RedisServiceImpl implements RedisService {
         Object existingColor = redisTemplate.opsForHash().get(key, actorEmail);
         if (existingColor != null) return;
 
-        long currentSize = redisTemplate.opsForHash().size(key);
-
-        int index = (int) currentSize % COLLABORATOR_COLORS.length;
-
-        String assignColor = COLLABORATOR_COLORS[index];
+        String assignColor = COLLABORATOR_COLORS[Math.abs(actorEmail.hashCode() % COLLABORATOR_COLORS.length)];
 
         redisTemplate.opsForHash().put(key, actorEmail, assignColor);
     }
