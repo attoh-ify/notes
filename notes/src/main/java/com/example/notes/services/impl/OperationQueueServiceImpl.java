@@ -29,7 +29,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     public void enqueue(OperationQueueInPayload message) {
         UUID noteId = message.getNoteId();
         int retries = 0;
-        int maxRetries = 100;
+        int maxRetries = 50;
 
         while (!redisService.acquireLock(noteId)) {
             try {
@@ -54,14 +54,14 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
             if (clientRevision < serverRevision) {
                 for (int i = clientRevision; i < serverRevision; i++) {
-                    int logIndex = i - redisService.getInitialRevision(noteId);
+//                    int logIndex = i - redisService.getInitialRevision(noteId);
+//
+//                    if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
+//                        // client is behind what we have in memory - can't transform
+//                        throw new RuntimeException("Client revision too stale, revision log doesn't go back that far");
+//                    }
 
-                    if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
-                        // client is behind what we have in memory - can't transform
-                        throw new RuntimeException("Client revision too stale, revision log doesn't go back that far");
-                    }
-
-                    TextOperation historyOp = note.getRevisionLog().get(logIndex);
+                    TextOperation historyOp = note.getRevisionLog().get(i);
 
                     if (historyOp.getActorId().equals(message.getFrom())) {
                         continue;

@@ -56,12 +56,12 @@ public class RedisServiceImpl implements RedisService {
         String noteVersionKey = getNoteVersionKey(note.getId());
 
         String key = getInitialRevisionKey(noteId);
-        redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
             String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
 
+            redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
         } catch (JsonProcessingException e) {
@@ -170,7 +170,7 @@ public class RedisServiceImpl implements RedisService {
     public boolean acquireLock(UUID noteId) {
         String lockKey = getNoteLockKey(noteId);
         Boolean acquired = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(2));
+                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(1));
         return acquired != null && acquired;
     }
 
