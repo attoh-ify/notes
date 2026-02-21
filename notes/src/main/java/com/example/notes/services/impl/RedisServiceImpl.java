@@ -24,15 +24,57 @@ public class RedisServiceImpl implements RedisService {
     private final NotePolicyService notePolicyService;
 
     private static final String[] COLLABORATOR_COLORS = {
-            "#4285F4", // Google Blue
-            "#F4B400", // Google Yellow
-            "#0F9D58", // Google Green
-            "#9C27B0", // Deep Purple
-            "#FF7043", // Deep Orange
-            "#00BCD4", // Cyan
-            "#795548", // Brown
-            "#607D8B", // Blue Grey
-            "#E91E63"  // Pink
+            "#1F3A93",
+            "#D32F2F",
+            "#00796B",
+            "#F57C00",
+            "#512DA8",
+            "#C2185B",
+            "#303F9F",
+            "#388E3C",
+            "#FBC02D",
+            "#455A64",
+            "#E64A19",
+            "#5D4037",
+            "#1976D2",
+            "#7B1FA2",
+            "#0097A7",
+            "#AFB42B",
+            "#6A1B9A",
+            "#C62828",
+            "#00838F",
+            "#AD1457",
+            "#283593",
+            "#2E7D32",
+            "#EF6C00",
+            "#4A148C",
+            "#00695C",
+            "#8E24AA",
+            "#B71C1C",
+            "#1565C0",
+            "#1B5E20",
+            "#FF8F00",
+            "#880E4F",
+            "#0D47A1",
+            "#004D40",
+            "#6D4C41",
+            "#37474F",
+            "#E65100",
+            "#311B92",
+            "#827717",
+            "#01579B",
+            "#4E342E",
+            "#1A237E",
+            "#33691E",
+            "#BF360C",
+            "#3E2723",
+            "#263238",
+            "#F9A825",
+            "#8D6E63",
+            "#9E9D24",
+            "#0288D1",
+            "#D84315"
+
     };
 
     public RedisServiceImpl(StringRedisTemplate redisTemplate, ObjectMapper objectMapper, NotePolicyService notePolicyService) {
