@@ -1,13 +1,16 @@
 package com.example.notes.controllers;
 
+import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.CursorDto;
 import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
 import com.example.notes.services.NoteService;
+import com.example.notes.services.OperationQueueService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,9 +27,11 @@ import java.util.UUID;
 )
 public class NoteController {
     private final NoteService noteService;
+    private final OperationQueueService operationQueue;
 
-    public NoteController(NoteService noteService) {
+    public NoteController(NoteService noteService, OperationQueueService operationQueue) {
         this.noteService = noteService;
+        this.operationQueue = operationQueue;
     }
 
     @PostMapping
@@ -57,6 +62,18 @@ public class NoteController {
         return new ResponseDto(
                 true, "Ok", null
         );
+    }
+
+    @PostMapping("/{noteId}/enqueue")
+    public ResponseDto enqueue(@PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
+        operationQueue.enqueue(new OperationQueueInPayload(
+                noteId,
+                operation.getRevision(),
+                operation.getActorId(),
+                operation.getDelta()
+        ));
+
+        return new ResponseDto("ok");
     }
 
     @PostMapping("/{noteId}/save")
