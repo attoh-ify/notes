@@ -96,7 +96,7 @@ public class DeltaIterator {
     }
 
     public OpType peekType() {
-        if (!hasNext()) return OpType.NONE;
+        if (!hasNext()) return OpType.RETAIN;
         Op op = ops.get(index);
         if (op.isInsert()) return OpType.INSERT;
         if (op.isDelete()) return OpType.DELETE;
