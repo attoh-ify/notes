@@ -169,6 +169,13 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
+    public int getInitialRevision(UUID noteId) {
+        String key = getInitialRevisionKey(noteId);
+        String val = redisTemplate.opsForValue().get(key);
+        return val != null ? Integer.parseInt(val) : 0;
+    }
+
+    @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
         String key = getNoteCollaboratorsKey(noteId);
 
