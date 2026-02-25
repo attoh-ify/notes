@@ -29,7 +29,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     public void enqueue(OperationQueueInPayload message) {
         UUID noteId = message.getNoteId();
         int retries = 0;
-        int maxRetries = 50;
+        int maxRetries = 100;
 
         while (!redisService.acquireLock(noteId)) {
             try {

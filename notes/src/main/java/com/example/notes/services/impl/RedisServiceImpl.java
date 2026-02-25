@@ -201,7 +201,7 @@ public class RedisServiceImpl implements RedisService {
     public boolean acquireLock(UUID noteId) {
         String lockKey = getNoteLockKey(noteId);
         Boolean acquired = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(1));
+                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(2));
         return acquired != null && acquired;
     }
 
