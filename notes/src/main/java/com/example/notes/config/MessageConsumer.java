@@ -18,7 +18,7 @@ public class MessageConsumer {
         this.operationQueueService = operationQueueService;
     }
 
-    @JmsListener(destination = "note-operations", concurrency = "5-20")
+    @JmsListener(destination = "note-operations", concurrency = "1")
     public void receiveMessage(OperationQueueInPayload payload) {
         operationQueueService.enqueue(payload);
     }

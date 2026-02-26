@@ -33,12 +33,12 @@ public class JMSConfig {
         DefaultJmsListenerContainerFactory factory = new DefaultJmsListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setPubSubDomain(false);
-        factory.setConcurrency("5-20");
+        factory.setConcurrency("1");
         return factory;
     }
 
     @Bean
-    public JmsTemplate jmsTemplate(ActiveMQConnectionFactory connectionFactory) {
+    public JmsTemplate jmsTemplate(ConnectionFactory connectionFactory) {
         return new JmsTemplate(connectionFactory);
     }
 }
