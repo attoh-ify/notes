@@ -433,4 +433,11 @@ public class Delta {
         }
         return copy;
     }
+
+    @Override
+    public String toString() {
+        return "Delta{" +
+                "ops=" + ops +
+                '}';
+    }
 }
