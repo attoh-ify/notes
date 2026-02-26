@@ -36,4 +36,14 @@ public class Op {
         if (insert != null) return 1;
         return 0;
     }
+
+    @Override
+    public String toString() {
+        return "Op{" +
+                "insert=" + insert +
+                ", delete=" + delete +
+                ", retain=" + retain +
+                ", attributes=" + attributes +
+                '}';
+    }
 }
