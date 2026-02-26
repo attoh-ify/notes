@@ -62,7 +62,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
             log.info("serverRevision:  {}", serverRevision);
             log.info("initialRevision: {}", initialRevision);
             log.info("revisionLog size:{}", note.getRevisionLog() == null ? 0 : note.getRevisionLog().size());
-            log.info("incomingDelta:   {}", message.getDelta().ops);
+            log.info("incomingDelta:   {}", message.getDelta().ops.toString());
 
             Delta transformedDelta = message.getDelta();
 
@@ -90,11 +90,11 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                     log.info("  priority (incoming wins): {}", priority);
 
                     transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
-                    log.info("  delta after transform: {}", transformedDelta.ops);
+                    log.info("  delta after transform: {}", transformedDelta.ops.toString());
                 }
             }
 
-            log.info("finalDelta: {}", transformedDelta.ops);
+            log.info("finalDelta: {}", transformedDelta.ops.toString());
             TextOperation newTextOperation = new TextOperation(
                     transformedDelta,
                     message.getFrom(),
@@ -109,7 +109,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
             noteVersion.setRevision(serverRevision + 1);
 
             log.info("newRevision: {}", serverRevision + 1);
-            log.info("masterDelta after compose: {}", updatedMaster.ops);
+            log.info("masterDelta after compose: {}", updatedMaster.ops.toString());
 
             redisService.updateNote(note, noteVersion);
             operationRelayer.relay(noteId, newTextOperation);
