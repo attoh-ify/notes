@@ -10,12 +10,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.*;
 
 @Service
 public class RedisServiceImpl implements RedisService {
-    private int initialRevision;
     private static final Logger log =
             LoggerFactory.getLogger(RedisServiceImpl.class);
 
@@ -97,13 +95,10 @@ public class RedisServiceImpl implements RedisService {
 
         String noteVersionKey = getNoteVersionKey(note.getId());
 
-        String key = getInitialRevisionKey(noteId);
-
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
             String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
 
-            redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
         } catch (JsonProcessingException e) {
@@ -169,13 +164,6 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public int getInitialRevision(UUID noteId) {
-        String key = getInitialRevisionKey(noteId);
-        String val = redisTemplate.opsForValue().get(key);
-        return val != null ? Integer.parseInt(val) : 0;
-    }
-
-    @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
         String key = getNoteCollaboratorsKey(noteId);
 
@@ -197,29 +185,6 @@ public class RedisServiceImpl implements RedisService {
     public Map<Object, Object> getCollaborators(UUID noteId) {
         String key = getNoteCollaboratorsKey(noteId);
         return redisTemplate.opsForHash().entries(key);
-    }
-
-    @Override
-    public Boolean isCollaborator(String actorEmail) {
-        return null;
-    }
-
-    @Override
-    public boolean acquireLock(UUID noteId) {
-        String lockKey = getNoteLockKey(noteId);
-        Boolean acquired = redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "locked", Duration.ofSeconds(2));
-        return acquired != null && acquired;
-    }
-
-    @Override
-    public void releaseLock(UUID noteId) {
-        String lockKey = getNoteLockKey(noteId);
-        redisTemplate.delete(lockKey);
-    }
-
-    private String getInitialRevisionKey(UUID noteId) {
-        return "note-initial-revision:" + noteId;
     }
 
     private String getNoteLockKey(UUID noteId) {

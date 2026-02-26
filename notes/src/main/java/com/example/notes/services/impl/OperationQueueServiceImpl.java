@@ -32,90 +32,59 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     @Override
     public void enqueue(OperationQueueInPayload message) {
         UUID noteId = message.getNoteId();
-        int retries = 0;
-        int maxRetries = 100;
 
-        while (!redisService.acquireLock(noteId)) {
-            try {
-                Thread.sleep(20);
-                retries++;
-                if (retries > maxRetries) {
-                    throw new RuntimeException("Could not acquire lock for note: " + noteId);
+        Note note = redisService.getNote(noteId);
+        NoteVersion noteVersion = redisService.getNoteVersion(noteId);
+
+        int serverRevision = noteVersion.getRevision();
+        int clientRevision = message.getRevision();
+
+        log.info("=== ENQUEUE ===");
+        log.info("actor:           {}", message.getFrom());
+        log.info("clientRevision:  {}", clientRevision);
+        log.info("serverRevision:  {}", serverRevision);
+        log.info("revisionLog size:{}", note.getRevisionLog() == null ? 0 : note.getRevisionLog().size());
+        log.info("incomingDelta:   {}", message.getDelta().toString());
+
+        Delta transformedDelta = message.getDelta();
+
+        if (clientRevision < serverRevision) {
+            for (int i = clientRevision; i < serverRevision; i++) {
+                TextOperation historyOp = note.getRevisionLog().get(i);
+                log.info("  historyOp actor: {}", historyOp.getActorId());
+                log.info("  historyOp delta: {}", historyOp.getDelta().ops);
+
+                if (historyOp.getActorId().equals(message.getFrom())) {
+                    log.info("  same actor, skipping");
+                    continue;
                 }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
+
+                boolean priority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
+                log.info("  priority (incoming wins): {}", priority);
+
+                transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
+                log.info("  delta after transform: {}", transformedDelta.toString());
             }
         }
 
-        try {
-            Note note = redisService.getNote(noteId);
-            NoteVersion noteVersion = redisService.getNoteVersion(noteId);
+        log.info("finalDelta: {}", transformedDelta.toString());
+        TextOperation newTextOperation = new TextOperation(
+                transformedDelta,
+                message.getFrom(),
+                serverRevision + 1
+        );
 
-            int initialRevision = redisService.getInitialRevision(noteId);
-            int serverRevision = noteVersion.getRevision();
-            int clientRevision = message.getRevision();
+        if (note.getRevisionLog() == null) note.setRevisionLog(new ArrayList<>());
+        note.getRevisionLog().add(newTextOperation);
 
-            log.info("=== ENQUEUE ===");
-            log.info("actor:           {}", message.getFrom());
-            log.info("clientRevision:  {}", clientRevision);
-            log.info("serverRevision:  {}", serverRevision);
-            log.info("initialRevision: {}", initialRevision);
-            log.info("revisionLog size:{}", note.getRevisionLog() == null ? 0 : note.getRevisionLog().size());
-            log.info("incomingDelta:   {}", message.getDelta().toString());
+        Delta updatedMaster = noteVersion.getMasterDelta().compose(transformedDelta);
+        noteVersion.setMasterDelta(updatedMaster);
+        noteVersion.setRevision(serverRevision + 1);
 
-            Delta transformedDelta = message.getDelta();
+        log.info("newRevision: {}", serverRevision + 1);
+        log.info("masterDelta after compose: {}", updatedMaster.toString());
 
-            if (clientRevision < serverRevision) {
-                for (int i = clientRevision; i < serverRevision; i++) {
-                    int logIndex = i - initialRevision;
-
-                    log.info("  transforming past logIndex={} (revision {})", logIndex, i);
-
-                    if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
-                        log.warn("  logIndex {} out of bounds, skipping", logIndex);
-                        continue;
-                    }
-
-                    TextOperation historyOp = note.getRevisionLog().get(logIndex);
-                    log.info("  historyOp actor: {}", historyOp.getActorId());
-                    log.info("  historyOp delta: {}", historyOp.getDelta().ops);
-
-                    if (historyOp.getActorId().equals(message.getFrom())) {
-                        log.info("  same actor, skipping");
-                        continue;
-                    }
-
-                    boolean priority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
-                    log.info("  priority (incoming wins): {}", priority);
-
-                    transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
-                    log.info("  delta after transform: {}", transformedDelta.toString());
-                }
-            }
-
-            log.info("finalDelta: {}", transformedDelta.toString());
-            TextOperation newTextOperation = new TextOperation(
-                    transformedDelta,
-                    message.getFrom(),
-                    serverRevision + 1
-            );
-
-            if (note.getRevisionLog() == null) note.setRevisionLog(new ArrayList<>());
-            note.getRevisionLog().add(newTextOperation);
-
-            Delta updatedMaster = noteVersion.getMasterDelta().compose(transformedDelta);
-            noteVersion.setMasterDelta(updatedMaster);
-            noteVersion.setRevision(serverRevision + 1);
-
-            log.info("newRevision: {}", serverRevision + 1);
-            log.info("masterDelta after compose: {}", updatedMaster.toString());
-
-            redisService.updateNote(note, noteVersion);
-            operationRelayer.relay(noteId, newTextOperation);
-
-        } finally {
-            redisService.releaseLock(noteId);
-        }
+        redisService.updateNote(note, noteVersion);
+        operationRelayer.relay(noteId, newTextOperation);
     }
 }

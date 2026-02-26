@@ -1,5 +1,6 @@
 package com.example.notes.controllers;
 
+import com.example.notes.config.MessageProducer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.CursorDto;
@@ -10,7 +11,6 @@ import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
 import com.example.notes.services.NoteService;
-import com.example.notes.services.OperationQueueService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -27,11 +27,11 @@ import java.util.UUID;
 )
 public class NoteController {
     private final NoteService noteService;
-    private final OperationQueueService operationQueue;
+    private final MessageProducer messageProducer;
 
-    public NoteController(NoteService noteService, OperationQueueService operationQueue) {
+    public NoteController(NoteService noteService, MessageProducer messageProducer) {
         this.noteService = noteService;
-        this.operationQueue = operationQueue;
+        this.messageProducer = messageProducer;
     }
 
     @PostMapping
@@ -66,12 +66,13 @@ public class NoteController {
 
     @PostMapping("/{noteId}/enqueue")
     public ResponseDto enqueue(@PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
-        operationQueue.enqueue(new OperationQueueInPayload(
+        OperationQueueInPayload payload = new OperationQueueInPayload(
                 noteId,
                 operation.getRevision(),
                 operation.getActorId(),
                 operation.getDelta()
-        ));
+        );
+        messageProducer.sendMessage(payload, noteId);
 
         return new ResponseDto("ok");
     }

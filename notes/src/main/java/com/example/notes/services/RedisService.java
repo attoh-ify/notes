@@ -14,13 +14,8 @@ public interface RedisService {
     void deleteNote(UUID noteId);
 
     NoteVersion getNoteVersion(UUID noteId);
-    int getInitialRevision(UUID noteId);
 
     void addCollaboratorToNote(UUID noteId, String actorEmail);
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);
     Map<Object, Object> getCollaborators(UUID noteId);
-    Boolean isCollaborator(String actorEmail);
-
-    boolean acquireLock(UUID noteId);
-    void releaseLock(UUID noteId);
 }
