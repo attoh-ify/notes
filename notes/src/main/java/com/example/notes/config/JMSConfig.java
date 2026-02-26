@@ -1,6 +1,7 @@
 package com.example.notes.config;
 
 import jakarta.jms.ConnectionFactory;
+import org.apache.qpid.jms.JmsConnectionFactory;
 import org.apache.activemq.ActiveMQConnectionFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -16,11 +17,15 @@ public class JMSConfig {
     private String brokerUrl;
 
     @Bean
-    public ActiveMQConnectionFactory activeMQConnectionFactory() {
-        ActiveMQConnectionFactory factory = new ActiveMQConnectionFactory();
-        factory.setBrokerURL(brokerUrl);
-        factory.setTrustAllPackages(true);
-        return factory;
+    public ConnectionFactory activeMQConnectionFactory() {
+        if (brokerUrl.startsWith("amqp")) {
+            return new JmsConnectionFactory(brokerUrl);
+        } else {
+            ActiveMQConnectionFactory factory = new ActiveMQConnectionFactory();
+            factory.setBrokerURL(brokerUrl);
+            factory.setTrustAllPackages(true);
+            return factory;
+        }
     }
 
     @Bean
