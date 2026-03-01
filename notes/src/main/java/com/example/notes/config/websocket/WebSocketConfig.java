@@ -27,7 +27,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/relay")
-                .setAllowedOrigins("http://localhost:3000", "https://notes-ui-production-5472.up.railway.app/")
+                .setAllowedOrigins("http://localhost:3000", "https://notes-ui-production-5472.up.railway.app")
                 .addInterceptors(new HandshakeInterceptorImpl())
                 .setHandshakeHandler(new HandshakeHandler())
                 .withSockJS();
