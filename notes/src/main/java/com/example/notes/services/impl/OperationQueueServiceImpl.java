@@ -67,10 +67,10 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                     continue;
                 }
 
-                boolean priority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
-                log.info("  priority (incoming wins): {}", priority);
+                boolean serverHasOpPriority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
+                log.info("  priority (server wins): {}", serverHasOpPriority);
 
-                transformedDelta = historyOp.getDelta().transform(transformedDelta, !priority);
+                transformedDelta = historyOp.getDelta().transform(transformedDelta, serverHasOpPriority);
                 log.info("  delta after transform: {}", transformedDelta.toString());
             }
         }
