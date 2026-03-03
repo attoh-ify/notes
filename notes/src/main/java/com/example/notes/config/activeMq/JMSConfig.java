@@ -1,4 +1,4 @@
-package com.example.notes.config;
+package com.example.notes.config.activeMq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.jms.ConnectionFactory;

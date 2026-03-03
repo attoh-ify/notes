@@ -1,4 +1,4 @@
-package com.example.notes.config;
+package com.example.notes.config.activeMq;
 
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import org.springframework.beans.factory.annotation.Autowired;

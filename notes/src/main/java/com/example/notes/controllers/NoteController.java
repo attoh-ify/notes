@@ -1,6 +1,6 @@
 package com.example.notes.controllers;
 
-import com.example.notes.config.MessageProducer;
+import com.example.notes.config.activeMq.MessageProducer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.CursorDto;
