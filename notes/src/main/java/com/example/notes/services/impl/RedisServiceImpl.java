@@ -94,11 +94,13 @@ public class RedisServiceImpl implements RedisService {
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
         String noteVersionKey = getNoteVersionKey(note.getId());
+        String key = getInitialRevisionKey(noteId);
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
             String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
 
+            redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
         } catch (JsonProcessingException e) {
@@ -145,8 +147,9 @@ public class RedisServiceImpl implements RedisService {
         String noteKey = getNoteKey(noteId);
         String noteVersionKey = getNoteVersionKey(noteId);
         String noteCollaboratorKey = getNoteCollaboratorsKey(noteId);
+        String noteInitialRevisionKey = getInitialRevisionKey(noteId);
 
-        redisTemplate.delete(List.of(noteKey, noteVersionKey, noteCollaboratorKey));
+        redisTemplate.delete(List.of(noteKey, noteVersionKey, noteCollaboratorKey, noteInitialRevisionKey));
     }
 
     @Override
@@ -187,6 +190,12 @@ public class RedisServiceImpl implements RedisService {
         return redisTemplate.opsForHash().entries(key);
     }
 
+    @Override
+    public int getInitialRevision(UUID noteId) {
+        String val = redisTemplate.opsForValue().get("note-initial-revision:" + noteId);
+        return val != null ? Integer.parseInt(val) : 0;
+    }
+
     private String getNoteLockKey(UUID noteId) {
         return "lock:note:" + noteId;
     }
@@ -201,5 +210,9 @@ public class RedisServiceImpl implements RedisService {
 
     private String getNoteCollaboratorsKey(UUID noteId) {
         return "note-collaborators:" + noteId;
+    }
+
+    private String getInitialRevisionKey(UUID noteId) {
+        return "note-initial-revision:" + noteId;
     }
 }

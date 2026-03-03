@@ -50,7 +50,15 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         if (clientRevision < serverRevision) {
             for (int i = clientRevision; i < serverRevision; i++) {
-                TextOperation historyOp = note.getRevisionLog().get(i);
+                int logIndex = i - redisService.getInitialRevision(noteId);
+
+                if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
+                    log.warn("logIndex {} out of bounds (size={}), skipping",
+                            logIndex, note.getRevisionLog().size());
+                    continue;
+                }
+
+                TextOperation historyOp = note.getRevisionLog().get(logIndex);
                 log.info("  historyOp actor: {}", historyOp.getActorId());
                 log.info("  historyOp delta: {}", historyOp.getDelta().ops);
 
