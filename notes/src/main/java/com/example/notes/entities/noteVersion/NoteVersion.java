@@ -37,8 +37,8 @@ public class NoteVersion {
     @Column(name = "revision", nullable = false)
     private int revision;
 
-    @Column(name = "created_by", nullable = false)
-    private UUID createdBy;
+    @Column(name = "comment", nullable = false)
+    private String comment;
 
     @Column(name = "version_number", nullable = false)
     private Integer versionNumber;
@@ -56,14 +56,14 @@ public class NoteVersion {
             Note note,
             Delta masterDelta,
             int revision,
-            UUID createdBy,
+            String comment,
             Integer versionNumber
     ) {
         this.id = id;
         this.note = note;
         this.masterDelta = masterDelta;
         this.revision = revision;
-        this.createdBy = createdBy;
+        this.comment = comment;
         this.versionNumber = versionNumber;
     }
 
@@ -85,7 +85,7 @@ public class NoteVersion {
                 ", note=" + note +
                 ", masterDelta=" + masterDelta +
                 ", revision=" + revision +
-                ", createdBy=" + createdBy +
+                ", comment=" + comment +
                 ", versionNumber=" + versionNumber +
                 ", createdAt=" + createdAt +
                 ", updatedAt=" + updatedAt +

@@ -1,5 +1,6 @@
 package com.example.notes.controllers;
 
+import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.user.UserPrincipal;
@@ -64,9 +65,9 @@ public class NoteVersionController {
             @PathVariable UUID noteId,
 
             @Parameter(description = "Object of the note version", required = true)
-            @RequestBody NoteVersionDto noteVersionDto
+            @RequestBody CreateNoteVersionPayload payload
     ) {
-        NoteVersionDto restored = noteVersionService.createVersion(currentUser.getEmail(), noteId, noteVersionDto);
+        NoteVersionDto restored = noteVersionService.createVersion(currentUser.getEmail(), noteId, payload);
         return new ResponseDto("Note restored to version", restored);
     }
 

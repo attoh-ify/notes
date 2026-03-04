@@ -25,10 +25,10 @@ public record NoteVersionDto(
         int revision,
 
         @Schema(
-                description = "Identifier of the user who created this version",
-                example = "3a6d8e27-4c2f-4b71-9e4a-91c9d2f5c611"
+                description = "Description to easily remember what version this is",
+                example = "Changed Introduction paragraph"
         )
-        UUID createdBy,
+        String comment,
 
         @Schema(
                 description = "Version number of the note, starting from 1",

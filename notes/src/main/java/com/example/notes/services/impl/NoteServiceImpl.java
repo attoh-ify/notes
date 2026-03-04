@@ -106,8 +106,8 @@ public class NoteServiceImpl implements NoteService {
                 newNote,
                 new Delta(),
                 0,
-                user.getId(),
-                1
+                "Note copy",
+                0
         );
 
         firstNoteVersion = noteVersionRepository.save(firstNoteVersion);
