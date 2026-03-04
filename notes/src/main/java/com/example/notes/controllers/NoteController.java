@@ -70,7 +70,8 @@ public class NoteController {
                 noteId,
                 operation.getRevision(),
                 operation.getActorId(),
-                operation.getDelta()
+                operation.getDelta(),
+                operation.getCreatedAt()
         );
         messageProducer.sendMessage(payload, noteId);
 

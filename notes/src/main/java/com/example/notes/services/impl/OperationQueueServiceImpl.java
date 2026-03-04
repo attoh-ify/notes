@@ -67,7 +67,8 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         TextOperation newTextOperation = new TextOperation(
                 transformedDelta,
                 message.getFrom(),
-                serverRevision + 1
+                serverRevision + 1,
+                message.getCreatedAt()
         );
 
         if (note.getRevisionLog() == null) note.setRevisionLog(new ArrayList<>());
