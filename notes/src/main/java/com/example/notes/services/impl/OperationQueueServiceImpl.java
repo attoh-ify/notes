@@ -39,13 +39,6 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         int serverRevision = noteVersion.getRevision();
         int clientRevision = message.getRevision();
 
-        log.info("=== ENQUEUE ===");
-        log.info("actor:           {}", message.getFrom());
-        log.info("clientRevision:  {}", clientRevision);
-        log.info("serverRevision:  {}", serverRevision);
-        log.info("revisionLog size:{}", note.getRevisionLog() == null ? 0 : note.getRevisionLog().size());
-        log.info("incomingDelta:   {}", message.getDelta().toString());
-
         Delta transformedDelta = message.getDelta();
 
         if (clientRevision < serverRevision) {
@@ -59,23 +52,18 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 }
 
                 TextOperation historyOp = note.getRevisionLog().get(logIndex);
-                log.info("  historyOp actor: {}", historyOp.getActorId());
-                log.info("  historyOp delta: {}", historyOp.getDelta().ops);
 
                 if (historyOp.getActorId().equals(message.getFrom())) {
-                    log.info("  same actor, skipping");
+                    log.info("Same actor, skipping");
                     continue;
                 }
 
                 boolean serverHasOpPriority = message.getFrom().compareTo(historyOp.getActorId()) > 0;
-                log.info("  priority (server wins): {}", serverHasOpPriority);
 
                 transformedDelta = historyOp.getDelta().transform(transformedDelta, serverHasOpPriority);
-                log.info("  delta after transform: {}", transformedDelta.toString());
             }
         }
 
-        log.info("finalDelta: {}", transformedDelta.toString());
         TextOperation newTextOperation = new TextOperation(
                 transformedDelta,
                 message.getFrom(),
@@ -88,9 +76,6 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         Delta updatedMaster = noteVersion.getMasterDelta().compose(transformedDelta);
         noteVersion.setMasterDelta(updatedMaster);
         noteVersion.setRevision(serverRevision + 1);
-
-        log.info("newRevision: {}", serverRevision + 1);
-        log.info("masterDelta after compose: {}", updatedMaster.toString());
 
         redisService.updateNote(note, noteVersion);
         operationRelayer.relay(noteId, newTextOperation);
