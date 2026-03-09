@@ -2,11 +2,14 @@ package com.example.notes.services.impl;
 
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
+import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.CursorDto;
 import com.example.notes.dto.note.JoinNoteResponse;
 import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.noteVersion.NoteVersion;
@@ -15,6 +18,7 @@ import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteMapper;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.notifier.CursorNotifier;
+import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.NoteService;
@@ -34,6 +38,9 @@ import java.util.UUID;
 public class NoteServiceImpl implements NoteService {
     @Autowired
     private CollaboratorCountNotifier collaboratorCountNotifier;
+
+    @Autowired
+    private ReviewInProgressNotifier reviewInProgressNotifier;
 
     @Autowired
     private CursorNotifier cursorNotifier;
@@ -77,11 +84,25 @@ public class NoteServiceImpl implements NoteService {
         if (notePolicyService.resolveRole(actorEmail, note) == null) {
             if (!note.getVisibility().equals(NoteVisibility.PUBLIC)) {
                 log.warn("Note with id={} visibility is not public", noteId);
-                throw new BadRequestException("Note visibility is not public");
+                throw new BadRequestException("Note is not visible to the public");
             }
         }
 
         return noteMapper.toDto(note, actorEmail);
+    }
+
+    @Override
+    public List<TextOperation> fetchRevisionLog(String actorEmail, UUID noteId) {
+        Note note = notePolicyService.findNoteById(noteId);
+
+        if (notePolicyService.resolveRole(actorEmail, note) == null) {
+            if (!note.getVisibility().equals(NoteVisibility.PUBLIC)) {
+                log.warn("Note with id={} visibility is not public", noteId);
+                throw new BadRequestException("Note is not visible to the public");
+            }
+        }
+
+        return note.getRevisionLog();
     }
 
     @Transactional
@@ -96,7 +117,7 @@ public class NoteServiceImpl implements NoteService {
                 new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 new ArrayList<>(),
-                null,
+                0,
                 new ArrayList<>()
         );
         newNote = noteRepository.save(newNote);
@@ -110,13 +131,11 @@ public class NoteServiceImpl implements NoteService {
                 0
         );
 
-        firstNoteVersion = noteVersionRepository.save(firstNoteVersion);
+        noteVersionRepository.save(firstNoteVersion);
 
         newNote.getNoteVersions().add(firstNoteVersion);
-        newNote.setCurrentNoteVersion(firstNoteVersion.getId());
 
         noteRepository.save(newNote);
-
         redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
 
@@ -129,14 +148,20 @@ public class NoteServiceImpl implements NoteService {
     @Override
     public JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId) {
         redisService.initializeNote(actorEmail, noteId);
-        NoteVersion noteVersion = redisService.getNoteVersion(noteId);
+        NoteDto note = redisService.getNote(noteId);
+        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+
+        if (!actorEmail.equals(note.ownerEmail()) && redisService.isReviewInProgress(noteId, note.ownerEmail())) {
+            reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
+            return null;
+        }
 
         redisService.addCollaboratorToNote(noteId, actorEmail);
 
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
-        return new JoinNoteResponse(collaborators, noteVersion.getMasterDelta(), noteVersion.getRevision());
+        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision());
     }
 
     @Override
@@ -145,22 +170,36 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
+    public void reviewNote(String actorEmail, UUID noteId) {
+        notePolicyService.validateOwner(actorEmail,noteId);
+        redisService.setReviewInProgress(noteId, actorEmail, "true");
+        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
+    }
+
+    @Override
+    public void exitReviewNote(String actorEmail, UUID noteId) {
+        notePolicyService.validateOwner(actorEmail,noteId);
+        redisService.setReviewInProgress(noteId, actorEmail, "false");
+        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
+    }
+
+    @Override
     public void saveNote(String actorEmail, UUID noteId) {
         Note note = notePolicyService.validateEditor(actorEmail, noteId);
-        NoteVersion noteVersion = noteVersionRepository.findById(note.getCurrentNoteVersion())
+        NoteVersion noteVersion = noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
                 .orElseThrow(() -> {
-                    log.warn("Note version with id={} not found", note.getCurrentNoteVersion());
+                    log.warn("Note version with id={} not found", note.getCurrentNoteVersionNumber());
                     return new BadRequestException("Note version not found");
                 });
 
-        Note storedNote = redisService.getNote(noteId);
-        NoteVersion storedNoteVersion = redisService.getNoteVersion(noteId);
+        NoteDto storedNote = redisService.getNote(noteId);
+        NoteVersionDto storedNoteVersion = redisService.getNoteVersion(noteId);
 
-        noteVersion.setMasterDelta(storedNoteVersion.getMasterDelta());
-        noteVersion.setRevision(storedNoteVersion.getRevision());
+        noteVersion.setMasterDelta(storedNoteVersion.masterDelta());
+        noteVersion.setRevision(storedNoteVersion.revision());
         noteVersionRepository.save(noteVersion);
 
-        note.setRevisionLog(storedNote.getRevisionLog());
+        note.setRevisionLog(storedNote.revisionLog());
         noteRepository.save(note);
     }
 

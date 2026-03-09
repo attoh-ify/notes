@@ -13,16 +13,14 @@ import java.util.UUID;
 public class OperationQueueInPayload {
     private UUID noteId;
     private int revision;
-    private UUID from;
+    private String from;
     private Delta delta;
-    private LocalDateTime createdAt;
 
-    public  OperationQueueInPayload(UUID noteId, int revision, UUID from, Delta delta, LocalDateTime createdAt) {
+    public  OperationQueueInPayload(UUID noteId, int revision, String from, Delta delta) {
         this.noteId = noteId;
         this.revision = revision;
         this.from = from;
         this.delta = delta;
-        this.createdAt = createdAt;
     }
 
     public OperationQueueInPayload() {}
@@ -34,7 +32,6 @@ public class OperationQueueInPayload {
                 ", revision=" + revision +
                 ", from=" + from +
                 ", delta=" + delta +
-                ", createdAt=" + createdAt +
                 '}';
     }
 }

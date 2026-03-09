@@ -3,6 +3,7 @@ package com.example.notes;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.notifier.CursorNotifier;
 import com.example.notes.notifier.OperationRelayer;
+import com.example.notes.notifier.ReviewInProgressNotifier;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -26,5 +27,10 @@ public class NotesApplication {
     @Bean
     public CursorNotifier getCursorNotifier() {
         return new CursorNotifier();
+    }
+
+    @Bean
+    public ReviewInProgressNotifier getReviewInProgressNotifier() {
+        return new ReviewInProgressNotifier();
     }
 }

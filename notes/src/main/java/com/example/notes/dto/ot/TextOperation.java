@@ -9,31 +9,32 @@ import java.util.UUID;
 @Setter
 @Getter
 public class TextOperation {
+    private UUID opId;
     private Delta delta;
-    private UUID actorId;
+    private String actorEmail;
     private int revision;
+    private OpState state;
     private LocalDateTime createdAt;
 
     public TextOperation() {}
 
-    public TextOperation(
-            Delta delta,
-            UUID actorId,
-            int revision,
-            LocalDateTime createdAt
-    ) {
+    public TextOperation(Delta delta, String actorEmail, int revision, OpState state, LocalDateTime createdAt) {
+        this.opId = UUID.randomUUID();
         this.delta = delta;
-        this.actorId = actorId;
+        this.actorEmail = actorEmail;
         this.revision = revision;
+        this.state = state;
         this.createdAt = createdAt;
     }
 
     @Override
     public String toString() {
         return "TextOperation{" +
-                "delta=" + delta +
-                ", actorId=" + actorId +
+                "opId=" + opId +
+                ", delta=" + delta +
+                ", actorEmail='" + actorEmail + '\'' +
                 ", revision=" + revision +
+                ", state=" + state +
                 ", createdAt=" + createdAt +
                 '}';
     }

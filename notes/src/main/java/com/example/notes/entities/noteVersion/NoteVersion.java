@@ -18,6 +18,10 @@ import java.util.UUID;
         name = "note_versions",
         uniqueConstraints = @UniqueConstraint(
                 columnNames = {"note_id", "version_number"}
+        ),
+        indexes = @Index(
+                name = "idx_note_version_lookup",
+                columnList = "note_id, version_number"
         )
 )
 public class NoteVersion {

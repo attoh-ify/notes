@@ -1,18 +1,20 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.exceptions.BadRequestException;
-import com.example.notes.exceptions.NotFoundException;
 import com.example.notes.mappers.NoteVersionMapper;
+import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,9 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteVersionServiceImpl.class);
+
+    @Autowired
+    private ReviewInProgressNotifier reviewInProgressNotifier;
 
     public NoteVersionServiceImpl(NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService) {
         this.noteRepository = noteRepository;
@@ -47,10 +52,10 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     @Transactional(readOnly = true)
     @Override
-    public NoteVersionDto fetchVersion(String actorEmail, UUID noteId, UUID noteVersionId) {
-        return noteVersionMapper.toDto(noteVersionRepository.findByIdAndNote_Id(noteVersionId, noteId)
+    public NoteVersionDto fetchVersion(String actorEmail, UUID noteId, int noteVersionNumber) {
+        return noteVersionMapper.toDto(noteVersionRepository.findByNote_IdAndVersionNumber(noteId, noteVersionNumber)
                 .orElseThrow(() -> {
-                    log.warn("Note version with id={} not found", noteVersionId);
+                    log.warn("Note version with version number = {} not found", noteVersionNumber);
                     return new BadRequestException("Note version not found");
                 })
         );
@@ -58,13 +63,14 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     @Override
     public NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload) {
-        Note note = redisService.getNote(noteId);
-        NoteVersion noteVersion = redisService.getNoteVersion(noteId);
-
-        if (note == null || noteVersion == null) {
-            log.warn("Note not found for id={}", noteId);
-            throw new NotFoundException("Note for noteId not found");
-        }
+        Note note = notePolicyService.validateSuper(actorEmail, noteId);
+        NoteVersion noteVersion = noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
+                .orElseThrow(() -> {
+                    log.warn("Note version not found");
+                    return new BadRequestException(
+                            "Note version with this id does not exist."
+                    );
+                });
 
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
@@ -74,6 +80,9 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 payload.comment(),
                 noteVersionRepository.findMaxVersionByNoteId(noteId) + 1
         );
+
+        redisService.setReviewInProgress(noteId, actorEmail, "false");
+        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
 
         return noteVersionMapper.toDto(noteVersionRepository.save(newNoteVersion));
     }
@@ -95,7 +104,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
             throw new BadRequestException("Note and Note version conflicts");
         }
 
-        note.setCurrentNoteVersion(noteVersionId);
+        note.setCurrentNoteVersionNumber(noteVersion.getVersionNumber());
         noteRepository.save(note);
         return noteVersionMapper.toDto(noteVersionRepository.save(noteVersion));
     }

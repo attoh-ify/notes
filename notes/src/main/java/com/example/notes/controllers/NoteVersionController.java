@@ -41,7 +41,7 @@ public class NoteVersionController {
         return new ResponseDto("Note versions fetched", versions);
     }
 
-    @GetMapping("/{versionId}")
+    @GetMapping("/{versionNumber}")
     @Operation(summary = "Fetch a specific note version", description = "Retrieves a specific version of a note")
     public ResponseDto getVersion(
             @CurrentUser UserPrincipal currentUser,
@@ -49,10 +49,10 @@ public class NoteVersionController {
             @Parameter(description = "Unique identifier of the note", required = true)
             @PathVariable UUID noteId,
 
-            @Parameter(description = "Unique identifier of the note version", required = true)
-            @PathVariable UUID versionId
+            @Parameter(description = "Version number of the note version", required = true)
+            @PathVariable int versionNumber
     ) {
-        NoteVersionDto version = noteVersionService.fetchVersion(currentUser.getEmail(), noteId, versionId);
+        NoteVersionDto version = noteVersionService.fetchVersion(currentUser.getEmail(), noteId, versionNumber);
         return new ResponseDto("Note version fetched", version);
     }
 

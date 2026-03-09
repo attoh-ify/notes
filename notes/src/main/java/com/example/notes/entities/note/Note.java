@@ -43,8 +43,8 @@ public class Note {
     @OneToMany(mappedBy = "note", cascade = {CascadeType.REMOVE, CascadeType.PERSIST}, fetch = FetchType.LAZY)
     private List<NoteAccess> noteAccesses;
 
-    @Column(name = "current_note_version")
-    private UUID currentNoteVersion;
+    @Column(name = "current_note_version_number")
+    private int currentNoteVersionNumber;
 
     @OneToMany(mappedBy = "note", cascade = {CascadeType.REMOVE, CascadeType.PERSIST}, fetch = FetchType.LAZY)
     private List<NoteVersion> noteVersions = new ArrayList<>();
@@ -57,14 +57,14 @@ public class Note {
 
     public Note() {}
 
-    public Note(UUID id, User user, String title, List<TextOperation> revisionLog, NoteVisibility visibility,  List<NoteAccess> noteAccesses, UUID currentNoteVersion, List<NoteVersion> noteVersions) {
+    public Note(UUID id, User user, String title, List<TextOperation> revisionLog, NoteVisibility visibility,  List<NoteAccess> noteAccesses, int currentNoteVersionNumber, List<NoteVersion> noteVersions) {
         this.id = id;
         this.user = user;
         this.title = title;
         this.revisionLog = revisionLog != null ? revisionLog : new ArrayList<>();
         this.visibility = visibility;
         this.noteAccesses = noteAccesses != null ? noteAccesses : new ArrayList<>();
-        this.currentNoteVersion = currentNoteVersion;
+        this.currentNoteVersionNumber = currentNoteVersionNumber;
         this.noteVersions = noteVersions != null ? noteVersions : new ArrayList<>();
     }
 
@@ -87,7 +87,7 @@ public class Note {
                 ", title='" + title + '\'' +
                 ", visibility=" + visibility +
                 ", noteAccesses=" + noteAccesses +
-                ", currentNoteVersion=" + currentNoteVersion +
+                ", currentNoteVersionNumber=" + currentNoteVersionNumber +
                 ", noteVersions=" + noteVersions +
                 ", createdAt=" + createdAt +
                 ", updatedAt=" + updatedAt +

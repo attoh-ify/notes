@@ -4,6 +4,7 @@ import com.example.notes.config.activeMq.MessageProducer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.CreateNotePayload;
 import com.example.notes.dto.note.CursorDto;
+import com.example.notes.dto.note.JoinNoteResponse;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.dto.response.ResponseDto;
@@ -46,9 +47,10 @@ public class NoteController {
 
     @GetMapping("/{noteId}/join")
     public ResponseDto joinDoc(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) {
+        JoinNoteResponse response = noteService.joinNote(currentUser.getUserId(), currentUser.getEmail(), noteId);
         return new ResponseDto(
-                true, "User joined the note successfully",
-                noteService.joinNote(currentUser.getUserId(), currentUser.getEmail(), noteId)
+                true, response != null ? "User joined the note successfully" : "Note is currently under review",
+                response
         );
     }
 
@@ -69,12 +71,23 @@ public class NoteController {
         OperationQueueInPayload payload = new OperationQueueInPayload(
                 noteId,
                 operation.getRevision(),
-                operation.getActorId(),
-                operation.getDelta(),
-                operation.getCreatedAt()
+                operation.getActorEmail(),
+                operation.getDelta()
         );
         messageProducer.sendMessage(payload, noteId);
 
+        return new ResponseDto("ok");
+    }
+
+    @GetMapping("/{noteId}/review")
+    public ResponseDto review(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
+        noteService.reviewNote(currentUser.getEmail(), noteId);
+        return new ResponseDto("ok");
+    }
+
+    @GetMapping("/{noteId}/review/exit")
+    public ResponseDto exitReview(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
+        noteService.exitReviewNote(currentUser.getEmail(), noteId);
         return new ResponseDto("ok");
     }
 
@@ -105,6 +118,17 @@ public class NoteController {
     ) {
         NoteDto note = noteService.fetchNote(currentUser.getEmail(), noteId);
         return new ResponseDto("Note fetched", note);
+    }
+
+    @GetMapping("/{noteId}/revision-log")
+    @Operation(summary = "Fetch revision log", description = "Fetch revision log for a single note")
+    public ResponseDto getRevisionLog(
+            @CurrentUser UserPrincipal currentUser,
+
+            @Parameter(description = "Unique identifier of the note", required = true)
+            @PathVariable UUID noteId) {
+        List<TextOperation> revisionLog = noteService.fetchRevisionLog(currentUser.getEmail(), noteId);
+        return new ResponseDto("Revision log fetched successfully.", revisionLog);
     }
 
     @DeleteMapping("/{noteId}")
