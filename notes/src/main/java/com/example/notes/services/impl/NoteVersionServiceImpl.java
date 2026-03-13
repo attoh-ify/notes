@@ -64,19 +64,13 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Override
     public NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload) {
         Note note = notePolicyService.validateSuper(actorEmail, noteId);
-        NoteVersion noteVersion = noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
-                .orElseThrow(() -> {
-                    log.warn("Note version not found");
-                    return new BadRequestException(
-                            "Note version with this id does not exist."
-                    );
-                });
+        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
                 note,
-                noteVersion.getMasterDelta(),
-                noteVersion.getRevision(),
+                noteVersion.masterDelta(),
+                noteVersion.revision(),
                 payload.comment(),
                 noteVersionRepository.findMaxVersionByNoteId(noteId) + 1
         );

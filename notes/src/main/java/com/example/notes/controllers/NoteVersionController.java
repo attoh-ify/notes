@@ -67,8 +67,8 @@ public class NoteVersionController {
             @Parameter(description = "Object of the note version", required = true)
             @RequestBody CreateNoteVersionPayload payload
     ) {
-        NoteVersionDto restored = noteVersionService.createVersion(currentUser.getEmail(), noteId, payload);
-        return new ResponseDto("Note restored to version", restored);
+        NoteVersionDto newNoteVersion = noteVersionService.createVersion(currentUser.getEmail(), noteId, payload);
+        return new ResponseDto("Note restored to version", newNoteVersion);
     }
 
     @PutMapping("/{versionId}/restore")

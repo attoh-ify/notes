@@ -2,7 +2,9 @@ package com.example.notes.services;
 
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
+import com.example.notes.dto.ot.TextOperation;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 

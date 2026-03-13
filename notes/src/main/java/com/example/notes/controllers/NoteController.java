@@ -80,8 +80,14 @@ public class NoteController {
     }
 
     @GetMapping("/{noteId}/review")
-    public ResponseDto review(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
-        noteService.reviewNote(currentUser.getEmail(), noteId);
+    public ResponseDto startReview(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
+        noteService.startReview(currentUser.getEmail(), noteId);
+        return new ResponseDto("ok");
+    }
+
+    @PostMapping("/{noteId}/review")
+    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody List<TextOperation> textOps) {
+        noteService.applyReviewChanges(currentUser.getEmail(), noteId, textOps);
         return new ResponseDto("ok");
     }
 

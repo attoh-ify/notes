@@ -2,6 +2,7 @@ package com.example.notes.services.impl;
 
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.services.RedisService;

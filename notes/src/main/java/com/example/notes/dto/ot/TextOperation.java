@@ -9,7 +9,6 @@ import java.util.UUID;
 @Setter
 @Getter
 public class TextOperation {
-    private UUID opId;
     private Delta delta;
     private String actorEmail;
     private int revision;
@@ -19,7 +18,6 @@ public class TextOperation {
     public TextOperation() {}
 
     public TextOperation(Delta delta, String actorEmail, int revision, OpState state, LocalDateTime createdAt) {
-        this.opId = UUID.randomUUID();
         this.delta = delta;
         this.actorEmail = actorEmail;
         this.revision = revision;
@@ -30,7 +28,6 @@ public class TextOperation {
     @Override
     public String toString() {
         return "TextOperation{" +
-                "opId=" + opId +
                 ", delta=" + delta +
                 ", actorEmail='" + actorEmail + '\'' +
                 ", revision=" + revision +

@@ -17,8 +17,8 @@ public interface NoteService {
     NoteDto createNote(String actorEmail, CreateNotePayload payload);
     JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId);
     void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail);
-    void reviewNote(String actorEmail, UUID noteId);
-//    void makeReview(String actorEmail, UUID noteId);
+    void startReview(String actorEmail, UUID noteId);
+    void applyReviewChanges(String actorEmail, UUID noteId, List<TextOperation> textOps);
     void exitReviewNote(String actorEmail, UUID noteId);
     void saveNote(String actorEmail, UUID noteId);
     void deleteNote(String actorEmail, UUID noteId);

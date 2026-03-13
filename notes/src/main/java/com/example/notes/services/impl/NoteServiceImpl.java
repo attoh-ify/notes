@@ -9,6 +9,7 @@ import com.example.notes.dto.note.JoinNoteResponse;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
+import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.note.NoteVisibility;
@@ -170,10 +171,48 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public void reviewNote(String actorEmail, UUID noteId) {
+    public void startReview(String actorEmail, UUID noteId) {
         notePolicyService.validateOwner(actorEmail,noteId);
         redisService.setReviewInProgress(noteId, actorEmail, "true");
         reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
+    }
+
+    @Override
+    public void applyReviewChanges(String actorEmail, UUID noteId, List<TextOperation> textOps) {
+        notePolicyService.validateOwner(actorEmail, noteId);
+        NoteDto note = redisService.getNote(noteId);
+        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+        Delta masterDelta = noteVersion.masterDelta();
+
+        for (int i = 0; i < textOps.size(); i++) {
+            TextOperation newTextOp = new TextOperation(
+                    textOps.get(i).getDelta(),
+                    actorEmail,
+                    noteVersion.revision() + i,
+                    OpState.INVERSE,
+                    textOps.get(i).getCreatedAt()
+            );
+
+            masterDelta.compose(textOps.get(i).getDelta());
+            note.revisionLog().add(newTextOp);
+        }
+
+        NoteVersionDto newNoteVersion = new NoteVersionDto(
+                noteVersion.id(),
+                masterDelta,
+                noteVersion.revision() + textOps.size(),
+                noteVersion.comment(),
+                noteVersion.versionNumber(),
+                noteVersion.createdAt()
+        );
+
+        note.revisionLog().stream().peek(textOp -> {
+            if (textOp.getState().equals(OpState.PENDING)) {
+                textOp.setState(OpState.COMMITED);
+            }
+        }).toList();
+        redisService.updateNote(note, newNoteVersion);
+        saveNote(actorEmail, noteId);
     }
 
     @Override
