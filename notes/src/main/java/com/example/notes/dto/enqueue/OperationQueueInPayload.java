@@ -5,6 +5,7 @@ import com.example.notes.dto.ot.TextOperation;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Setter
@@ -12,10 +13,10 @@ import java.util.UUID;
 public class OperationQueueInPayload {
     private UUID noteId;
     private int revision;
-    private UUID from;
+    private String from;
     private Delta delta;
 
-    public  OperationQueueInPayload(UUID noteId, int revision, UUID from, Delta delta) {
+    public  OperationQueueInPayload(UUID noteId, int revision, String from, Delta delta) {
         this.noteId = noteId;
         this.revision = revision;
         this.from = from;
@@ -27,9 +28,9 @@ public class OperationQueueInPayload {
     @Override
     public String toString() {
         return "OperationQueueInPayload{" +
-                "noteId='" + noteId + '\'' +
+                "noteId=" + noteId +
                 ", revision=" + revision +
-                ", from='" + from + '\'' +
+                ", from=" + from +
                 ", delta=" + delta +
                 '}';
     }

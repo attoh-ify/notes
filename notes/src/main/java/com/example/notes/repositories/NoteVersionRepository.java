@@ -18,4 +18,5 @@ public interface NoteVersionRepository extends JpaRepository<NoteVersion, UUID> 
 
     List<NoteVersion> findByNoteIdOrderByVersionNumberAsc(UUID noteId);
     Optional<NoteVersion> findTopByNote_IdOrderByVersionNumberDesc(UUID noteId);
+    Optional<NoteVersion> findByNote_IdAndVersionNumber(UUID noteId, int versionNumber);
 }

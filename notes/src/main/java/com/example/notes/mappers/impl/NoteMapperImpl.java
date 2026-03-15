@@ -39,7 +39,7 @@ public class NoteMapperImpl implements NoteMapper {
                 null,
                 noteDto.visibility(),
                 null,
-                noteDto.currentNoteVersion(),
+                noteDto.currentNoteVersionNumber(),
                 null
         );
     }
@@ -51,9 +51,10 @@ public class NoteMapperImpl implements NoteMapper {
                 note.getId(),
                 note.getUser().getEmail(),
                 note.getTitle(),
+                null,
                 note.getVisibility(),
                 accessRole,
-                note.getCurrentNoteVersion(),
+                note.getCurrentNoteVersionNumber(),
                 note.getCreatedAt(),
                 note.getUpdatedAt()
         );

@@ -1,5 +1,8 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.noteVersion.NoteVersionDto;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.services.RedisService;
@@ -88,19 +91,37 @@ public class RedisServiceImpl implements RedisService {
         if (redisTemplate.hasKey(noteKey)) return;
 
         Note note = notePolicyService.validateEditor(actorEmail, noteId);
-        note.setNoteVersions(null);
-        note.setUser(null);
-        note.setNoteAccesses(null);
         NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
 
+        NoteDto redisNote = new NoteDto(
+                note.getId(),
+                note.getUser().getEmail(),
+                note.getTitle(),
+                note.getRevisionLog(),
+                note.getVisibility(),
+                null,
+                note.getCurrentNoteVersionNumber(),
+                note.getCreatedAt(),
+                note.getUpdatedAt()
+        );
+
+        NoteVersionDto redisNoteVersion = new NoteVersionDto(
+                noteVersion.getId(),
+                noteVersion.getMasterDelta(),
+                noteVersion.getRevision(),
+                noteVersion.getComment(),
+                noteVersion.getVersionNumber(),
+                noteVersion.getCreatedAt()
+        );
+
         String noteVersionKey = getNoteVersionKey(note.getId());
-        String key = getInitialRevisionKey(noteId);
+        String initialRevisionKey = getInitialRevisionKey(noteId);
 
         try {
-            String jsonNote = objectMapper.writeValueAsString(note);
-            String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
+            String jsonNote = objectMapper.writeValueAsString(redisNote);
+            String jsonNoteVersion = objectMapper.writeValueAsString(redisNoteVersion);
 
-            redisTemplate.opsForValue().set(key, String.valueOf(noteVersion.getRevision()));
+            redisTemplate.opsForValue().set(initialRevisionKey, String.valueOf(noteVersion.getRevision()));
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
         } catch (JsonProcessingException e) {
@@ -110,9 +131,9 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public void updateNote(Note note, NoteVersion noteVersion) {
-        String noteKey = getNoteKey(note.getId());
-        String noteVersionKey = getNoteVersionKey(note.getId());
+    public void updateNote(NoteDto note, NoteVersionDto noteVersion) {
+        String noteKey = getNoteKey(note.id());
+        String noteVersionKey = getNoteVersionKey(note.id());
 
         if (redisTemplate.opsForValue().get(noteKey) == null) return;
 
@@ -123,20 +144,20 @@ public class RedisServiceImpl implements RedisService {
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
         } catch (Exception e) {
-            log.error("Failed to update note: {}", note.getId(), e);
+            log.error("Failed to update note: {}", note.id(), e);
             throw new RuntimeException(e);
         }
     }
 
     @Override
-    public Note getNote(UUID noteId) {
+    public NoteDto getNote(UUID noteId) {
         String key = getNoteKey(noteId);
         String jsonNote = redisTemplate.opsForValue().get(key);
 
         if (jsonNote == null) return null;
 
         try {
-            return objectMapper.readValue(jsonNote, Note.class);
+            return objectMapper.readValue(jsonNote, NoteDto.class);
         } catch (Exception e) {
             throw new RuntimeException("Error parsing Note", e);
         }
@@ -153,14 +174,14 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public NoteVersion getNoteVersion(UUID noteId) {
+    public NoteVersionDto getNoteVersion(UUID noteId) {
         String key = getNoteVersionKey(noteId);
         String jsonNoteVersion = redisTemplate.opsForValue().get(key);
 
         if (jsonNoteVersion == null) return null;
 
         try {
-            return objectMapper.readValue(jsonNoteVersion, NoteVersion.class);
+            return objectMapper.readValue(jsonNoteVersion, NoteVersionDto.class);
         } catch (Exception e) {
             throw new RuntimeException("Error parsing NoteVersion", e);
         }
@@ -191,13 +212,24 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public int getInitialRevision(UUID noteId) {
-        String val = redisTemplate.opsForValue().get("note-initial-revision:" + noteId);
-        return val != null ? Integer.parseInt(val) : 0;
+    public void setReviewInProgress(UUID noteId, String ownerEmail, String value) {
+        if ("true".equalsIgnoreCase(value)) {
+            redisTemplate.opsForHash().put(getReviewInProgressKey(noteId), ownerEmail, "true");
+        } else {
+            redisTemplate.opsForHash().delete(getReviewInProgressKey(noteId), ownerEmail);
+        }
     }
 
-    private String getNoteLockKey(UUID noteId) {
-        return "lock:note:" + noteId;
+    @Override
+    public boolean isReviewInProgress(UUID noteId, String ownerEmail) {
+        Object val = redisTemplate.opsForHash().get(getReviewInProgressKey(noteId), ownerEmail);
+        return "true".equals(val);
+    }
+
+    @Override
+    public int getInitialRevision(UUID noteId) {
+        String val = redisTemplate.opsForValue().get(getInitialRevisionKey(noteId));
+        return val != null ? Integer.parseInt(val) : 0;
     }
 
     private String getNoteKey(UUID noteId) {
@@ -214,5 +246,9 @@ public class RedisServiceImpl implements RedisService {
 
     private String getInitialRevisionKey(UUID noteId) {
         return "note-initial-revision:" + noteId;
+    }
+
+    private String getReviewInProgressKey(UUID noteId) {
+        return "note-review-in-progress:" + noteId;
     }
 }

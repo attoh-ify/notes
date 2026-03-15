@@ -45,9 +45,9 @@ public class NotePolicyService {
 
     public NoteVersion findNoteVersionByNoteId(UUID noteId) {
         Note note = findNoteById(noteId);
-        return noteVersionRepository.findById(note.getCurrentNoteVersion())
+        return noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
                 .orElseThrow(() -> {
-                    log.warn("Note version not found id={}", note.getCurrentNoteVersion());
+                    log.warn("Note version not found id={}", note.getCurrentNoteVersionNumber());
                     return new BadRequestException(
                             "Note version with this id does not exist."
                     );

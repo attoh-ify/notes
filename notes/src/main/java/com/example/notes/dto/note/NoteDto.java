@@ -1,10 +1,12 @@
 package com.example.notes.dto.note;
 
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.noteAccess.NoteAccessRole;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Schema(description = "Represents a note returned by the NotesTogether service")
@@ -28,6 +30,11 @@ public record NoteDto(
         String title,
 
         @Schema(
+                description = "List of text operations that make up this note"
+        )
+        List<TextOperation> revisionLog,
+
+        @Schema(
                 description = "Visibility of the note, either private or public",
                 example = "PRIVATE"
         )
@@ -40,9 +47,9 @@ public record NoteDto(
         NoteAccessRole accessRole,
 
         @Schema(
-                description = "Current note version UUID"
+                description = "Current note version number"
         )
-        UUID currentNoteVersion,
+        int currentNoteVersionNumber,
 
         @Schema(
                 description = "Timestamp when the note was created",

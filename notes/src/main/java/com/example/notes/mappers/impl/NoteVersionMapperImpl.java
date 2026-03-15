@@ -14,7 +14,7 @@ public class NoteVersionMapperImpl implements NoteVersionMapper {
                 null,
                 noteVersionDto.masterDelta(),
                 noteVersionDto.revision(),
-                noteVersionDto.createdBy(),
+                noteVersionDto.comment(),
                 noteVersionDto.versionNumber()
         );
     }
@@ -25,7 +25,7 @@ public class NoteVersionMapperImpl implements NoteVersionMapper {
                 noteVersion.getId(),
                 noteVersion.getMasterDelta(),
                 noteVersion.getRevision(),
-                noteVersion.getCreatedBy(),
+                noteVersion.getComment(),
                 noteVersion.getVersionNumber(),
                 noteVersion.getCreatedAt()
         );

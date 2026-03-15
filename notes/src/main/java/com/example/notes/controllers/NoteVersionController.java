@@ -1,5 +1,6 @@
 package com.example.notes.controllers;
 
+import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.user.UserPrincipal;
@@ -40,7 +41,7 @@ public class NoteVersionController {
         return new ResponseDto("Note versions fetched", versions);
     }
 
-    @GetMapping("/{versionId}")
+    @GetMapping("/{versionNumber}")
     @Operation(summary = "Fetch a specific note version", description = "Retrieves a specific version of a note")
     public ResponseDto getVersion(
             @CurrentUser UserPrincipal currentUser,
@@ -48,10 +49,10 @@ public class NoteVersionController {
             @Parameter(description = "Unique identifier of the note", required = true)
             @PathVariable UUID noteId,
 
-            @Parameter(description = "Unique identifier of the note version", required = true)
-            @PathVariable UUID versionId
+            @Parameter(description = "Version number of the note version", required = true)
+            @PathVariable int versionNumber
     ) {
-        NoteVersionDto version = noteVersionService.fetchVersion(currentUser.getEmail(), noteId, versionId);
+        NoteVersionDto version = noteVersionService.fetchVersion(currentUser.getEmail(), noteId, versionNumber);
         return new ResponseDto("Note version fetched", version);
     }
 
@@ -64,10 +65,10 @@ public class NoteVersionController {
             @PathVariable UUID noteId,
 
             @Parameter(description = "Object of the note version", required = true)
-            @RequestBody NoteVersionDto noteVersionDto
+            @RequestBody CreateNoteVersionPayload payload
     ) {
-        NoteVersionDto restored = noteVersionService.createVersion(currentUser.getEmail(), noteId, noteVersionDto);
-        return new ResponseDto("Note restored to version", restored);
+        NoteVersionDto newNoteVersion = noteVersionService.createVersion(currentUser.getEmail(), noteId, payload);
+        return new ResponseDto("Note restored to version", newNoteVersion);
     }
 
     @PutMapping("/{versionId}/restore")
