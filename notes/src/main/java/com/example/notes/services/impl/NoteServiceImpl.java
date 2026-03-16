@@ -178,37 +178,33 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public void applyReviewChanges(String actorEmail, UUID noteId, List<TextOperation> textOps) {
+    public void applyReviewChanges(String actorEmail, UUID noteId, TextOperation textOp) {
         notePolicyService.validateOwner(actorEmail, noteId);
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
         Delta masterDelta = noteVersion.masterDelta();
 
-        for (int i = 0; i < textOps.size(); i++) {
-            TextOperation newTextOp = new TextOperation(
-                    textOps.get(i).getDelta(),
-                    actorEmail,
-                    noteVersion.revision() + i,
-                    OpState.INVERSE,
-                    textOps.get(i).getCreatedAt()
-            );
+        TextOperation newTextOp = new TextOperation(
+                textOp.getDelta(),
+                actorEmail,
+                noteVersion.revision() + 1,
+                OpState.INVERSE,
+                textOp.getCreatedAt()
+        );
 
-            masterDelta.compose(textOps.get(i).getDelta());
-            note.revisionLog().add(newTextOp);
-        }
-
+        note.revisionLog().add(newTextOp);
         NoteVersionDto newNoteVersion = new NoteVersionDto(
                 noteVersion.id(),
-                masterDelta,
-                noteVersion.revision() + textOps.size(),
+                masterDelta.compose(textOp.getDelta()),
+                noteVersion.revision() + 1,
                 noteVersion.comment(),
                 noteVersion.versionNumber(),
                 noteVersion.createdAt()
         );
 
-        note.revisionLog().stream().peek(textOp -> {
-            if (textOp.getState().equals(OpState.PENDING)) {
-                textOp.setState(OpState.COMMITED);
+        note.revisionLog().stream().peek(op -> {
+            if (op.getState().equals(OpState.PENDING)) {
+                op.setState(OpState.COMMITED);
             }
         }).toList();
         redisService.updateNote(note, newNoteVersion);

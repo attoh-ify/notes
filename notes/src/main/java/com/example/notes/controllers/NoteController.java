@@ -86,8 +86,8 @@ public class NoteController {
     }
 
     @PostMapping("/{noteId}/review")
-    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody List<TextOperation> textOps) {
-        noteService.applyReviewChanges(currentUser.getEmail(), noteId, textOps);
+    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody TextOperation textOp) {
+        noteService.applyReviewChanges(currentUser.getEmail(), noteId, textOp);
         return new ResponseDto("ok");
     }
 
