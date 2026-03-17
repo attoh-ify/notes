@@ -3,6 +3,7 @@ package com.example.notes.services.impl;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
+import com.example.notes.dto.ot.OpState;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.exceptions.BadRequestException;
@@ -64,6 +65,13 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Override
     public NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload) {
         Note note = notePolicyService.validateSuper(actorEmail, noteId);
+
+        note.getRevisionLog().stream().peek(op -> {
+            if (op.getState().equals(OpState.PENDING)) {
+                op.setState(OpState.COMMITTED);
+            }
+        }).toList();
+
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
         NoteVersion newNoteVersion = new NoteVersion(

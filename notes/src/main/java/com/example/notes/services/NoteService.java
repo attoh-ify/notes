@@ -1,9 +1,6 @@
 package com.example.notes.services;
 
-import com.example.notes.dto.note.CreateNotePayload;
-import com.example.notes.dto.note.CursorDto;
-import com.example.notes.dto.note.JoinNoteResponse;
-import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.note.*;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.NoteVisibility;
 
@@ -18,7 +15,7 @@ public interface NoteService {
     JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId);
     void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail);
     void startReview(String actorEmail, UUID noteId);
-    void applyReviewChanges(String actorEmail, UUID noteId, TextOperation textOp);
+    void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload);
     void exitReviewNote(String actorEmail, UUID noteId);
     void saveNote(String actorEmail, UUID noteId);
     void deleteNote(String actorEmail, UUID noteId);

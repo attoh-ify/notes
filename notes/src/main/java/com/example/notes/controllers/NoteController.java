@@ -2,10 +2,7 @@ package com.example.notes.controllers;
 
 import com.example.notes.config.activeMq.MessageProducer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
-import com.example.notes.dto.note.CreateNotePayload;
-import com.example.notes.dto.note.CursorDto;
-import com.example.notes.dto.note.JoinNoteResponse;
-import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.note.*;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
@@ -86,8 +83,8 @@ public class NoteController {
     }
 
     @PostMapping("/{noteId}/review")
-    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody TextOperation textOp) {
-        noteService.applyReviewChanges(currentUser.getEmail(), noteId, textOp);
+    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody ReviewNotePayload payload) {
+        noteService.applyReviewChanges(currentUser.getEmail(), noteId, payload);
         return new ResponseDto("ok");
     }
 

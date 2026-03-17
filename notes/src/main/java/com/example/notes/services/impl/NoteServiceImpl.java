@@ -3,10 +3,7 @@ package com.example.notes.services.impl;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
-import com.example.notes.dto.note.CreateNotePayload;
-import com.example.notes.dto.note.CursorDto;
-import com.example.notes.dto.note.JoinNoteResponse;
-import com.example.notes.dto.note.NoteDto;
+import com.example.notes.dto.note.*;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
 import com.example.notes.dto.ot.OpState;
@@ -178,35 +175,41 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public void applyReviewChanges(String actorEmail, UUID noteId, TextOperation textOp) {
+    public void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload) {
         notePolicyService.validateOwner(actorEmail, noteId);
+
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
         Delta masterDelta = noteVersion.masterDelta();
+        NoteVersionDto newNoteVersion = noteVersion;
 
-        TextOperation newTextOp = new TextOperation(
-                textOp.getDelta(),
-                actorEmail,
-                noteVersion.revision() + 1,
-                OpState.INVERSE,
-                textOp.getCreatedAt()
-        );
+        if (!payload.rejectedChange().getDelta().ops.isEmpty()) {
+            TextOperation newTextOp = new TextOperation(
+                    payload.rejectedChange().getDelta(),
+                    actorEmail,
+                    noteVersion.revision() + 1,
+                    OpState.PENDING,
+                    payload.rejectedChange().getCreatedAt()
+            );
 
-        note.revisionLog().add(newTextOp);
-        NoteVersionDto newNoteVersion = new NoteVersionDto(
-                noteVersion.id(),
-                masterDelta.compose(textOp.getDelta()),
-                noteVersion.revision() + 1,
-                noteVersion.comment(),
-                noteVersion.versionNumber(),
-                noteVersion.createdAt()
-        );
+            note.revisionLog().add(newTextOp);
+
+            newNoteVersion = new NoteVersionDto(
+                    noteVersion.id(),
+                    masterDelta.compose(payload.rejectedChange().getDelta()),
+                    noteVersion.revision() + 1,
+                    noteVersion.comment(),
+                    noteVersion.versionNumber(),
+                    noteVersion.createdAt()
+            );
+        }
 
         note.revisionLog().stream().peek(op -> {
-            if (op.getState().equals(OpState.PENDING)) {
-                op.setState(OpState.COMMITED);
+            if (payload.acceptedOpIds().contains(op.getOpId())) {
+                op.setState(OpState.COMMITTED);
             }
         }).toList();
+
         redisService.updateNote(note, newNoteVersion);
         saveNote(actorEmail, noteId);
     }
