@@ -88,6 +88,12 @@ public class NoteController {
         return new ResponseDto("ok");
     }
 
+    @PostMapping("/{noteId}/review/split")
+    public ResponseDto splitOp(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody SplitOpPayload payload) {
+        noteService.splitOp(currentUser.getEmail(), noteId, payload);
+        return new ResponseDto("ok");
+    }
+
     @GetMapping("/{noteId}/review/exit")
     public ResponseDto exitReview(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
         noteService.exitReviewNote(currentUser.getEmail(), noteId);

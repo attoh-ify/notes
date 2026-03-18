@@ -6,6 +6,7 @@ import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
+import com.example.notes.dto.ot.Op;
 import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
@@ -211,6 +212,168 @@ public class NoteServiceImpl implements NoteService {
         }).toList();
 
         redisService.updateNote(note, newNoteVersion);
+        saveNote(actorEmail, noteId);
+    }
+
+    @Override
+    public void splitOp(String actorEmail, UUID noteId, SplitOpPayload payload) {
+        notePolicyService.validateOwner(actorEmail, noteId);
+
+        NoteDto note = redisService.getNote(noteId);
+        List<TextOperation> log = note.revisionLog();
+        System.out.println("Before: " + log.toString());
+
+        TextOperation insertOp = log.stream()
+                .filter(op -> op.getOpId().equals(payload.insertOpId()))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Insert op not found: " + payload.insertOpId()));
+
+        int insertComponentIndex = -1;
+        int charsBeforeInsert = 0;
+
+        {
+            int pos = 0;
+            for (int i = 0; i < insertOp.getDelta().ops.size(); i++) {
+                Op op = insertOp.getDelta().ops.get(i);
+                if (op.isInsert() && op.getInsert() instanceof String text) {
+                    if (text.length() == payload.insertOpLength()) {
+                        insertComponentIndex = i;
+                        charsBeforeInsert = pos;
+                        break;
+                    }
+                    pos += text.length();
+                } else if (op.isRetain() && op.getRetain() instanceof Integer retain) {
+                    pos += retain;
+                }
+            }
+        }
+
+        if (insertComponentIndex == -1) {
+            throw new BadRequestException("Could not locate insert component in delta for op: " + payload.insertOpId());
+        }
+
+        Op insertComponent = insertOp.getDelta().ops.get(insertComponentIndex);
+        String fullInsertText = (String) insertComponent.getInsert();
+        int overlapLength = payload.overlapLength();
+        int insertTotalLength = payload.insertOpLength();
+
+        if (overlapLength == insertTotalLength) {
+            insertOp.setState(OpState.COMMITTED);
+        } else {
+            String committedText = fullInsertText.substring(0, overlapLength);
+            String remainingText = fullInsertText.substring(overlapLength);
+
+            Delta committedDelta = new Delta();
+
+            if (charsBeforeInsert > 0) committedDelta.retain(charsBeforeInsert, null);
+            committedDelta.insert(committedText, insertComponent.getAttributes());
+
+            TextOperation committedInsertOp = new TextOperation(
+                    committedDelta,
+                    insertOp.getActorEmail(),
+                    insertOp.getRevision(),
+                    OpState.COMMITTED,
+                    insertOp.getCreatedAt()
+            );
+
+            Delta remainingDelta = new Delta();
+
+            for (int i = 0; i < insertComponentIndex; i++) {
+                remainingDelta.push(insertOp.getDelta().ops.get(i));
+            }
+
+            remainingDelta.retain(overlapLength, null);
+            remainingDelta.insert(remainingText, insertComponent.getAttributes());
+
+            for (int i = insertComponentIndex + 1; i < insertOp.getDelta().ops.size(); i++) {
+                remainingDelta.push(insertOp.getDelta().ops.get(i));
+            }
+
+            insertOp.setDelta(remainingDelta);
+
+            int insertOpIndex = log.indexOf(insertOp);
+            log.add(insertOpIndex, committedInsertOp);
+        }
+
+        TextOperation deleteOp = log.stream()
+                .filter(op -> op.getOpId().equals(payload.deleteOpId()))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Delete op not found: " + payload.deleteOpId()));
+
+        int deleteConsumedBefore = payload.deleteConsumedBefore();
+        int deleteTotalLength = payload.deleteOpTotalLength();
+        int consumed = deleteConsumedBefore + overlapLength;
+
+        int deleteComponentIndex = -1;
+        {
+            for (int i = 0; i < deleteOp.getDelta().ops.size(); i++) {
+                Op op = deleteOp.getDelta().ops.get(i);
+                if (op.isDelete()) {
+                    deleteComponentIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (deleteComponentIndex == -1) {
+            throw new BadRequestException("Could not locate delete component in delta for op: " + payload.deleteOpId());
+        }
+
+        if (consumed == deleteTotalLength) {
+            deleteOp.setState(OpState.COMMITTED);
+        } else {
+            int remainingDeleteLength = deleteTotalLength - consumed;
+
+            Delta committedDeleteDelta = new Delta();
+            for (int i = 0; i < deleteComponentIndex; i++) {
+                committedDeleteDelta.push(deleteOp.getDelta().ops.get(i));
+            }
+            committedDeleteDelta.delete(consumed);
+
+            TextOperation committedDeleteOp = new TextOperation(
+                    committedDeleteDelta,
+                    deleteOp.getActorEmail(),
+                    deleteOp.getRevision(),
+                    OpState.COMMITTED,
+                    deleteOp.getCreatedAt()
+            );
+
+            Delta remainingDeleteDelta = new Delta();
+
+            for(int i = 0; i < deleteComponentIndex; i++) {
+                remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
+            }
+
+            remainingDeleteDelta.retain(consumed, null);
+            remainingDeleteDelta.delete(remainingDeleteLength);
+
+            for (int i = deleteComponentIndex + 1; i < deleteOp.getDelta().ops.size(); i++) {
+                remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
+            }
+
+            deleteOp.setDelta(remainingDeleteDelta);
+
+            int deleteOpIndex = log.indexOf(deleteOp);
+            log.add(deleteOpIndex, committedDeleteOp);
+        }
+
+        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+
+        NoteDto updatedNote = new NoteDto(
+                note.id(),
+                note.ownerEmail(),
+                note.title(),
+                log,
+                note.visibility(),
+                note.accessRole(),
+                note.currentNoteVersionNumber(),
+                note.createdAt(),
+                note.updatedAt()
+        );
+
+        redisService.updateNote(updatedNote, noteVersion);
+        System.out.println("After: " + log.toString());
+
         saveNote(actorEmail, noteId);
     }
 
