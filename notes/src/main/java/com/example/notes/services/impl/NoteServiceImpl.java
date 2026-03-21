@@ -216,12 +216,11 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public void splitOp(String actorEmail, UUID noteId, SplitOpPayload payload) {
+    public void cancelInsert(String actorEmail, UUID noteId, CancelInsertPayload payload) {
         notePolicyService.validateOwner(actorEmail, noteId);
 
         NoteDto note = redisService.getNote(noteId);
         List<TextOperation> log = note.revisionLog();
-        System.out.println("Before: " + log.toString());
 
         TextOperation insertOp = log.stream()
                 .filter(op -> op.getOpId().equals(payload.insertOpId()))
@@ -372,8 +371,93 @@ public class NoteServiceImpl implements NoteService {
         );
 
         redisService.updateNote(updatedNote, noteVersion);
-        System.out.println("After: " + log.toString());
 
+        saveNote(actorEmail, noteId);
+    }
+
+    @Override
+    public void cancelFormat(String actorEmail, UUID noteId, CancelFormatPayload payload) {
+        notePolicyService.validateOwner(actorEmail, noteId);
+
+        NoteDto note = redisService.getNote(noteId);
+        List<TextOperation> log = note.revisionLog();
+
+        log.stream()
+                .filter(op -> payload.cancelledOpIds().contains(op.getOpId()))
+                .forEach(op -> op.setState(OpState.COMMITTED));
+
+        TextOperation cancellingOp = log.stream()
+                .filter(op -> op.getOpId().equals(payload.cancellingOpId()))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Cancelling op not found"));
+
+        int consumed = payload.consumedBefore() + payload.opLength();
+        int total = payload.totalLength();
+
+        if (consumed == total) {
+            cancellingOp.setState(OpState.COMMITTED);
+        } else {
+            int retainComponentIndex = -1;
+            for (int i = 0; i < cancellingOp.getDelta().ops.size(); i++) {
+                Op op = cancellingOp.getDelta().ops.get(i);
+                if (op.isRetain() && op.getAttributes() != null && !op.getAttributes().isEmpty()) {
+                    retainComponentIndex = i;
+                    break;
+                }
+            }
+
+            if (retainComponentIndex == -1) {
+                throw new BadRequestException("Could not locate retain component in cancelling op");
+            }
+
+            Op retainComponent = cancellingOp.getDelta().ops.get(retainComponentIndex);
+            int fullRetainLength = (Integer) retainComponent.getRetain();
+            int remainingRetainLength = fullRetainLength - consumed;
+
+            Delta committedDelta = new Delta();
+            for (int i = 0; i < retainComponentIndex; i++) {
+                committedDelta.push(cancellingOp.getDelta().ops.get(i));
+            }
+            committedDelta.retain(consumed, retainComponent.getAttributes());
+
+            TextOperation committedOp = new TextOperation(
+                    committedDelta,
+                    cancellingOp.getActorEmail(),
+                    cancellingOp.getRevision(),
+                    OpState.COMMITTED,
+                    cancellingOp.getCreatedAt()
+            );
+
+            Delta remainingDelta = new Delta();
+            for (int i = 0; i < retainComponentIndex; i++) {
+                remainingDelta.push(cancellingOp.getDelta().ops.get(i));
+            }
+            remainingDelta.retain(consumed, null);
+            remainingDelta.retain(remainingRetainLength, retainComponent.getAttributes());
+            for (int i = retainComponentIndex + 1; i < cancellingOp.getDelta().ops.size(); i++) {
+                remainingDelta.push(cancellingOp.getDelta().ops.get(i));
+            }
+
+            cancellingOp.setDelta(remainingDelta);
+
+            int cancellingOpIndex = log.indexOf(cancellingOp);
+            log.add(cancellingOpIndex, committedOp);
+        }
+
+        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+        NoteDto updatedNote = new NoteDto(
+                note.id(),
+                note.ownerEmail(),
+                note.title(),
+                log,
+                note.visibility(),
+                note.accessRole(),
+                note.currentNoteVersionNumber(),
+                note.createdAt(),
+                note.updatedAt()
+        );
+
+        redisService.updateNote(updatedNote, noteVersion);
         saveNote(actorEmail, noteId);
     }
 

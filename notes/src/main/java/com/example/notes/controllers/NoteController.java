@@ -88,9 +88,15 @@ public class NoteController {
         return new ResponseDto("ok");
     }
 
-    @PostMapping("/{noteId}/review/split")
-    public ResponseDto splitOp(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody SplitOpPayload payload) {
-        noteService.splitOp(currentUser.getEmail(), noteId, payload);
+    @PostMapping("/{noteId}/review/split/insert")
+    public ResponseDto cancelInsert(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody CancelInsertPayload payload) {
+        noteService.cancelInsert(currentUser.getEmail(), noteId, payload);
+        return new ResponseDto("ok");
+    }
+
+    @PostMapping("/{noteId}/review/split/format")
+    public ResponseDto cancelFormat(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody CancelFormatPayload payload) {
+        noteService.cancelFormat(currentUser.getEmail(), noteId, payload);
         return new ResponseDto("ok");
     }
 
