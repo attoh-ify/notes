@@ -54,7 +54,6 @@ public class EmailServiceImpl implements EmailService {
 //
 //            javaMailSender.send(message);
 //        } catch (MessagingException e) {
-//            // Consider using a logger here (e.g., log.error)
 //            log.error("Failed to send HTML email to {}", recipient, e);
 //        }
     }
@@ -70,7 +69,6 @@ public class EmailServiceImpl implements EmailService {
                     <h2 style="margin-top: 30px; font-size: 24px;">Welcome to the future of note-taking.</h2>
                     <p>Hello <strong>%s</strong>,</p>
                     <p>Notes is more than just a digital notebook—it's a live, collaborative engine built for speed and security.</p>
-                    
                     <div style="background-color: #f0fff4; border-left: 4px solid #38a169; padding: 20px; margin: 25px 0;">
                         <ul style="margin: 0; padding: 0; list-style: none;">
                             <li style="margin-bottom: 10px;">🚀 <strong>Live Collaboration:</strong> Edit with others in real-time.</li>
@@ -104,7 +102,6 @@ public class EmailServiceImpl implements EmailService {
                     <h3 style="margin-top: 25px;">You've Been Added</h3>
                     <p>Hello,</p>
                     <p>You have been invited to collaborate on the note: <strong>"%s"</strong>.</p>
-                    
                     <div style="background-color: #f7fafc; padding: 25px; border-radius: 10px; margin: 25px 0; border: 1px solid #edf2f7;">
                         <span style="font-size: 11px; color: #a0aec0; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Assigned Role</span>
                         %s
@@ -137,12 +134,10 @@ public class EmailServiceImpl implements EmailService {
                     </div>
                     <h3>Role Updated</h3>
                     <p>Your access level for <strong>"%s"</strong> has been modified by the note owner.</p>
-                    
                     <div style="background-color: #fffaf0; padding: 25px; border-radius: 10px; margin: 25px 0; border: 1px dashed #f6ad55;">
                         <span style="font-size: 11px; color: #a0aec0; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">New Permissions</span>
                         %s
                     </div>
-                    
                     <p style="font-size: 14px; color: #718096;">These changes take effect immediately.</p>
                     %s
                 </div>

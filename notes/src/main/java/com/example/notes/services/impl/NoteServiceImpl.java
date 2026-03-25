@@ -227,34 +227,29 @@ public class NoteServiceImpl implements NoteService {
                 .findFirst()
                 .orElseThrow(() -> new BadRequestException("Insert op not found: " + payload.insertOpId()));
 
-        int insertComponentIndex = -1;
-        int charsBeforeInsert = 0;
+        Op insertComponent = insertOp.getDelta().ops.get(payload.insertComponentIndex());
+        if (insertComponent == null) {
+            throw new BadRequestException("Could not locate insert component in delta for op: " + payload.insertOpId());
+        }
 
+        int charsBeforeInsert = 0;
         {
-            int pos = 0;
             for (int i = 0; i < insertOp.getDelta().ops.size(); i++) {
                 Op op = insertOp.getDelta().ops.get(i);
+
+                if (op.equals(insertComponent)) break;
+
                 if (op.isInsert() && op.getInsert() instanceof String text) {
-                    if (text.length() == payload.insertOpLength()) {
-                        insertComponentIndex = i;
-                        charsBeforeInsert = pos;
-                        break;
-                    }
-                    pos += text.length();
+                    charsBeforeInsert += text.length();
                 } else if (op.isRetain() && op.getRetain() instanceof Integer retain) {
-                    pos += retain;
+                    charsBeforeInsert += retain;
                 }
             }
         }
 
-        if (insertComponentIndex == -1) {
-            throw new BadRequestException("Could not locate insert component in delta for op: " + payload.insertOpId());
-        }
-
-        Op insertComponent = insertOp.getDelta().ops.get(insertComponentIndex);
         String fullInsertText = (String) insertComponent.getInsert();
         int overlapLength = payload.overlapLength();
-        int insertTotalLength = payload.insertOpLength();
+        int insertTotalLength = insertComponent.length();
 
         if (overlapLength == insertTotalLength) {
             insertOp.setState(OpState.COMMITTED);
@@ -264,7 +259,10 @@ public class NoteServiceImpl implements NoteService {
 
             Delta committedDelta = new Delta();
 
-            if (charsBeforeInsert > 0) committedDelta.retain(charsBeforeInsert, null);
+            if (charsBeforeInsert > 0) {
+                committedDelta.retain(charsBeforeInsert, null);
+            }
+
             committedDelta.insert(committedText, insertComponent.getAttributes());
 
             TextOperation committedInsertOp = new TextOperation(
@@ -277,14 +275,14 @@ public class NoteServiceImpl implements NoteService {
 
             Delta remainingDelta = new Delta();
 
-            for (int i = 0; i < insertComponentIndex; i++) {
+            for (int i = 0; i < payload.insertComponentIndex(); i++) {
                 remainingDelta.push(insertOp.getDelta().ops.get(i));
             }
 
             remainingDelta.retain(overlapLength, null);
             remainingDelta.insert(remainingText, insertComponent.getAttributes());
 
-            for (int i = insertComponentIndex + 1; i < insertOp.getDelta().ops.size(); i++) {
+            for (int i = payload.insertComponentIndex() + 1; i < insertOp.getDelta().ops.size(); i++) {
                 remainingDelta.push(insertOp.getDelta().ops.get(i));
             }
 
@@ -299,35 +297,23 @@ public class NoteServiceImpl implements NoteService {
                 .findFirst()
                 .orElseThrow(() -> new BadRequestException("Delete op not found: " + payload.deleteOpId()));
 
-        int deleteConsumedBefore = payload.deleteConsumedBefore();
-        int deleteTotalLength = payload.deleteOpTotalLength();
-        int consumed = deleteConsumedBefore + overlapLength;
-
-        int deleteComponentIndex = -1;
-        {
-            for (int i = 0; i < deleteOp.getDelta().ops.size(); i++) {
-                Op op = deleteOp.getDelta().ops.get(i);
-                if (op.isDelete()) {
-                    deleteComponentIndex = i;
-                    break;
-                }
-            }
-        }
-
-        if (deleteComponentIndex == -1) {
+        Op deleteComponent = deleteOp.getDelta().ops.get(payload.deleteComponentIndex());
+        if (deleteComponent == null) {
             throw new BadRequestException("Could not locate delete component in delta for op: " + payload.deleteOpId());
         }
 
-        if (consumed == deleteTotalLength) {
+        int deleteTotalLength = deleteComponent.getDelete();
+
+        if (overlapLength == deleteTotalLength) {
             deleteOp.setState(OpState.COMMITTED);
         } else {
-            int remainingDeleteLength = deleteTotalLength - consumed;
-
             Delta committedDeleteDelta = new Delta();
-            for (int i = 0; i < deleteComponentIndex; i++) {
+
+            for (int i = 0; i < payload.deleteComponentIndex(); i++) {
                 committedDeleteDelta.push(deleteOp.getDelta().ops.get(i));
             }
-            committedDeleteDelta.delete(consumed);
+
+            committedDeleteDelta.delete(overlapLength);
 
             TextOperation committedDeleteOp = new TextOperation(
                     committedDeleteDelta,
@@ -339,14 +325,13 @@ public class NoteServiceImpl implements NoteService {
 
             Delta remainingDeleteDelta = new Delta();
 
-            for(int i = 0; i < deleteComponentIndex; i++) {
+            for(int i = 0; i < payload.deleteComponentIndex(); i++) {
                 remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
             }
 
-            remainingDeleteDelta.retain(consumed, null);
-            remainingDeleteDelta.delete(remainingDeleteLength);
+            remainingDeleteDelta.delete(deleteTotalLength - overlapLength);
 
-            for (int i = deleteComponentIndex + 1; i < deleteOp.getDelta().ops.size(); i++) {
+            for (int i = payload.deleteComponentIndex() + 1; i < deleteOp.getDelta().ops.size(); i++) {
                 remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
             }
 

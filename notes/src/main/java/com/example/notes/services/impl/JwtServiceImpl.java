@@ -36,12 +36,14 @@ public class JwtServiceImpl implements JwtService {
         Map<String, Object> claims = new HashMap<>();
         claims.put("id", userId);
 
+        long timeMillis = System.currentTimeMillis();
+
         String token = Jwts.builder()
                 .claims()
                 .add(claims)
                 .subject(email)
-                .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000)) // 7 days
+                .issuedAt(new Date(timeMillis))
+                .expiration(new Date(timeMillis + 60 * 60 * 1000)) // 1 hour
                 .and()
                 .signWith(getKey())
                 .compact();

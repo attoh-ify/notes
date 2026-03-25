@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.UUID;
 
 public class UserPrincipal implements UserDetails {
-    private User user;
+    private final User user;
 
     public UserPrincipal(User user) {
         this.user = user;

@@ -4,6 +4,7 @@ import com.example.notes.dto.user.LoginDto;
 import com.example.notes.dto.user.LoginResponseDto;
 import com.example.notes.dto.user.UserDto;
 import com.example.notes.entities.user.User;
+import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.UserMapper;
 import com.example.notes.repositories.UserRepository;
@@ -83,10 +84,10 @@ public class UserServiceImpl implements UserService {
                 );
 
         if (authentication.isAuthenticated()) {
-            User userExists = userPolicyService.userExists(user.email());
             log.info("Authentication successful email={}", user.email());
-            String token = jwtService.generateToken(user.email(), userExists.getId());
-            return new LoginResponseDto(token, userExists.getId());
+            UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+            String token = jwtService.generateToken(user.email(), principal.getUserId());
+            return new LoginResponseDto(token, principal.getUserId());
         }
 
         log.warn("Authentication failed email={}", user.email());
