@@ -3,8 +3,9 @@ package com.example.notes.dto.note;
 import java.util.List;
 
 public record CancelFormatPayload (
-        List<String> cancelledOpIds,
+        List<OpReference> targetReferences,
         String cancellingOpId,
+        int retainComponentIndex,
         int opLength,
         int totalLength,
         int consumedBefore

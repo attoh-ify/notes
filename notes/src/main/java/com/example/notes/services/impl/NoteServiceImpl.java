@@ -28,10 +28,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 public class NoteServiceImpl implements NoteService {
@@ -189,7 +188,7 @@ public class NoteServiceImpl implements NoteService {
                     payload.rejectedChange().getDelta(),
                     actorEmail,
                     noteVersion.revision() + 1,
-                    OpState.PENDING,
+                    OpState.COMMITTED,
                     payload.rejectedChange().getCreatedAt()
             );
 
@@ -205,11 +204,85 @@ public class NoteServiceImpl implements NoteService {
             );
         }
 
-        note.revisionLog().stream().peek(op -> {
-            if (payload.acceptedOpIds().contains(op.getOpId())) {
-                op.setState(OpState.COMMITTED);
+        Set<String> acceptedIds = payload.acceptedReferences().stream()
+                .map(OpReferenceResponse::opId)
+                .collect(Collectors.toSet());
+
+        note.revisionLog().forEach(textOp -> {
+            if (acceptedIds.contains(textOp.getOpId())) {
+                long meaningfulOpCount = textOp.getDelta().ops.stream()
+                                .filter(component ->
+                                        component.isInsert() ||
+                                        component.isDelete() ||
+                                                (component.isRetain() && component.getAttributes() != null && !component.getAttributes().isEmpty()))
+                                        .count();
+                long referenceCount = payload.acceptedReferences().stream()
+                        .filter(ref -> ref.opId().equals(textOp.getOpId()))
+                        .mapToLong(ref -> ref.componentIndexes().size())
+                        .sum();
+
+                if (meaningfulOpCount == referenceCount) {
+                    textOp.setState(OpState.COMMITTED);
+                } else {
+                    OpReferenceResponse opReferenceResponse = payload.acceptedReferences().stream()
+                            .filter(opRef -> opRef.opId().equals(textOp.getOpId()))
+                            .findFirst()
+                            .orElseThrow();
+
+                    Delta committedDelta = new Delta();
+                    Delta remainingDelta = new Delta();
+
+                    for (int i = 0; i < textOp.getDelta().ops.size(); i++) {
+                        Op op = textOp.getDelta().ops.get(i);
+
+                        if (op.isRetain() && op.getAttributes() == null) {
+                            committedDelta.retain(op.getRetain(), null);
+                            remainingDelta.retain(op.getRetain(), null);
+                            continue;
+                        }
+
+                        boolean accepted = opReferenceResponse.componentIndexes().contains(i);
+
+                        if (accepted) {
+                            if (op.isDelete()) {
+                                committedDelta.delete(op.getDelete());
+                            } else if (op.isInsert()) {
+                                committedDelta.insert(op.getInsert(), op.getAttributes());
+                                remainingDelta.retain(op.length(), null);
+                            } else if (op.isRetain()) {
+                                committedDelta.retain(op.getRetain(), op.getAttributes());
+                                remainingDelta.retain(op.getRetain(), null);
+                            }
+                        } else {
+                            if (op.isDelete()) {
+                                remainingDelta.delete(op.getDelete());
+                            } else if (op.isInsert()) {
+                                remainingDelta.insert(op.getInsert(), op.getAttributes());
+                                committedDelta.retain(op.length(), null);
+                            } else if (op.isRetain()) {
+                                remainingDelta.retain(op.getRetain(), op.getAttributes());
+                                committedDelta.retain(op.getRetain(), null);
+                            }
+                        }
+                    }
+
+                    TextOperation committedOp = new TextOperation(
+                            committedDelta,
+                            textOp.getActorEmail(),
+                            textOp.getRevision(),
+                            OpState.COMMITTED,
+                            textOp.getCreatedAt()
+                    );
+
+                    textOp.setDelta(remainingDelta);
+
+                    int textOpIndex = note.revisionLog().indexOf(textOp);
+                    note.revisionLog().add(textOpIndex, committedOp);
+                }
+
+                log.debug("Committed operation: {}", textOp.getOpId());
             }
-        }).toList();
+        });
 
         redisService.updateNote(note, newNoteVersion);
         saveNote(actorEmail, noteId);
@@ -367,45 +440,86 @@ public class NoteServiceImpl implements NoteService {
         NoteDto note = redisService.getNote(noteId);
         List<TextOperation> log = note.revisionLog();
 
-        log.stream()
-                .filter(op -> payload.cancelledOpIds().contains(op.getOpId()))
-                .forEach(op -> op.setState(OpState.COMMITTED));
-
         TextOperation cancellingOp = log.stream()
                 .filter(op -> op.getOpId().equals(payload.cancellingOpId()))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("Cancelling op not found"));
+                .orElseThrow(() -> new BadRequestException("Cancelling op not found: " + payload.cancellingOpId()));
 
-        int consumed = payload.consumedBefore() + payload.opLength();
-        int total = payload.totalLength();
+        Op cancellingRetain = cancellingOp.getDelta().ops.get(payload.retainComponentIndex());
+        if (cancellingRetain == null || !cancellingRetain.isRetain()) {
+            throw new BadRequestException(
+                    "Could not locate retain component at index "
+                            + payload.retainComponentIndex()
+                            + " for op: " + payload.cancellingOpId()
+            );
+        }
 
-        if (consumed == total) {
+        int overlapLen = payload.opLength();
+
+        // Split each affected pending format op so only the surviving remainder stays pending
+        for (OpReference ref : payload.targetReferences()) {
+            TextOperation targetOp = log.stream()
+                    .filter(op -> op.getOpId().equals(ref.opId()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetOp == null || targetOp.getState() != OpState.PENDING) {
+                continue;
+            }
+
+            Delta originalTargetDelta = targetOp.getDelta();
+            Op targetRetain = originalTargetDelta.ops.get(ref.componentIndex());
+
+            if (targetRetain == null) {
+                throw new BadRequestException(
+                        "Could not locate target retain component at index "
+                                + ref.componentIndex()
+                                + " for op: " + ref.opId()
+                );
+            }
+
+            int fullLen = (Integer) targetRetain.getRetain();
+
+            int consumed = Math.min(payload.consumedBefore() + overlapLen, fullLen);
+            int remainingLen = fullLen - consumed;
+
+            if (consumed <= 0) {
+                continue;
+            }
+
+            if (remainingLen == 0) {
+                targetOp.setState(OpState.COMMITTED);
+            } else {
+                Delta pendingRemainderDelta = new Delta();
+                for (int i = 0; i < ref.componentIndex(); i++) {
+                    pendingRemainderDelta.push(originalTargetDelta.ops.get(i));
+                }
+
+                pendingRemainderDelta.retain(consumed, null);
+                pendingRemainderDelta.retain(remainingLen, targetRetain.getAttributes());
+
+                for (int i = ref.componentIndex() + 1; i < originalTargetDelta.ops.size(); i++) {
+                    pendingRemainderDelta.push(originalTargetDelta.ops.get(i));
+                }
+
+                targetOp.setDelta(pendingRemainderDelta);
+            }
+        }
+
+        // Persist the cancelling op split as well, so this work is not redone every rebuild
+        int cancellingConsumed = payload.consumedBefore() + overlapLen;
+        int cancellingTotal = (Integer) cancellingRetain.getRetain();
+
+        if (cancellingConsumed >= cancellingTotal) {
             cancellingOp.setState(OpState.COMMITTED);
         } else {
-            int retainComponentIndex = -1;
-            for (int i = 0; i < cancellingOp.getDelta().ops.size(); i++) {
-                Op op = cancellingOp.getDelta().ops.get(i);
-                if (op.isRetain() && op.getAttributes() != null && !op.getAttributes().isEmpty()) {
-                    retainComponentIndex = i;
-                    break;
-                }
-            }
-
-            if (retainComponentIndex == -1) {
-                throw new BadRequestException("Could not locate retain component in cancelling op");
-            }
-
-            Op retainComponent = cancellingOp.getDelta().ops.get(retainComponentIndex);
-            int fullRetainLength = (Integer) retainComponent.getRetain();
-            int remainingRetainLength = fullRetainLength - consumed;
-
             Delta committedDelta = new Delta();
-            for (int i = 0; i < retainComponentIndex; i++) {
+            for (int i = 0; i < payload.retainComponentIndex(); i++) {
                 committedDelta.push(cancellingOp.getDelta().ops.get(i));
             }
-            committedDelta.retain(consumed, retainComponent.getAttributes());
+            committedDelta.retain(cancellingConsumed, cancellingRetain.getAttributes());
 
-            TextOperation committedOp = new TextOperation(
+            TextOperation committedPart = new TextOperation(
                     committedDelta,
                     cancellingOp.getActorEmail(),
                     cancellingOp.getRevision(),
@@ -414,19 +528,19 @@ public class NoteServiceImpl implements NoteService {
             );
 
             Delta remainingDelta = new Delta();
-            for (int i = 0; i < retainComponentIndex; i++) {
+            for (int i = 0; i < payload.retainComponentIndex(); i++) {
                 remainingDelta.push(cancellingOp.getDelta().ops.get(i));
             }
-            remainingDelta.retain(consumed, null);
-            remainingDelta.retain(remainingRetainLength, retainComponent.getAttributes());
-            for (int i = retainComponentIndex + 1; i < cancellingOp.getDelta().ops.size(); i++) {
+            remainingDelta.retain(cancellingConsumed, null);
+            remainingDelta.retain(cancellingTotal - cancellingConsumed, cancellingRetain.getAttributes());
+            for (int i = payload.retainComponentIndex() + 1; i < cancellingOp.getDelta().ops.size(); i++) {
                 remainingDelta.push(cancellingOp.getDelta().ops.get(i));
             }
 
             cancellingOp.setDelta(remainingDelta);
 
-            int cancellingOpIndex = log.indexOf(cancellingOp);
-            log.add(cancellingOpIndex, committedOp);
+            int cancellingIndex = log.indexOf(cancellingOp);
+            log.add(cancellingIndex, committedPart);
         }
 
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
@@ -445,7 +559,7 @@ public class NoteServiceImpl implements NoteService {
         redisService.updateNote(updatedNote, noteVersion);
         saveNote(actorEmail, noteId);
     }
-
+    
     @Override
     public void exitReviewNote(String actorEmail, UUID noteId) {
         notePolicyService.validateOwner(actorEmail,noteId);

@@ -15,6 +15,6 @@ public record ReviewNotePayload(
         @Schema(
                 description = "list of accepted text operations"
         )
-        List<String> acceptedOpIds
+        List<OpReferenceResponse> acceptedReferences
 ) {
 }
