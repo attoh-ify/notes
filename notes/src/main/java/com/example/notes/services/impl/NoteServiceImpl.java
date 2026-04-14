@@ -30,7 +30,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 @Service
 public class NoteServiceImpl implements NoteService {
@@ -290,20 +289,37 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public void cancelInsert(String actorEmail, UUID noteId, CancelInsertPayload payload) {
+        log.info("[CANCEL_INSERT] START — actor={} noteId={} insertOpId={} deleteOpId={} insertComponentIndex={} deleteComponentIndex={} overlapLength={}",
+                actorEmail, noteId, payload.insertOpId(), payload.deleteOpId(),
+                payload.insertComponentIndex(), payload.deleteComponentIndex(), payload.overlapLength());
+
         notePolicyService.validateOwner(actorEmail, noteId);
+        log.info("[CANCEL_INSERT] Owner validation passed — actor={} noteId={}", actorEmail, noteId);
 
         NoteDto note = redisService.getNote(noteId);
-        List<TextOperation> log = note.revisionLog();
+        List<TextOperation> log_ops = note.revisionLog();
+        log.info("[CANCEL_INSERT] Loaded revision log — opCount={}", log_ops.size());
 
-        TextOperation insertOp = log.stream()
+        TextOperation insertOp = log_ops.stream()
                 .filter(op -> op.getOpId().equals(payload.insertOpId()))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("Insert op not found: " + payload.insertOpId()));
+                .orElseThrow(() -> {
+                    log.warn("[CANCEL_INSERT] ERROR — insert op not found in log: insertOpId={}", payload.insertOpId());
+                    return new BadRequestException("Insert op not found: " + payload.insertOpId());
+                });
+
+        log.info("[CANCEL_INSERT] Found insertOp — opId={} actor={} state={} deltaOpCount={}",
+                insertOp.getOpId(), insertOp.getActorEmail(), insertOp.getState(), insertOp.getDelta().ops.size());
 
         Op insertComponent = insertOp.getDelta().ops.get(payload.insertComponentIndex());
         if (insertComponent == null) {
+            log.warn("[CANCEL_INSERT] ERROR — insert component not found at index={} for opId={}", payload.insertComponentIndex(), payload.insertOpId());
             throw new BadRequestException("Could not locate insert component in delta for op: " + payload.insertOpId());
         }
+
+        log.info("[CANCEL_INSERT] Found insertComponent at componentIndex={} — type=insert text=\"{}\"",
+                payload.insertComponentIndex(),
+                insertComponent.getInsert() instanceof String s ? s : "[non-string]");
 
         int charsBeforeInsert = 0;
         {
@@ -320,23 +336,33 @@ public class NoteServiceImpl implements NoteService {
             }
         }
 
+        log.info("[CANCEL_INSERT] Computed charsBeforeInsert={}", charsBeforeInsert);
+
         String fullInsertText = (String) insertComponent.getInsert();
         int overlapLength = payload.overlapLength();
         int insertTotalLength = insertComponent.length();
 
+        log.info("[CANCEL_INSERT] fullInsertText=\"{}\" overlapLength={} insertTotalLength={}",
+                fullInsertText, overlapLength, insertTotalLength);
+
         if (overlapLength == insertTotalLength) {
+            log.info("[CANCEL_INSERT] overlapLength == insertTotalLength — marking entire insertOp as COMMITTED opId={}", insertOp.getOpId());
             insertOp.setState(OpState.COMMITTED);
         } else {
             String committedText = fullInsertText.substring(0, overlapLength);
             String remainingText = fullInsertText.substring(overlapLength);
 
+            log.info("[CANCEL_INSERT] Partial overlap — committedText=\"{}\" remainingText=\"{}\"", committedText, remainingText);
+
             Delta committedDelta = new Delta();
 
             if (charsBeforeInsert > 0) {
                 committedDelta.retain(charsBeforeInsert, null);
+                log.info("[CANCEL_INSERT] committedDelta: retain({}) prepended", charsBeforeInsert);
             }
 
             committedDelta.insert(committedText, insertComponent.getAttributes());
+            log.info("[CANCEL_INSERT] committedDelta: insert \"{}\" added", committedText);
 
             TextOperation committedInsertOp = new TextOperation(
                     committedDelta,
@@ -345,6 +371,7 @@ public class NoteServiceImpl implements NoteService {
                     OpState.COMMITTED,
                     insertOp.getCreatedAt()
             );
+            log.info("[CANCEL_INSERT] Created committedInsertOp for actor={} revision={}", insertOp.getActorEmail(), insertOp.getRevision());
 
             Delta remainingDelta = new Delta();
 
@@ -355,31 +382,46 @@ public class NoteServiceImpl implements NoteService {
             remainingDelta.retain(overlapLength, null);
             remainingDelta.insert(remainingText, insertComponent.getAttributes());
 
+            log.info("[CANCEL_INSERT] remainingDelta: retain({}) + insert \"{}\" built", overlapLength, remainingText);
+
             for (int i = payload.insertComponentIndex() + 1; i < insertOp.getDelta().ops.size(); i++) {
                 remainingDelta.push(insertOp.getDelta().ops.get(i));
             }
 
             insertOp.setDelta(remainingDelta);
 
-            int insertOpIndex = log.indexOf(insertOp);
-            log.add(insertOpIndex, committedInsertOp);
+            int insertOpIndex = log_ops.indexOf(insertOp);
+            log_ops.add(insertOpIndex, committedInsertOp);
+            log.info("[CANCEL_INSERT] Inserted committedInsertOp at logIndex={} — new logSize={}", insertOpIndex, log_ops.size());
         }
 
-        TextOperation deleteOp = log.stream()
+        TextOperation deleteOp = log_ops.stream()
                 .filter(op -> op.getOpId().equals(payload.deleteOpId()))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("Delete op not found: " + payload.deleteOpId()));
+                .orElseThrow(() -> {
+                    log.warn("[CANCEL_INSERT] ERROR — delete op not found in log: deleteOpId={}", payload.deleteOpId());
+                    return new BadRequestException("Delete op not found: " + payload.deleteOpId());
+                });
+
+        log.info("[CANCEL_INSERT] Found deleteOp — opId={} actor={} state={} deltaOpCount={}",
+                deleteOp.getOpId(), deleteOp.getActorEmail(), deleteOp.getState(), deleteOp.getDelta().ops.size());
 
         Op deleteComponent = deleteOp.getDelta().ops.get(payload.deleteComponentIndex());
         if (deleteComponent == null) {
+            log.warn("[CANCEL_INSERT] ERROR — delete component not found at index={} for opId={}", payload.deleteComponentIndex(), payload.deleteOpId());
             throw new BadRequestException("Could not locate delete component in delta for op: " + payload.deleteOpId());
         }
 
         int deleteTotalLength = deleteComponent.getDelete();
+        log.info("[CANCEL_INSERT] Found deleteComponent at index={} — deleteTotalLength={}", payload.deleteComponentIndex(), deleteTotalLength);
 
         if (overlapLength == deleteTotalLength) {
+            log.info("[CANCEL_INSERT] overlapLength == deleteTotalLength — marking entire deleteOp as COMMITTED opId={}", deleteOp.getOpId());
             deleteOp.setState(OpState.COMMITTED);
         } else {
+            log.info("[CANCEL_INSERT] Partial delete overlap — splitting: committedDelete={} remainingDelete={}",
+                    overlapLength, deleteTotalLength - overlapLength);
+
             Delta committedDeleteDelta = new Delta();
 
             for (int i = 0; i < payload.deleteComponentIndex(); i++) {
@@ -387,6 +429,7 @@ public class NoteServiceImpl implements NoteService {
             }
 
             committedDeleteDelta.delete(overlapLength);
+            log.info("[CANCEL_INSERT] committedDeleteDelta: delete({}) built", overlapLength);
 
             TextOperation committedDeleteOp = new TextOperation(
                     committedDeleteDelta,
@@ -395,14 +438,16 @@ public class NoteServiceImpl implements NoteService {
                     OpState.COMMITTED,
                     deleteOp.getCreatedAt()
             );
+            log.info("[CANCEL_INSERT] Created committedDeleteOp for actor={} revision={}", deleteOp.getActorEmail(), deleteOp.getRevision());
 
             Delta remainingDeleteDelta = new Delta();
 
-            for(int i = 0; i < payload.deleteComponentIndex(); i++) {
+            for (int i = 0; i < payload.deleteComponentIndex(); i++) {
                 remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
             }
 
             remainingDeleteDelta.delete(deleteTotalLength - overlapLength);
+            log.info("[CANCEL_INSERT] remainingDeleteDelta: delete({}) built", deleteTotalLength - overlapLength);
 
             for (int i = payload.deleteComponentIndex() + 1; i < deleteOp.getDelta().ops.size(); i++) {
                 remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
@@ -410,17 +455,19 @@ public class NoteServiceImpl implements NoteService {
 
             deleteOp.setDelta(remainingDeleteDelta);
 
-            int deleteOpIndex = log.indexOf(deleteOp);
-            log.add(deleteOpIndex, committedDeleteOp);
+            int deleteOpIndex = log_ops.indexOf(deleteOp);
+            log_ops.add(deleteOpIndex, committedDeleteOp);
+            log.info("[CANCEL_INSERT] Inserted committedDeleteOp at logIndex={} — new logSize={}", deleteOpIndex, log_ops.size());
         }
 
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+        log.info("[CANCEL_INSERT] Fetched NoteVersion for noteId={}", noteId);
 
         NoteDto updatedNote = new NoteDto(
                 note.id(),
                 note.ownerEmail(),
                 note.title(),
-                log,
+                log_ops,
                 note.visibility(),
                 note.accessRole(),
                 note.currentNoteVersionNumber(),
@@ -429,24 +476,41 @@ public class NoteServiceImpl implements NoteService {
         );
 
         redisService.updateNote(updatedNote, noteVersion);
+        log.info("[CANCEL_INSERT] Note updated in Redis — noteId={}", noteId);
 
         saveNote(actorEmail, noteId);
+        log.info("[CANCEL_INSERT] Note saved to persistent store — actor={} noteId={}", actorEmail, noteId);
+        log.info("[CANCEL_INSERT] END — actor={} noteId={} insertOpId={}", actorEmail, noteId, payload.insertOpId());
     }
 
     @Override
     public void cancelFormat(String actorEmail, UUID noteId, CancelFormatPayload payload) {
+        log.info("[CANCEL_FORMAT] START — actor={} noteId={} cancellingOpId={} retainComponentIndex={} opLength={} consumedBefore={} targetReferenceCount={}",
+                actorEmail, noteId, payload.cancellingOpId(), payload.retainComponentIndex(),
+                payload.opLength(), payload.consumedBefore(), payload.targetReferences().size());
+
         notePolicyService.validateOwner(actorEmail, noteId);
+        log.info("[CANCEL_FORMAT] Owner validation passed — actor={} noteId={}", actorEmail, noteId);
 
         NoteDto note = redisService.getNote(noteId);
-        List<TextOperation> log = note.revisionLog();
+        List<TextOperation> log_ops = note.revisionLog();
+        log.info("[CANCEL_FORMAT] Loaded revision log — opCount={}", log_ops.size());
 
-        TextOperation cancellingOp = log.stream()
+        TextOperation cancellingOp = log_ops.stream()
                 .filter(op -> op.getOpId().equals(payload.cancellingOpId()))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("Cancelling op not found: " + payload.cancellingOpId()));
+                .orElseThrow(() -> {
+                    log.warn("[CANCEL_FORMAT] ERROR — cancelling op not found: cancellingOpId={}", payload.cancellingOpId());
+                    return new BadRequestException("Cancelling op not found: " + payload.cancellingOpId());
+                });
+
+        log.info("[CANCEL_FORMAT] Found cancellingOp — opId={} actor={} state={} deltaOpCount={}",
+                cancellingOp.getOpId(), cancellingOp.getActorEmail(), cancellingOp.getState(), cancellingOp.getDelta().ops.size());
 
         Op cancellingRetain = cancellingOp.getDelta().ops.get(payload.retainComponentIndex());
         if (cancellingRetain == null || !cancellingRetain.isRetain()) {
+            log.warn("[CANCEL_FORMAT] ERROR — retain component not found or not a retain at index={} for opId={}",
+                    payload.retainComponentIndex(), payload.cancellingOpId());
             throw new BadRequestException(
                     "Could not locate retain component at index "
                             + payload.retainComponentIndex()
@@ -454,23 +518,34 @@ public class NoteServiceImpl implements NoteService {
             );
         }
 
+        int cancellingRetainTotal = (Integer) cancellingRetain.getRetain();
+        log.info("[CANCEL_FORMAT] Found cancellingRetain at index={} — retainLength={}", payload.retainComponentIndex(), cancellingRetainTotal);
+
         int overlapLen = payload.opLength();
 
-        // Split each affected pending format op so only the surviving remainder stays pending
+        // Split each affected pending format op
         for (OpReference ref : payload.targetReferences()) {
-            TextOperation targetOp = log.stream()
+            log.info("[CANCEL_FORMAT] Processing targetReference — refOpId={} refComponentIndex={}", ref.opId(), ref.componentIndex());
+
+            TextOperation targetOp = log_ops.stream()
                     .filter(op -> op.getOpId().equals(ref.opId()))
                     .findFirst()
                     .orElse(null);
 
             if (targetOp == null || targetOp.getState() != OpState.PENDING) {
+                log.info("[CANCEL_FORMAT] Skipping refOpId={} — notFound={} state={}",
+                        ref.opId(), targetOp == null, targetOp != null ? targetOp.getState() : "N/A");
                 continue;
             }
+
+            log.info("[CANCEL_FORMAT] Found targetOp — opId={} actor={} state={}",
+                    targetOp.getOpId(), targetOp.getActorEmail(), targetOp.getState());
 
             Delta originalTargetDelta = targetOp.getDelta();
             Op targetRetain = originalTargetDelta.ops.get(ref.componentIndex());
 
             if (targetRetain == null) {
+                log.warn("[CANCEL_FORMAT] ERROR — target retain not found at componentIndex={} for opId={}", ref.componentIndex(), ref.opId());
                 throw new BadRequestException(
                         "Could not locate target retain component at index "
                                 + ref.componentIndex()
@@ -479,15 +554,19 @@ public class NoteServiceImpl implements NoteService {
             }
 
             int fullLen = (Integer) targetRetain.getRetain();
-
             int consumed = Math.min(payload.consumedBefore() + overlapLen, fullLen);
             int remainingLen = fullLen - consumed;
 
+            log.info("[CANCEL_FORMAT] targetRetain fullLen={} consumedBefore={} overlapLen={} consumed={} remainingLen={}",
+                    fullLen, payload.consumedBefore(), overlapLen, consumed, remainingLen);
+
             if (consumed <= 0) {
+                log.info("[CANCEL_FORMAT] consumed={} <= 0 — skipping this reference", consumed);
                 continue;
             }
 
             if (remainingLen == 0) {
+                log.info("[CANCEL_FORMAT] remainingLen=0 — marking targetOp as COMMITTED opId={}", targetOp.getOpId());
                 targetOp.setState(OpState.COMMITTED);
             } else {
                 Delta pendingRemainderDelta = new Delta();
@@ -503,21 +582,30 @@ public class NoteServiceImpl implements NoteService {
                 }
 
                 targetOp.setDelta(pendingRemainderDelta);
+                log.info("[CANCEL_FORMAT] Updated targetOp delta — retain({}, null) + retain({}, attrs) for opId={}",
+                        consumed, remainingLen, targetOp.getOpId());
             }
         }
 
-        // Persist the cancelling op split as well, so this work is not redone every rebuild
+        // Persist the cancelling op split
         int cancellingConsumed = payload.consumedBefore() + overlapLen;
-        int cancellingTotal = (Integer) cancellingRetain.getRetain();
+        log.info("[CANCEL_FORMAT] Splitting cancellingOp — cancellingConsumed={} cancellingTotal={}",
+                cancellingConsumed, cancellingRetainTotal);
 
-        if (cancellingConsumed >= cancellingTotal) {
+        if (cancellingConsumed >= cancellingRetainTotal) {
+            log.info("[CANCEL_FORMAT] cancellingConsumed >= total — marking cancellingOp as COMMITTED opId={}", cancellingOp.getOpId());
             cancellingOp.setState(OpState.COMMITTED);
         } else {
+            int cancellingRemainder = cancellingRetainTotal - cancellingConsumed;
+            log.info("[CANCEL_FORMAT] Partial cancelling split — committedPortion={} remainderPortion={}", cancellingConsumed, cancellingRemainder);
+
             Delta committedDelta = new Delta();
             for (int i = 0; i < payload.retainComponentIndex(); i++) {
                 committedDelta.push(cancellingOp.getDelta().ops.get(i));
             }
             committedDelta.retain(cancellingConsumed, cancellingRetain.getAttributes());
+
+            log.info("[CANCEL_FORMAT] committedDelta: retain({}, attrs) built", cancellingConsumed);
 
             TextOperation committedPart = new TextOperation(
                     committedDelta,
@@ -526,29 +614,34 @@ public class NoteServiceImpl implements NoteService {
                     OpState.COMMITTED,
                     cancellingOp.getCreatedAt()
             );
+            log.info("[CANCEL_FORMAT] Created committedPart for actor={} revision={}", cancellingOp.getActorEmail(), cancellingOp.getRevision());
 
             Delta remainingDelta = new Delta();
             for (int i = 0; i < payload.retainComponentIndex(); i++) {
                 remainingDelta.push(cancellingOp.getDelta().ops.get(i));
             }
             remainingDelta.retain(cancellingConsumed, null);
-            remainingDelta.retain(cancellingTotal - cancellingConsumed, cancellingRetain.getAttributes());
+            remainingDelta.retain(cancellingRemainder, cancellingRetain.getAttributes());
             for (int i = payload.retainComponentIndex() + 1; i < cancellingOp.getDelta().ops.size(); i++) {
                 remainingDelta.push(cancellingOp.getDelta().ops.get(i));
             }
 
             cancellingOp.setDelta(remainingDelta);
+            log.info("[CANCEL_FORMAT] Updated cancellingOp delta — retain({}, null) + retain({}, attrs)", cancellingConsumed, cancellingRemainder);
 
-            int cancellingIndex = log.indexOf(cancellingOp);
-            log.add(cancellingIndex, committedPart);
+            int cancellingIndex = log_ops.indexOf(cancellingOp);
+            log_ops.add(cancellingIndex, committedPart);
+            log.info("[CANCEL_FORMAT] Inserted committedPart at logIndex={} — new logSize={}", cancellingIndex, log_ops.size());
         }
 
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+        log.info("[CANCEL_FORMAT] Fetched NoteVersion for noteId={}", noteId);
+
         NoteDto updatedNote = new NoteDto(
                 note.id(),
                 note.ownerEmail(),
                 note.title(),
-                log,
+                log_ops,
                 note.visibility(),
                 note.accessRole(),
                 note.currentNoteVersionNumber(),
@@ -557,9 +650,13 @@ public class NoteServiceImpl implements NoteService {
         );
 
         redisService.updateNote(updatedNote, noteVersion);
+        log.info("[CANCEL_FORMAT] Note updated in Redis — noteId={}", noteId);
+
         saveNote(actorEmail, noteId);
+        log.info("[CANCEL_FORMAT] Note saved to persistent store — actor={} noteId={}", actorEmail, noteId);
+        log.info("[CANCEL_FORMAT] END — actor={} noteId={} cancellingOpId={}", actorEmail, noteId, payload.cancellingOpId());
     }
-    
+
     @Override
     public void exitReviewNote(String actorEmail, UUID noteId) {
         notePolicyService.validateOwner(actorEmail,noteId);

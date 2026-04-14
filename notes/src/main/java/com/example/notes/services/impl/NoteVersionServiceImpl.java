@@ -1,6 +1,7 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
+import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.OpState;
@@ -11,6 +12,7 @@ import com.example.notes.mappers.NoteVersionMapper;
 import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
+import com.example.notes.services.NoteService;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
@@ -24,6 +26,7 @@ import java.util.UUID;
 
 @Service
 public class NoteVersionServiceImpl implements NoteVersionService {
+    private final NoteService noteService;
     private final NoteRepository noteRepository;
     private final NoteVersionRepository noteVersionRepository;
     private final NotePolicyService notePolicyService;
@@ -36,7 +39,8 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Autowired
     private ReviewInProgressNotifier reviewInProgressNotifier;
 
-    public NoteVersionServiceImpl(NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService) {
+    public NoteVersionServiceImpl(NoteService noteService, NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService) {
+        this.noteService = noteService;
         this.noteRepository = noteRepository;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
@@ -64,19 +68,25 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     @Override
     public NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload) {
-        Note note = notePolicyService.validateSuper(actorEmail, noteId);
+        notePolicyService.validateSuper(actorEmail, noteId);
 
-        note.getRevisionLog().stream().peek(op -> {
+        NoteDto note = redisService.getNote(noteId);
+
+        note.revisionLog().stream().peek(op -> {
             if (op.getState().equals(OpState.PENDING)) {
                 op.setState(OpState.COMMITTED);
             }
         }).toList();
 
+        Note updatedNote = notePolicyService.validateSuper(actorEmail, noteId);
+
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
+        redisService.updateNote(note, noteVersion);
+        noteService.saveNote(actorEmail, noteId);
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
-                note,
+                updatedNote,
                 noteVersion.masterDelta(),
                 noteVersion.revision(),
                 payload.comment(),
