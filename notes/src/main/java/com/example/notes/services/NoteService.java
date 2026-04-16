@@ -16,8 +16,6 @@ public interface NoteService {
     void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail);
     void startReview(String actorEmail, UUID noteId);
     void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload);
-    void cancelInsert(String actorEmail, UUID noteId, CancelInsertPayload payload);
-    void cancelFormat(String actorEmail, UUID noteId, CancelFormatPayload payload);
     void exitReviewNote(String actorEmail, UUID noteId);
     void saveNote(String actorEmail, UUID noteId);
     void deleteNote(String actorEmail, UUID noteId);

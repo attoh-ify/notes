@@ -7,7 +7,6 @@ public record CancelFormatPayload (
         String cancellingOpId,
         int retainComponentIndex,
         int opLength,
-        int totalLength,
         int consumedBefore
 ) {
 }

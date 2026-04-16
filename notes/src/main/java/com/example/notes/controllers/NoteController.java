@@ -1,6 +1,7 @@
 package com.example.notes.controllers;
 
 import com.example.notes.config.activeMq.MessageProducer;
+import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.ot.TextOperation;
@@ -8,6 +9,7 @@ import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
+import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -26,10 +28,12 @@ import java.util.UUID;
 public class NoteController {
     private final NoteService noteService;
     private final MessageProducer messageProducer;
+    private final AttributionService attributionService;
 
-    public NoteController(NoteService noteService, MessageProducer messageProducer) {
+    public NoteController(NoteService noteService, MessageProducer messageProducer, AttributionService attributionService) {
         this.noteService = noteService;
         this.messageProducer = messageProducer;
+        this.attributionService = attributionService;
     }
 
     @PostMapping
@@ -76,6 +80,12 @@ public class NoteController {
         return new ResponseDto("ok");
     }
 
+    @GetMapping("/{noteId}/build-attribution")
+    public ResponseDto buildAttribution(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
+        ReviewProjection reviewProjection = attributionService.buildReviewProjection(currentUser.getEmail(), noteId);
+        return new ResponseDto(true, "ok", reviewProjection);
+    }
+
     @GetMapping("/{noteId}/review")
     public ResponseDto startReview(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
         noteService.startReview(currentUser.getEmail(), noteId);
@@ -85,18 +95,6 @@ public class NoteController {
     @PostMapping("/{noteId}/review")
     public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody ReviewNotePayload payload) {
         noteService.applyReviewChanges(currentUser.getEmail(), noteId, payload);
-        return new ResponseDto("ok");
-    }
-
-    @PostMapping("/{noteId}/review/split/insert")
-    public ResponseDto cancelInsert(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody CancelInsertPayload payload) {
-        noteService.cancelInsert(currentUser.getEmail(), noteId, payload);
-        return new ResponseDto("ok");
-    }
-
-    @PostMapping("/{noteId}/review/split/format")
-    public ResponseDto cancelFormat(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody CancelFormatPayload payload) {
-        noteService.cancelFormat(currentUser.getEmail(), noteId, payload);
         return new ResponseDto("ok");
     }
 
