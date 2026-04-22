@@ -98,9 +98,6 @@ public class AttributionServiceImpl implements AttributionService {
     public ReviewProjection buildReviewProjection(
             String actorEmail, UUID noteId
     ) {
-        log.info("\n{}", "=".repeat(60));
-        log.info("[REVIEW_BUILD] START — noteId={}", noteId);
-
         notePolicyService.validateOwner(actorEmail, noteId);
 
         NoteDto note = redisService.getNote(noteId);
@@ -111,8 +108,6 @@ public class AttributionServiceImpl implements AttributionService {
         List<TextOperation> pendingTextOps = note.revisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.PENDING))
                 .toList();
-        
-        log.info("[REVIEW_BUILD] committedOpCount={} pendingOpCount={}", committedTextOps.size(), pendingTextOps.size());
         
         // Reset the group ID counter so IDs are predictable (g_1, g_2...) for each build
         resetGroupCounter();
@@ -125,7 +120,6 @@ public class AttributionServiceImpl implements AttributionService {
         for (TextOperation textOp : committedTextOps) {
             committedDelta = committedDelta.compose(new Delta(textOp.getDelta().ops));
         }
-        log.info("[REVIEW_BUILD] Composed committed delta — opCount={}", committedDelta.ops.size());
 
         // Break the committed delta into individual runs. Text segments are split on
         // "\n" so that each newline becomes its own run — required because Quill treats
@@ -149,8 +143,7 @@ public class AttributionServiceImpl implements AttributionService {
                             .baseAttributes(new LinkedHashMap<>(opAttrs))
                             .suggestionAttributes(new LinkedHashMap<>())
                             .logicalStart(seedPos)
-                            .opId("")            // Empty = came from committed state
-                            .insertComponentIndex(idx)
+                            .insertReferences(new ArrayList<>())
                             .build());
                     seedPos += parts[i].length();
                 }
@@ -161,14 +154,12 @@ public class AttributionServiceImpl implements AttributionService {
                             .baseAttributes(new LinkedHashMap<>())
                             .suggestionAttributes(new LinkedHashMap<>())
                             .logicalStart(seedPos)
-                            .opId("")
-                            .insertComponentIndex(idx)
+                            .insertReferences(new ArrayList<>())
                             .build());
                     seedPos += 1;
                 }
             }
         }
-        log.info("[REVIEW_BUILD] Seeded {} committed run(s). Total logical length={}", runs.size(), seedPos);
 
         // ── STEP 2: Apply pending ops ──────────────────────────────────────────
 
@@ -183,9 +174,6 @@ public class AttributionServiceImpl implements AttributionService {
             String opId = textOp.getOpId();
             String authorEmail = textOp.getActorEmail();
             String createdAt = textOp.getCreatedAt().toString();
-
-            log.info("\n[REVIEW_BUILD] --- Processing pending op opId={} actor={} componentCount={}",
-                    opId, authorEmail, textOp.getDelta().ops.size());
 
             // Per-op group tracking — allows consecutive insert/delete/format components
             // to be merged into one suggestion group.
@@ -210,13 +198,9 @@ public class AttributionServiceImpl implements AttributionService {
                     int retainLen = (int) component.getRetain();
                     boolean isLastOp = (compIdx == components.size() - 1);
 
-                    log.debug("[RETAIN_PLAIN] opId={} compIdx={} retain={} localLogPos={} isLastOp={}",
-                            opId, compIdx, retainLen, localLogPos, isLastOp);
-
                     // The trailing retain that Quill appends to every delta (to fill out
                     // the document length) has no semantic meaning — skip it.
                     if (isLastOp) {
-                        log.debug("[RETAIN_PLAIN] opId={} compIdx={} — last op, breaking early", opId, compIdx);
                         break;
                     }
 
@@ -224,10 +208,6 @@ public class AttributionServiceImpl implements AttributionService {
                     currentDeleteGroup = null;
 
                     boolean newlineOnly = isOnlyNewlineRetain(runs, localLogPos, retainLen);
-                    log.debug("[RETAIN_PLAIN] opId={} compIdx={} newlineOnly={} currentFormatGroupId=\"{}\"",
-                            opId, compIdx, newlineOnly,
-                            currentFormatGroup != null ? currentFormatGroup.getGroupId() : "none");
-
                     if (newlineOnly && currentFormatGroup != null) {
                         // A newline-only retain between two format retains means the format
                         // spans a paragraph break. Extend the current format group's span to
@@ -238,26 +218,15 @@ public class AttributionServiceImpl implements AttributionService {
                         int absPos = absPosResult.absPos();
                         int absLength = nextAbsPosResult.absPos() - absPos;
 
-                        log.debug("[RETAIN_PLAIN] opId={} compIdx={} — newline-only retain bridging formatGroup={} absPos={} absLength={}",
-                                opId, compIdx, currentFormatGroup.getGroupId(), absPos, absLength);
-
                         int beforeSpanCount = currentFormatGroup.getSpans().size();
                         currentFormatGroup.setSpans(extendOrAddSpan(
                                 currentFormatGroup.getSpans(), absPos, absLength));
-
-                        log.debug("[RETAIN_PLAIN] formatGroup={} spanCount {} -> {} after newline bridge",
-                                currentFormatGroup.getGroupId(), beforeSpanCount, currentFormatGroup.getSpans().size());
 
                         pendingFormatBridge = new HashMap<>();
                         pendingFormatBridge.put("actorEmail", authorEmail);
                         pendingFormatBridge.put("attributes", currentFormatGroup.getAttributes());
                         pendingFormatBridge.put("groupId", currentFormatGroup.getGroupId());
-                        log.debug("[RETAIN_PLAIN] Set pendingFormatBridge to groupId={}", currentFormatGroup.getGroupId());
                     } else {
-                        if (currentFormatGroup != null) {
-                            log.debug("[RETAIN_PLAIN] opId={} compIdx={} — non-newline retain breaks formatGroup={}",
-                                    opId, compIdx, currentFormatGroup.getGroupId());
-                        }
                         currentFormatGroup = null;
                         pendingFormatBridge = null;
                     }
@@ -275,16 +244,11 @@ public class AttributionServiceImpl implements AttributionService {
                     Map<String, Object> componentAttrs = new LinkedHashMap<>(component.getAttributes());
                     String attrKeys = String.join(",", componentAttrs.keySet());
 
-                    log.debug("\n[RETAIN_FORMAT] opId={} compIdx={} retain={} localLogPos={} attrKeys=\"{}\"",
-                            opId, compIdx, retainLen, localLogPos, attrKeys);
-
                     RunPosition startPos = findRunPos(runs, localLogPos);
                     int runIdx = startPos.idx();
                     int startOffset = startPos.offset();
 
                     if (startOffset > 0 && runIdx < runs.size()) {
-                        log.debug("[RETAIN_FORMAT] opId={} compIdx={} — splitting run at runIdx={} offset={} before processing",
-                                opId, compIdx, runIdx, startOffset);
                         runIdx = splitAt(runs, runIdx, startOffset);
                     }
 
@@ -295,15 +259,11 @@ public class AttributionServiceImpl implements AttributionService {
                         ReviewRun run = runs.get(cursor);
 
                         if (run.getDeleteSuggestion() != null) {
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} — skipping deleted run text=\"{}\"",
-                                    opId, cursor, run.getText());
                             cursor++;
                             continue;
                         }
 
                         if ("\n".equals(run.getText())) {
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} — newline run, bridging format group if active",
-                                    opId, cursor);
                             cursor++;
 //                            remaining--;
 
@@ -312,24 +272,17 @@ public class AttributionServiceImpl implements AttributionService {
                                 pendingFormatBridge.put("actorEmail", authorEmail);
                                 pendingFormatBridge.put("attributes", currentFormatGroup.getAttributes());
                                 pendingFormatBridge.put("groupId", currentFormatGroup.getGroupId());
-                                log.debug("[RETAIN_FORMAT] Set pendingFormatBridge to groupId={} after newline",
-                                        currentFormatGroup.getGroupId());
                             }
                             continue;
                         }
 
                         if (run.getText().length() > remaining) {
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} run.text.length={} > remaining={} — splitting",
-                                    opId, cursor, run.getText().length(), remaining);
                             splitAt(runs, cursor, remaining);
                         }
 
                         ReviewRun target = runs.get(cursor);
                         int spanStart = target.getLogicalStart();
                         int spanLen = target.getText().length();
-
-                        log.debug("[RETAIN_FORMAT] opId={} cursor={} processing run text=\"{}\" logicalStart={} length={} remaining={}",
-                                opId, cursor, target.getText(), spanStart, spanLen, remaining);
 
                         Map<String, Object> rawIncomingAttrs = new LinkedHashMap<>(componentAttrs);
 
@@ -340,9 +293,6 @@ public class AttributionServiceImpl implements AttributionService {
                                         s.getStart() <= finalSpanStart
                                                 && s.getStart() + s.getLength() >= finalSpanStart + finalSpanLen))
                                 .toList();
-
-                        log.debug("[RETAIN_FORMAT] opId={} cursor={} coveringFormatCount={}",
-                                opId, cursor, coveringFormats.size());
 
                         for (FormatSuggestionItem fmt : new ArrayList<>(coveringFormats)) {
                             Map<String, Object> fmtAttrs = parseAttrs(fmt.getAttributes());
@@ -385,8 +335,6 @@ public class AttributionServiceImpl implements AttributionService {
                                 if (existingCancellation.isPresent()) {
                                     existingCancellation.get().setLength(
                                             existingCancellation.get().getLength() + spanLen);
-                                    log.debug("[RETAIN_FORMAT] opId={} — extending existing cancellation for formatGroup={} newLength={}",
-                                            opId, fmt.getGroupId(), existingCancellation.get().getLength());
                                 } else {
                                     pendingFormatCancellations.add(PendingFormatCancellation.builder()
                                             .groupId(fmt.getGroupId())
@@ -396,16 +344,12 @@ public class AttributionServiceImpl implements AttributionService {
                                             .consumedBefore(consumedBefore)
                                             .length(spanLen)
                                             .build());
-                                    log.debug("[RETAIN_FORMAT] opId={} — new cancellation queued for formatGroup={} length={} consumedBefore={}",
-                                            opId, fmt.getGroupId(), spanLen, consumedBefore);
                                 }
 
                                 removeRangeFromFormatSuggestion(fmt, spanStart, spanLen);
 
                                 if (fmt.getSpans().isEmpty()) {
                                     formatSuggestions.remove(fmt);
-                                    log.debug("[RETAIN_FORMAT] opId={} — formatGroup={} fully removed after cancel/replace",
-                                            opId, fmt.getGroupId());
                                 }
 
                                 if (target.getSuggestionAttributes() != null) {
@@ -430,17 +374,12 @@ public class AttributionServiceImpl implements AttributionService {
                         String attrStr = attrsToJson(rawIncomingAttrs);
                         String suggestionAttrKeys = String.join(",", rawIncomingAttrs.keySet());
 
-                        log.debug("[RETAIN_FORMAT] opId={} cursor={} suggestionAttrKeys=\"{}\" attrStr=\"{}\"",
-                                opId, cursor, suggestionAttrKeys, attrStr);
-
                         if (!rawIncomingAttrs.isEmpty()) {
                             if (currentFormatGroup == null) {
                                 final String finalAttrStr = attrStr;
                                 final String finalActorEmail = authorEmail;
                                 final int finalSpanStart2 = spanStart;
                                 final int finalSpanEnd2 = spanStart + spanLen;
-                                log.info("finalSpanStart2: " + finalSpanStart2);
-                                log.info("finalSpanEnd2: " + finalSpanEnd2);
 
                                 FormatSuggestionItem prevAdj = formatSuggestions.stream()
                                         .filter(f -> f.getActorEmail().equals(finalActorEmail))
@@ -457,32 +396,17 @@ public class AttributionServiceImpl implements AttributionService {
                                         .orElse(null);
 
                                 FormatSuggestionItem existing = null;
-                                if (prevAdj != null) {
-                                    log.info(prevAdj.toString());
-                                } else {
-                                    log.info("No prevAdj");
-                                }
-                                if (nextAdj != null) {
-                                    log.info(nextAdj.toString());
-                                } else {
-                                    log.info("No prevAdj");
-                                }
 
                                 if (prevAdj != null) {
                                     existing = prevAdj;
-                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — JOINED PREV formatGroup={}",
-                                            opId, cursor, existing.getGroupId());
 
                                     if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
-                                        log.debug("[RETAIN_FORMAT] opId={} cursor={} — UNIFYING next formatGroup={} into prev formatGroup={}",
-                                                opId, cursor, nextAdj.getGroupId(), prevAdj.getGroupId());
-
                                         for (OpReference ref : nextAdj.getReferences()) {
-                                            boolean alreadyExists = existing.getReferences().stream()
-                                                    .anyMatch(r -> r.opId().equals(ref.opId()) && Objects.equals(r.componentIndex(), ref.componentIndex()));
-                                            if (!alreadyExists) {
-                                                existing.getReferences().add(ref);
-                                            }
+                                            existing.setReferences(addReferenceIfMissing(
+                                                    existing.getReferences(),
+                                                    ref.opId(),
+                                                    ref.componentIndex()
+                                            ));
                                         }
 
                                         List<FormatSuggestionSpan> mergedSpans = new ArrayList<>();
@@ -507,16 +431,10 @@ public class AttributionServiceImpl implements AttributionService {
                                         }
 
                                         formatSuggestions.removeIf(f -> f.getGroupId().equals(nextAdj.getGroupId()));
-
-                                        log.debug("[RETAIN_FORMAT] opId={} cursor={} — next formatGroup={} unified into {}",
-                                                opId, cursor, nextAdj.getGroupId(), existing.getGroupId());
                                     }
 
                                 } else if (nextAdj != null) {
                                     existing = nextAdj;
-                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — JOINED NEXT formatGroup={}",
-                                            opId, cursor, existing.getGroupId());
-
                                 } else if (pendingFormatBridge != null
                                         && authorEmail.equals(pendingFormatBridge.get("actorEmail"))
                                         && attrStr.equals(pendingFormatBridge.get("attributes"))) {
@@ -525,11 +443,6 @@ public class AttributionServiceImpl implements AttributionService {
                                             .filter(f -> f.getGroupId().equals(bridgeGroupId))
                                             .findFirst()
                                             .orElse(null);
-
-                                    if (existing != null) {
-                                        log.debug("[RETAIN_FORMAT] opId={} cursor={} — BRIDGE reconnected to formatGroup={} across newline",
-                                                opId, cursor, existing.getGroupId());
-                                    }
                                 }
 
                                 if (existing == null) {
@@ -545,8 +458,6 @@ public class AttributionServiceImpl implements AttributionService {
                                             .dependsOnInsertGroupIds(new ArrayList<>())
                                             .build();
                                     formatSuggestions.add(existing);
-                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — CREATED new formatGroup={} attrKeys=\"{}\"",
-                                            opId, cursor, existing.getGroupId(), suggestionAttrKeys);
                                 }
 
                                 currentFormatGroup = existing;
@@ -557,18 +468,13 @@ public class AttributionServiceImpl implements AttributionService {
                                     .contains(target.getInsertSuggestion().getGroupId())) {
                                 currentFormatGroup.getDependsOnInsertGroupIds()
                                         .add(target.getInsertSuggestion().getGroupId());
-                                log.debug("[RETAIN_FORMAT] opId={} — formatGroup={} now depends on insertGroup={}",
-                                        opId, currentFormatGroup.getGroupId(),
-                                        target.getInsertSuggestion().getGroupId());
                             }
 
-                            final int finalCompIdx = compIdx;
-                            boolean refExists = currentFormatGroup.getReferences().stream()
-                                    .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == finalCompIdx);
-                            if (!refExists) {
-                                currentFormatGroup.getReferences().add(
-                                        new OpReference(opId, compIdx));
-                            }
+                            currentFormatGroup.setReferences(addReferenceIfMissing(
+                                    currentFormatGroup.getReferences(),
+                                    opId,
+                                    compIdx
+                            ));
 
                             int adjacentIdx = findAdjacentSpanIndex(currentFormatGroup.getSpans(), spanStart);
                             if (adjacentIdx != -1) {
@@ -579,8 +485,6 @@ public class AttributionServiceImpl implements AttributionService {
                                                 .map(s -> FormatSuggestionSpan.builder()
                                                         .start(s.getStart()).length(s.getLength()).build())
                                                 .collect(Collectors.toList())));
-                                log.debug("[RETAIN_FORMAT] opId={} cursor={} — extended adjacent span of formatGroup={}",
-                                        opId, cursor, currentFormatGroup.getGroupId());
                             } else {
                                 currentFormatGroup.getSpans().add(
                                         FormatSuggestionSpan.builder().start(spanStart).length(spanLen).build());
@@ -589,8 +493,6 @@ public class AttributionServiceImpl implements AttributionService {
                                                 .map(s -> FormatSuggestionSpan.builder()
                                                         .start(s.getStart()).length(s.getLength()).build())
                                                 .collect(Collectors.toList())));
-                                log.debug("[RETAIN_FORMAT] opId={} cursor={} — added new span to formatGroup={} start={} length={}",
-                                        opId, cursor, currentFormatGroup.getGroupId(), spanStart, spanLen);
                             }
 
                             pendingFormatBridge = new HashMap<>();
@@ -598,12 +500,7 @@ public class AttributionServiceImpl implements AttributionService {
                             pendingFormatBridge.put("attributes", attrStr);
                             pendingFormatBridge.put("groupId", currentFormatGroup.getGroupId());
 
-                        } else {
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} — no suggestion attrs after stripping nulls",
-                                    opId, cursor);
                         }
-
-                        log.info(currentFormatGroup.toString());
 
                         remaining -= spanLen;
                         cursor++;
@@ -619,9 +516,6 @@ public class AttributionServiceImpl implements AttributionService {
                             : new LinkedHashMap<>();
                     String rawAttrKeys = String.join(",", rawAttrs.keySet());
 
-                    log.debug("\n[INSERT] opId={} compIdx={} text=\"{}\" localLogPos={} attrKeys=\"{}\"",
-                            opId, compIdx, insertText, localLogPos, rawAttrKeys);
-
                     RunPosition insertPos = findRunPos(runs, localLogPos);
                     int runIndex = insertPos.idx();
                     int insertOffset = insertPos.offset();
@@ -629,25 +523,11 @@ public class AttributionServiceImpl implements AttributionService {
 
                     int insertAtIdx = runIndex;
                     if (insertOffset > 0 && runIndex < runs.size()) {
-                        log.debug("[INSERT] opId={} compIdx={} — splitting run at runIndex={} offset={} before inserting",
-                                opId, compIdx, runIndex, insertOffset);
                         insertAtIdx = splitAt(runs, runIndex, insertOffset);
                     }
 
                     ReviewRun prevRun = (insertAtIdx > 0) ? runs.get(insertAtIdx - 1) : null;
                     ReviewRun nextRun = (insertAtIdx < runs.size()) ? runs.get(insertAtIdx) : null;
-
-                    log.debug("[INSERT] opId={} compIdx={} insertAtIdx={} insertAbsPos={}", opId, compIdx, insertAtIdx, insertAbsPos);
-                    log.debug("[INSERT] opId={} compIdx={} prevRun text=\"{}\" prevInsertGroupId=\"{}\" prevActor=\"{}\"",
-                            opId, compIdx,
-                            prevRun != null ? prevRun.getText() : "NONE",
-                            prevRun != null && prevRun.getInsertSuggestion() != null ? prevRun.getInsertSuggestion().getGroupId() : "none",
-                            prevRun != null && prevRun.getInsertSuggestion() != null ? prevRun.getInsertSuggestion().getActorEmail() : "none");
-                    log.debug("[INSERT] opId={} compIdx={} nextRun text=\"{}\" nextInsertGroupId=\"{}\" nextActor=\"{}\"",
-                            opId, compIdx,
-                            nextRun != null ? nextRun.getText() : "NONE",
-                            nextRun != null && nextRun.getInsertSuggestion() != null ? nextRun.getInsertSuggestion().getGroupId() : "none",
-                            nextRun != null && nextRun.getInsertSuggestion() != null ? nextRun.getInsertSuggestion().getActorEmail() : "none");
 
                     // ── Determine insert suggestion group ────────────────────
                     // Reuse an adjacent same-actor group (continuation of previous insert)
@@ -668,14 +548,11 @@ public class AttributionServiceImpl implements AttributionService {
                         if (adj != null) {
                             currentInsertGroup = adj;
                             final int finalCompIdx2 = compIdx;
-                            boolean refExists = currentInsertGroup.getReferences().stream()
-                                    .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == finalCompIdx2);
-                            if (!refExists) {
-                                currentInsertGroup.getReferences().add(
-                                        new OpReference(opId, compIdx));
-                            }
-                            log.debug("[INSERT] opId={} compIdx={} — JOINED adjacent insertGroup={} (same actor)",
-                                    opId, compIdx, currentInsertGroup.getGroupId());
+                            currentInsertGroup.setReferences(addReferenceIfMissing(
+                                    currentInsertGroup.getReferences(),
+                                    opId,
+                                    compIdx
+                            ));
                         } else {
                             currentInsertGroup = InsertSuggestion.builder()
                                     .groupId(nextId())
@@ -685,13 +562,9 @@ public class AttributionServiceImpl implements AttributionService {
                                             new OpReference(opId, compIdx))))
                                     .startIndex(localLogPos)
                                     .build();
-                            log.debug("[INSERT] opId={} compIdx={} — CREATED new insertGroup={} for actor={}",
-                                    opId, compIdx, currentInsertGroup.getGroupId(), authorEmail);
                         }
                     } else if (createdAt.compareTo(currentInsertGroup.getCreatedAt()) > 0) {
                         currentInsertGroup.setCreatedAt(createdAt);
-                        log.debug("[INSERT] opId={} compIdx={} — updated insertGroup={} createdAt={}",
-                                opId, compIdx, currentInsertGroup.getGroupId(), createdAt);
                     }
 
                     Map<String, Object> ownAttrs = new LinkedHashMap<>(rawAttrs);
@@ -716,10 +589,6 @@ public class AttributionServiceImpl implements AttributionService {
                                 opId, compIdx, currentInsertGroup.getGroupId());
                         extendedGroupIds.add(existingAdj.getGroupId());
                         ownAttrs.remove(key);
-
-                        log.debug("[INSERT] opId={} compIdx={} — EXTENDED existing adjacent formatGroup={} for key=\"{}\" at boundary={}; remaining ownAttrKeys=\"{}\"",
-                                opId, compIdx, existingAdj.getGroupId(), key, localLogPos,
-                                String.join(",", ownAttrs.keySet()));
                     }
 
                     // ── Check prev neighbor for inherited attrs (different actor) ──
@@ -737,8 +606,6 @@ public class AttributionServiceImpl implements AttributionService {
 
                         Map<String, Object> inherited = intersectAttrs(ownAttrs, prevEffectiveAttrs);
                         String inheritedKeys = String.join(",", inherited.keySet());
-                        log.debug("[INSERT] opId={} compIdx={} — checking PREV neighbor for inherited attrs from actor={} inheritedKeys=\"{}\"",
-                                opId, compIdx, prevRun.getInsertSuggestion().getActorEmail(), inheritedKeys);
 
                         if (!inherited.isEmpty()) {
                             String attrStr = attrsToJson(inherited);
@@ -748,9 +615,6 @@ public class AttributionServiceImpl implements AttributionService {
                             if (prevGroup != null) {
                                 int spanStart = prevGroup.start;
                                 int spanEnd = localLogPos + insertText.length();
-
-                                log.debug("[INSERT] opId={} compIdx={} — creating/extending inherited-attr format suggestion from prevGroup owner={} spanStart={} spanEnd={}",
-                                        opId, compIdx, prevRun.getInsertSuggestion().getActorEmail(), spanStart, spanEnd);
 
                                 // Fallback: find or create by spanStart
                                 String ownerEmail = prevRun.getInsertSuggestion().getActorEmail();
@@ -771,13 +635,9 @@ public class AttributionServiceImpl implements AttributionService {
                                 g.getReferences().add(new OpReference(opId, compIdx));
                                 formatSuggestions.add(g);
                                 extendedGroupIds.add(g.getGroupId());
-                                log.debug("[INSERT] opId={} compIdx={} — CREATED fallback inherited-attr formatGroup={} from prev neighbor",
-                                        opId, compIdx, g.getGroupId());
 
                                 stripAttrsFromRuns(runs, prevGroup.indices, inherited);
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
-                                log.debug("[INSERT] opId={} compIdx={} — stripped inherited attrs from prev runs, remaining ownAttrKeys=\"{}\"",
-                                        opId, compIdx, String.join(",", ownAttrs.keySet()));
                             }
                         }
                     }
@@ -791,9 +651,6 @@ public class AttributionServiceImpl implements AttributionService {
                             && !nextEffectiveAttrs.isEmpty()) {
 
                         Map<String, Object> inherited = intersectAttrs(ownAttrs, nextEffectiveAttrs);
-                        String inheritedKeys = String.join(",", inherited.keySet());
-                        log.debug("[INSERT] opId={} compIdx={} — checking NEXT neighbor for inherited attrs from actor={} inheritedKeys=\"{}\"",
-                                opId, compIdx, nextRun.getInsertSuggestion().getActorEmail(), inheritedKeys);
 
                         if (!inherited.isEmpty()) {
                             String ownerEmail = nextRun.getInsertSuggestion().getActorEmail();
@@ -804,9 +661,6 @@ public class AttributionServiceImpl implements AttributionService {
                             if (nextGroup != null) {
                                 int spanStart = localLogPos;
                                 int spanEnd = nextGroup.end;
-
-                                log.debug("[INSERT] opId={} compIdx={} — creating/extending inherited-attr format suggestion from nextGroup owner={} spanStart={} spanEnd={}",
-                                        opId, compIdx, ownerEmail, spanStart, spanEnd);
 
                                 FormatSuggestionItem g = FormatSuggestionItem.builder()
                                         .groupId(nextId())
@@ -824,13 +678,9 @@ public class AttributionServiceImpl implements AttributionService {
                                 g.getReferences().add(new OpReference(opId, compIdx));
                                 formatSuggestions.add(g);
                                 extendedGroupIds.add(g.getGroupId());
-                                log.debug("[INSERT] opId={} compIdx={} — CREATED inherited-attr formatGroup={} from next neighbor attrKeys=\"{}\"",
-                                        opId, compIdx, g.getGroupId(), inheritedKeys);
 
                                 stripAttrsFromRuns(runs, nextGroup.indices, inherited);
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
-                                log.debug("[INSERT] opId={} compIdx={} — stripped inherited attrs from next runs, remaining ownAttrKeys=\"{}\"",
-                                        opId, compIdx, String.join(",", ownAttrs.keySet()));
                             }
                         }
                     }
@@ -840,9 +690,6 @@ public class AttributionServiceImpl implements AttributionService {
                     String[] parts = insertText.split("\n", -1);
                     int spliceAt = insertAtIdx;
                     int runPos = insertAbsPos;
-
-                    log.debug("[INSERT] opId={} compIdx={} — splicing {} part(s) at insertAtIdx={} insertAbsPos={} insertGroup={}",
-                            opId, compIdx, parts.length, insertAtIdx, insertAbsPos, currentInsertGroup.getGroupId());
 
                     for (int i = 0; i < parts.length; i++) {
                         if (!parts[i].isEmpty()) {
@@ -868,54 +715,69 @@ public class AttributionServiceImpl implements AttributionService {
                                             && prevInsertedRun.getLogicalStart() + prevInsertedRun.getText().length() == runPos;
 
                             if (canMergeIntoPrev) {
+                                int previousLength = prevInsertedRun.getText().length();
                                 prevInsertedRun.setText(prevInsertedRun.getText() + parts[i]);
 
-                                // Keep the insert suggestion metadata fresh/merged
+                                List<InsertSlice> slices = prevInsertedRun.getInsertReferences() != null
+                                        ? prevInsertedRun.getInsertReferences()
+                                        : new ArrayList<>();
+
+                                slices.add(InsertSlice.builder()
+                                        .start(previousLength)
+                                        .length(parts[i].length())
+                                        .ref(new OpReference(opId, compIdx))
+                                        .build());
+
+                                prevInsertedRun.setInsertReferences(slices);
+
                                 InsertSuggestion mergedInsertSuggestion = prevInsertedRun.getInsertSuggestion();
-                                final int finalCompIdx = compIdx;
-                                boolean refExists = mergedInsertSuggestion.getReferences().stream()
-                                        .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == finalCompIdx);
-                                if (!refExists) {
-                                    mergedInsertSuggestion.getReferences().add(new OpReference(opId, compIdx));
-                                }
+                                mergedInsertSuggestion.setReferences(addReferenceIfMissing(
+                                        mergedInsertSuggestion.getReferences(),
+                                        opId,
+                                        compIdx
+                                ));
                                 if (createdAt.compareTo(mergedInsertSuggestion.getCreatedAt()) > 0) {
                                     mergedInsertSuggestion.setCreatedAt(createdAt);
                                 }
 
                                 prevInsertedRun.setInsertSuggestion(copyInsertSuggestion(mergedInsertSuggestion));
-
-                                log.debug("[INSERT] opId={} compIdx={} — MERGED text=\"{}\" into previous run at logicalStart={} group={}",
-                                        opId, compIdx, parts[i], prevInsertedRun.getLogicalStart(), currentInsertGroup.getGroupId());
                             } else {
                                 ReviewRun newRun = ReviewRun.builder()
                                         .text(parts[i])
                                         .baseAttributes(new LinkedHashMap<>(ownAttrs))
                                         .suggestionAttributes(new LinkedHashMap<>())
                                         .logicalStart(runPos)
-                                        .opId(opId)
-                                        .insertComponentIndex(compIdx)
+                                        .insertReferences(new ArrayList<>(Collections.singletonList(
+                                                InsertSlice.builder()
+                                                        .start(0)
+                                                        .length(parts[i].length())
+                                                        .ref(new OpReference(opId, compIdx))
+                                                        .build()
+                                        )))
                                         .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
                                         .build();
                                 runs.add(spliceAt++, newRun);
-                                log.debug("[INSERT] opId={} compIdx={} — inserted run text=\"{}\" at logicalStart={} group={}",
-                                        opId, compIdx, parts[i], runPos, currentInsertGroup.getGroupId());
                             }
 
                             runPos += parts[i].length();
                         }
+
                         if (i < parts.length - 1) {
                             ReviewRun newlineRun = ReviewRun.builder()
                                     .text("\n")
                                     .baseAttributes(new LinkedHashMap<>())
                                     .suggestionAttributes(new LinkedHashMap<>())
                                     .logicalStart(runPos)
-                                    .opId(opId)
-                                    .insertComponentIndex(compIdx)
+                                    .insertReferences(new ArrayList<>(Collections.singletonList(
+                                            InsertSlice.builder()
+                                                    .start(0)
+                                                    .length(1)
+                                                    .ref(new OpReference(opId, compIdx))
+                                                    .build()
+                                    )))
                                     .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
                                     .build();
                             runs.add(spliceAt++, newlineRun);
-                            log.debug("[INSERT] opId={} compIdx={} — inserted NEWLINE run at logicalStart={} group={}",
-                                    opId, compIdx, runPos, currentInsertGroup.getGroupId());
                             runPos += 1;
                         }
                     }
@@ -927,16 +789,11 @@ public class AttributionServiceImpl implements AttributionService {
                         runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() + shiftLen);
                         shiftedCount++;
                     }
-                    log.debug("[INSERT] opId={} compIdx={} — shifted {} subsequent run(s) right by {}",
-                            opId, compIdx, shiftedCount, shiftLen);
 
                     // Shift format spans to account for the inserted text
-                    log.debug("[INSERT] opId={} compIdx={} — shifting format spans: insertAbsPos={} shiftLen={} extendedGroupCount={}",
-                            opId, compIdx, insertAbsPos, shiftLen, extendedGroupIds.size());
                     shiftFormatSpansForInsert(formatSuggestions, insertAbsPos, insertText.length(), extendedGroupIds);
 
                     localLogPos += insertText.length();
-                    log.debug("[INSERT] opId={} compIdx={} — done. new localLogPos={}", opId, compIdx, localLogPos);
 
                     // ── Delete ────────────────────────────────────────────────────
                     // Text is being deleted. Rather than removing runs, we mark them
@@ -945,17 +802,12 @@ public class AttributionServiceImpl implements AttributionService {
                     currentInsertGroup = null;
                     currentFormatGroup = null;
 
-                    int deleteLen = component.getDelete();
-                    log.debug("\n[DELETE] opId={} compIdx={} deleteLength={} localLogPos={}", opId, compIdx, deleteLen, localLogPos);
-
                     RunPosition deletePos = findRunPos(runs, localLogPos);
                     int ri = deletePos.idx();
                     int deleteOffset = deletePos.offset();
                     int cursor = ri;
 
                     if (deleteOffset > 0 && ri < runs.size()) {
-                        log.debug("[DELETE] opId={} compIdx={} — splitting run at ri={} offset={} before deleting",
-                                opId, compIdx, ri, deleteOffset);
                         cursor = splitAt(runs, ri, deleteOffset);
                     }
 
@@ -978,27 +830,19 @@ public class AttributionServiceImpl implements AttributionService {
                         if (prevAdj != null) {
                             currentDeleteGroup = prevAdj;
 
-                            final int fc5 = compIdx;
-                            boolean refExists = currentDeleteGroup.getReferences().stream()
-                                    .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc5);
-                            if (!refExists) {
-                                currentDeleteGroup.getReferences().add(
-                                        new OpReference(opId, compIdx));
-                            }
-
-                            log.debug("[DELETE] opId={} compIdx={} — JOINED PREV deleteGroup={}",
-                                    opId, compIdx, currentDeleteGroup.getGroupId());
+                            currentDeleteGroup.setReferences(addReferenceIfMissing(
+                                    currentDeleteGroup.getReferences(),
+                                    opId,
+                                    compIdx
+                            ));
 
                             if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
-                                log.debug("[DELETE] opId={} compIdx={} — UNIFYING next deleteGroup={} into prev deleteGroup={}",
-                                        opId, compIdx, nextAdj.getGroupId(), prevAdj.getGroupId());
-
                                 for (OpReference ref : nextAdj.getReferences()) {
-                                    boolean alreadyExists = currentDeleteGroup.getReferences().stream()
-                                            .anyMatch(r -> r.opId().equals(ref.opId()) && r.componentIndex() == ref.componentIndex());
-                                    if (!alreadyExists) {
-                                        currentDeleteGroup.getReferences().add(ref);
-                                    }
+                                    currentDeleteGroup.setReferences(addReferenceIfMissing(
+                                            currentDeleteGroup.getReferences(),
+                                            ref.opId(),
+                                            ref.componentIndex()
+                                    ));
                                 }
 
                                 if (nextAdj.getCreatedAt().compareTo(currentDeleteGroup.getCreatedAt()) > 0) {
@@ -1011,25 +855,16 @@ public class AttributionServiceImpl implements AttributionService {
                                         existingRun.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
                                     }
                                 }
-
-                                log.debug("[DELETE] opId={} compIdx={} — next deleteGroup={} unified into {}",
-                                        opId, compIdx, nextAdj.getGroupId(), currentDeleteGroup.getGroupId());
                             }
 
                         } else if (nextAdj != null) {
                             currentDeleteGroup = nextAdj;
 
-                            final int fc5 = compIdx;
-                            boolean refExists = currentDeleteGroup.getReferences().stream()
-                                    .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc5);
-                            if (!refExists) {
-                                currentDeleteGroup.getReferences().add(
-                                        new OpReference(opId, compIdx));
-                            }
-
-                            log.debug("[DELETE] opId={} compIdx={} — JOINED NEXT deleteGroup={}",
-                                    opId, compIdx, currentDeleteGroup.getGroupId());
-
+                            currentDeleteGroup.setReferences(addReferenceIfMissing(
+                                    currentDeleteGroup.getReferences(),
+                                    opId,
+                                    compIdx
+                            ));
                         } else {
                             currentDeleteGroup = DeleteSuggestion.builder()
                                     .groupId(nextId())
@@ -1038,28 +873,21 @@ public class AttributionServiceImpl implements AttributionService {
                                     .references(new ArrayList<>(Collections.singletonList(
                                             new OpReference(opId, compIdx))))
                                     .build();
-
-                            log.debug("[DELETE] opId={} compIdx={} — CREATED new deleteGroup={} for actor={}",
-                                    opId, compIdx, currentDeleteGroup.getGroupId(), authorEmail);
                         }
                     }
 
-                    int remaining = deleteLen;
+                    int remaining = component.getDelete();
 
                     while (remaining > 0 && cursor < runs.size()) {
                         ReviewRun run = runs.get(cursor);
 
                         if (run.getDeleteSuggestion() != null) {
-                            log.debug("[DELETE] opId={} cursor={} — skipping already-deleted run text=\"{}\"",
-                                    opId, cursor, run.getText());
                             cursor++;
                             continue;
                         }
 
-                        if ("\n".equals(run.getText())) {
+                        if ("\n".equals(run.getText()) && run.getInsertSuggestion() == null) {
                             run.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
-                            log.debug("[DELETE] opId={} cursor={} — marked NEWLINE run as DELETE suggestion group={}",
-                                    opId, cursor, currentDeleteGroup.getGroupId());
                             remaining--;
                             localLogPos++;
                             cursor++;
@@ -1067,8 +895,6 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if (remaining < run.getText().length()) {
-                            log.debug("[DELETE] opId={} cursor={} — remaining={} < run.text.length={}, splitting",
-                                    opId, cursor, remaining, run.getText().length());
                             splitAt(runs, cursor, remaining);
                         }
 
@@ -1076,59 +902,40 @@ public class AttributionServiceImpl implements AttributionService {
                         int len = target.getText().length();
 
                         if (target.getInsertSuggestion() != null) {
-                            log.debug("[DELETE] opId={} cursor={} — run text=\"{}\" is INSERT SUGGESTION (insertGroup={}), cancelling via API",
-                                    opId, cursor, target.getText(), target.getInsertSuggestion().getGroupId());
+                            List<InsertSlice> targetSlices = cloneInsertSlices(target.getInsertReferences());
 
-                            int shiftLen = target.getText().length();
                             runs.remove(cursor);
                             for (int i = cursor; i < runs.size(); i++) {
-                                runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() - shiftLen);
+                                runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() - len);
                             }
 
                             cancelInsert(
                                     actorEmail,
                                     noteId,
-                                    new CancelInsertPayload(
-                                            target.getOpId(),
-                                            opId,
-                                            target.getInsertComponentIndex(),
-                                            len,
-                                            compIdx
-                                    )
+                                    targetSlices,
+                                    opId,
+                                    compIdx
                             );
 
-                            log.debug("[DELETE] opId={} cursor={} — API call sent for insert cancellation: insertOpId={} overlapLength={}",
-                                    opId, cursor, target.getOpId(), len);
-
                             remaining -= len;
-//                            localLogPos += len;
+                            localLogPos += len;
                             continue;
                         }
 
                         target.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
-                        log.debug("[DELETE] opId={} cursor={} — marked run text=\"{}\" as DELETE suggestion group={}",
-                                opId, cursor, target.getText(), currentDeleteGroup.getGroupId());
                         remaining -= len;
                         localLogPos += len;
                         cursor++;
                     }
-
-                    log.debug("[DELETE] opId={} compIdx={} — done. localLogPos={}", opId, compIdx, localLogPos);
                 }
             }
-
-            log.info("[REVIEW_BUILD] Finished processing opId={} — total runs={} formatSuggestions={}",
-                    opId, runs.size(), formatSuggestions.size());
         }
 
         // ── STEP 3: Build preview texts ───────────────────────────────────────
         // Compute a short text preview for each format suggestion so the sidebar
         // can display it without parsing the full delta.
-        log.info("\n[REVIEW_BUILD] Building preview texts for {} format suggestion(s)", formatSuggestions.size());
-
         for (FormatSuggestionItem fmt : formatSuggestions) {
             if (fmt.getPreviewText() != null && !fmt.getPreviewText().isEmpty()) {
-                log.debug("[PREVIEW_TEXT] groupId={} — already has previewText, skipping", fmt.getGroupId());
                 continue;
             }
 
@@ -1154,7 +961,6 @@ public class AttributionServiceImpl implements AttributionService {
                         }
                     }
                     texts.append(sawNewlineGap ? " ↵ " : " ... ");
-                    log.debug("[PREVIEW_TEXT] groupId={} — gap between spans, sawNewlineGap={}", fmt.getGroupId(), sawNewlineGap);
                 }
 
                 for (ReviewRun run : runs) {
@@ -1172,20 +978,12 @@ public class AttributionServiceImpl implements AttributionService {
             String preview = texts.toString();
             if (preview.length() > 60) preview = preview.substring(0, 60);
             fmt.setPreviewText(preview);
-            log.debug("[PREVIEW_TEXT] groupId={} previewText=\"{}\"", fmt.getGroupId(), preview);
         }
 
         // ── STEP 4: Flush pending format cancellations ────────────────────────
         // Now that all run mutations are complete, make the backend split calls
         // for format cancellations.
-        log.info("\n[REVIEW_BUILD] Flushing {} pending format cancellation(s) to backend",
-                pendingFormatCancellations.size());
-
         for (PendingFormatCancellation c : pendingFormatCancellations) {
-            log.debug("[CANCEL_FORMAT_API] groupId={} cancellingOpId={} retainComponentIndex={} length={} consumedBefore={}",
-                    c.getGroupId(), c.getCancellingOpId(), c.getRetainComponentIndex(),
-                    c.getLength(), c.getConsumedBefore());
-
             cancelFormat(
                     actorEmail,
                     noteId,
@@ -1201,19 +999,13 @@ public class AttributionServiceImpl implements AttributionService {
         List<ReviewRun> visualRuns = applyFormatSuggestionAttrsToRuns(runs, formatSuggestions);
         Delta visualDelta = buildVisualDelta(visualRuns);
 
-        log.info("\n[REVIEW_BUILD] END");
-        log.info("[REVIEW_BUILD] visualDelta opCount={}", visualDelta.ops.size());
-        log.info("[REVIEW_BUILD] formatSuggestionCount={}", formatSuggestions.size());
         for (FormatSuggestionItem fmt : formatSuggestions) {
             String spanSummary = fmt.getSpans().stream()
                     .map(s -> "[" + s.getStart() + "," + (s.getStart() + s.getLength()) + "]")
                     .collect(Collectors.joining(" "));
-            log.info("[REVIEW_BUILD] formatGroup={} actor={} attrKeys=\"{}\" spanCount={} spans=\"{}\" previewText=\"{}\"",
-                    fmt.getGroupId(), fmt.getActorEmail(),
-                    String.join(",", parseAttrs(fmt.getAttributes()).keySet()),
-                    fmt.getSpans().size(), spanSummary, fmt.getPreviewText());
         }
-        log.info("{}\n", "=".repeat(60));
+
+        log.info("Revision log: " + redisService.getNote(noteId).revisionLog().toString());
 
         return new ReviewProjection(visualDelta, formatSuggestions);
     }
@@ -1235,9 +1027,6 @@ public class AttributionServiceImpl implements AttributionService {
             List<ReviewRun> runs,
             List<FormatSuggestionItem> formatSuggestions
     ) {
-        log.debug("[APPLY_FORMAT_ATTRS_TO_RUNS] Applying {} format suggestion(s) onto {} run(s)",
-                formatSuggestions.size(), runs.size());
-
         // Deep-clone runs so we don't mutate the pipeline state
         List<ReviewRun> cloned = runs.stream()
                 .map(r -> ReviewRun.builder()
@@ -1245,8 +1034,7 @@ public class AttributionServiceImpl implements AttributionService {
                         .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                         .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
                         .logicalStart(r.getLogicalStart())
-                        .opId(r.getOpId())
-                        .insertComponentIndex(r.getInsertComponentIndex())
+                        .insertReferences(cloneInsertSlices(r.getInsertReferences()))
                         .insertSuggestion(r.getInsertSuggestion() != null ? copyInsertSuggestion(r.getInsertSuggestion()) : null)
                         .deleteSuggestion(r.getDeleteSuggestion() != null ? copyDeleteSuggestion(r.getDeleteSuggestion()) : null)
                         .build())
@@ -1255,12 +1043,8 @@ public class AttributionServiceImpl implements AttributionService {
         for (FormatSuggestionItem fmt : formatSuggestions) {
             Map<String, Object> fmtAttrs = parseAttrs(fmt.getAttributes());
             if (fmtAttrs.isEmpty()) {
-                log.debug("[APPLY_FORMAT_ATTRS_TO_RUNS] groupId={} — skipping, no parseable attributes", fmt.getGroupId());
                 continue;
             }
-
-            log.debug("[APPLY_FORMAT_ATTRS_TO_RUNS] groupId={} attrKeys=\"{}\" spanCount={}",
-                    fmt.getGroupId(), String.join(",", fmtAttrs.keySet()), fmt.getSpans().size());
 
             for (FormatSuggestionSpan span : fmt.getSpans()) {
                 // Binary search for the first run overlapping this span
@@ -1281,9 +1065,6 @@ public class AttributionServiceImpl implements AttributionService {
                     if (run.getDeleteSuggestion() != null) continue;
                     if (run.getLogicalStart() >= span.getStart() + span.getLength()) break;
                     if (run.getLogicalStart() + run.getText().length() <= span.getStart()) continue;
-
-                    log.debug("[APPLY_FORMAT_ATTRS_TO_RUNS] groupId={} applying attrs to run text=\"{}\" logicalStart={}",
-                            fmt.getGroupId(), run.getText(), run.getLogicalStart());
 
                     if (run.getSuggestionAttributes() == null) {
                         run.setSuggestionAttributes(new LinkedHashMap<>());
@@ -1315,8 +1096,6 @@ public class AttributionServiceImpl implements AttributionService {
     // because inserting "\n" into Quill would create a new paragraph.
     // ─────────────────────────────────────────────────────────────────────────
     private Delta buildVisualDelta(List<ReviewRun> runs) {
-        log.debug("[BUILD_VISUAL_DELTA] Building visual delta from {} run(s)", runs.size());
-
         List<ReviewRun> collapsed = new ArrayList<>();
 
         // ── Pass 1: Collapse adjacent mergeable runs ──
@@ -1339,9 +1118,23 @@ public class AttributionServiceImpl implements AttributionService {
                     run.getDeleteSuggestion() != null ? run.getDeleteSuggestion().getGroupId() : null);
 
             if (canMerge) {
-                log.debug("[BUILD_VISUAL_DELTA] Merging run text=\"{}\" into previous text=\"{}\" (same group and attrs)",
-                        run.getText(), last.getText());
                 last.setText(last.getText() + run.getText());
+
+                if (run.getInsertReferences() != null && !run.getInsertReferences().isEmpty()) {
+                    List<InsertSlice> mergedSlices = last.getInsertReferences() != null
+                            ? last.getInsertReferences()
+                            : new ArrayList<>();
+
+                    int offsetBase = last.getText().length() - run.getText().length();
+                    for (InsertSlice slice : run.getInsertReferences()) {
+                        mergedSlices.add(InsertSlice.builder()
+                                .start(offsetBase + slice.getStart())
+                                .length(slice.getLength())
+                                .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                                .build());
+                    }
+                    last.setInsertReferences(mergedSlices);
+                }
 
                 if (last.getInsertSuggestion() != null && run.getInsertSuggestion() != null) {
                     String mergedCreatedAt = run.getInsertSuggestion().getCreatedAt()
@@ -1364,24 +1157,17 @@ public class AttributionServiceImpl implements AttributionService {
                                     run.getDeleteSuggestion().getReferences()));
                 }
             } else {
-                log.debug("[BUILD_VISUAL_DELTA] Adding new collapsed run text=\"{}\" insertGroupId=\"{}\" deleteGroupId=\"{}\"",
-                        run.getText(),
-                        run.getInsertSuggestion() != null ? run.getInsertSuggestion().getGroupId() : "none",
-                        run.getDeleteSuggestion() != null ? run.getDeleteSuggestion().getGroupId() : "none");
                 collapsed.add(ReviewRun.builder()
                         .text(run.getText())
                         .baseAttributes(new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()))
                         .suggestionAttributes(new LinkedHashMap<>(run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap()))
                         .logicalStart(run.getLogicalStart())
-                        .opId(run.getOpId())
-                        .insertComponentIndex(run.getInsertComponentIndex())
+                        .insertReferences(cloneInsertSlices(run.getInsertReferences()))
                         .insertSuggestion(run.getInsertSuggestion() != null ? copyInsertSuggestion(run.getInsertSuggestion()) : null)
                         .deleteSuggestion(run.getDeleteSuggestion() != null ? copyDeleteSuggestion(run.getDeleteSuggestion()) : null)
                         .build());
             }
         }
-
-        log.debug("[BUILD_VISUAL_DELTA] Collapsed {} runs into {} ops", runs.size(), collapsed.size());
 
         // ── Pass 2: Build the delta from collapsed runs ──
         Delta delta = new Delta();
@@ -1432,190 +1218,72 @@ public class AttributionServiceImpl implements AttributionService {
             }
         }
 
-        log.debug("[BUILD_VISUAL_DELTA] Done. Final op count={}", delta.ops.size());
         return delta;
     }
 
-    private void cancelInsert(String actorEmail, UUID noteId, CancelInsertPayload payload) {
-        log.info("[CANCEL_INSERT] START — actor={} noteId={} insertOpId={} deleteOpId={} insertComponentIndex={} deleteComponentIndex={} overlapLength={}",
-                actorEmail, noteId, payload.insertOpId(), payload.deleteOpId(),
-                payload.insertComponentIndex(), payload.deleteComponentIndex(), payload.overlapLength());
-
-        notePolicyService.validateOwner(actorEmail, noteId);
-        log.info("[CANCEL_INSERT] Owner validation passed — actor={} noteId={}", actorEmail, noteId);
+    private void cancelInsert(
+            String actorEmail,
+            UUID noteId,
+            List<InsertSlice> targetSlices,
+            String deleteOpId,
+            int deleteComponentIndex
+    ) {
+        if (targetSlices == null || targetSlices.isEmpty()) {
+            return;
+        }
 
         NoteDto note = redisService.getNote(noteId);
-        List<TextOperation> log_ops = note.revisionLog();
-        log.info("[CANCEL_INSERT] Loaded revision log — opCount={}", log_ops.size());
+        List<TextOperation> logOps = note.revisionLog();
 
-        TextOperation insertOp = log_ops.stream()
-                .filter(op -> op.getOpId().equals(payload.insertOpId()))
-                .findFirst()
-                .orElseThrow(() -> {
-                    log.warn("[CANCEL_INSERT] ERROR — insert op not found in log: insertOpId={}", payload.insertOpId());
-                    return new BadRequestException("Insert op not found: " + payload.insertOpId());
-                });
+        List<InsertSlice> orderedSlices = cloneInsertSlices(targetSlices).stream()
+                .sorted(Comparator.comparingInt(InsertSlice::getStart))
+                .toList();
 
-        log.info("[CANCEL_INSERT] Found insertOp — opId={} actor={} state={} deltaOpCount={}",
-                insertOp.getOpId(), insertOp.getActorEmail(), insertOp.getState(), insertOp.getDelta().ops.size());
+        int totalCancelledLength = 0;
 
-        Op insertComponent = insertOp.getDelta().ops.get(payload.insertComponentIndex());
-        if (insertComponent == null) {
-            log.warn("[CANCEL_INSERT] ERROR — insert component not found at index={} for opId={}", payload.insertComponentIndex(), payload.insertOpId());
-            throw new BadRequestException("Could not locate insert component in delta for op: " + payload.insertOpId());
-        }
+        for (InsertSlice slice : orderedSlices) {
+            if (slice.getLength() <= 0) continue;
 
-        log.info("[CANCEL_INSERT] Found insertComponent at componentIndex={} — type=insert text=\"{}\"",
-                payload.insertComponentIndex(),
-                insertComponent.getInsert() instanceof String s ? s : "[non-string]");
+            OpReference ref = slice.getRef();
 
-        int charsBeforeInsert = 0;
-        {
-            for (int i = 0; i < insertOp.getDelta().ops.size(); i++) {
-                Op op = insertOp.getDelta().ops.get(i);
+            TextOperation insertOp = logOps.stream()
+                    .filter(op -> op.getOpId().equals(ref.opId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BadRequestException("Insert op not found: " + ref.opId()));
 
-                if (op.equals(insertComponent)) break;
-
-                if (op.isInsert() && op.getInsert() instanceof String text) {
-                    charsBeforeInsert += text.length();
-                } else if (op.isRetain() && op.getRetain() instanceof Integer retain) {
-                    charsBeforeInsert += retain;
-                }
-            }
-        }
-
-        log.info("[CANCEL_INSERT] Computed charsBeforeInsert={}", charsBeforeInsert);
-
-        String fullInsertText = (String) insertComponent.getInsert();
-        int overlapLength = payload.overlapLength();
-        int insertTotalLength = insertComponent.length();
-
-        log.info("[CANCEL_INSERT] fullInsertText=\"{}\" overlapLength={} insertTotalLength={}",
-                fullInsertText, overlapLength, insertTotalLength);
-
-        if (overlapLength == insertTotalLength) {
-            log.info("[CANCEL_INSERT] overlapLength == insertTotalLength — marking entire insertOp as COMMITTED opId={}", insertOp.getOpId());
-            insertOp.setState(OpState.COMMITTED);
-        } else {
-            String committedText = fullInsertText.substring(0, overlapLength);
-            String remainingText = fullInsertText.substring(overlapLength);
-
-            log.info("[CANCEL_INSERT] Partial overlap — committedText=\"{}\" remainingText=\"{}\"", committedText, remainingText);
-
-            Delta committedDelta = new Delta();
-
-            if (charsBeforeInsert > 0) {
-                committedDelta.retain(charsBeforeInsert, null);
-                log.info("[CANCEL_INSERT] committedDelta: retain({}) prepended", charsBeforeInsert);
-            }
-
-            committedDelta.insert(committedText, insertComponent.getAttributes());
-            log.info("[CANCEL_INSERT] committedDelta: insert \"{}\" added", committedText);
-
-            TextOperation committedInsertOp = new TextOperation(
-                    committedDelta,
-                    insertOp.getActorEmail(),
-                    insertOp.getRevision(),
-                    OpState.COMMITTED,
-                    insertOp.getCreatedAt()
+            commitOrSplitInsertOp(
+                    logOps,
+                    insertOp,
+                    ref.componentIndex(),
+                    slice.getLength()
             );
-            log.info("[CANCEL_INSERT] Created committedInsertOp for actor={} revision={}", insertOp.getActorEmail(), insertOp.getRevision());
 
-            Delta remainingDelta = new Delta();
-
-            for (int i = 0; i < payload.insertComponentIndex(); i++) {
-                remainingDelta.push(insertOp.getDelta().ops.get(i));
-            }
-
-            remainingDelta.retain(overlapLength, null);
-            remainingDelta.insert(remainingText, insertComponent.getAttributes());
-
-            log.info("[CANCEL_INSERT] remainingDelta: retain({}) + insert \"{}\" built", overlapLength, remainingText);
-
-            for (int i = payload.insertComponentIndex() + 1; i < insertOp.getDelta().ops.size(); i++) {
-                remainingDelta.push(insertOp.getDelta().ops.get(i));
-            }
-
-            insertOp.setDelta(remainingDelta);
-
-            int insertOpIndex = log_ops.indexOf(insertOp);
-            log_ops.add(insertOpIndex, committedInsertOp);
-            log.info("[CANCEL_INSERT] Inserted committedInsertOp at logIndex={} — new logSize={}", insertOpIndex, log_ops.size());
+            totalCancelledLength += slice.getLength();
         }
 
-        TextOperation deleteOp = log_ops.stream()
-                .filter(op -> op.getOpId().equals(payload.deleteOpId()))
+        if (totalCancelledLength <= 0) {
+            return;
+        }
+
+        TextOperation deleteOp = logOps.stream()
+                .filter(op -> op.getOpId().equals(deleteOpId))
                 .findFirst()
-                .orElseThrow(() -> {
-                    log.warn("[CANCEL_INSERT] ERROR — delete op not found in log: deleteOpId={}", payload.deleteOpId());
-                    return new BadRequestException("Delete op not found: " + payload.deleteOpId());
-                });
+                .orElseThrow(() -> new BadRequestException("Delete op not found: " + deleteOpId));
 
-        log.info("[CANCEL_INSERT] Found deleteOp — opId={} actor={} state={} deltaOpCount={}",
-                deleteOp.getOpId(), deleteOp.getActorEmail(), deleteOp.getState(), deleteOp.getDelta().ops.size());
-
-        Op deleteComponent = deleteOp.getDelta().ops.get(payload.deleteComponentIndex());
-        if (deleteComponent == null) {
-            log.warn("[CANCEL_INSERT] ERROR — delete component not found at index={} for opId={}", payload.deleteComponentIndex(), payload.deleteOpId());
-            throw new BadRequestException("Could not locate delete component in delta for op: " + payload.deleteOpId());
-        }
-
-        int deleteTotalLength = deleteComponent.getDelete();
-        log.info("[CANCEL_INSERT] Found deleteComponent at index={} — deleteTotalLength={}", payload.deleteComponentIndex(), deleteTotalLength);
-
-        if (overlapLength == deleteTotalLength) {
-            log.info("[CANCEL_INSERT] overlapLength == deleteTotalLength — marking entire deleteOp as COMMITTED opId={}", deleteOp.getOpId());
-            deleteOp.setState(OpState.COMMITTED);
-        } else {
-            log.info("[CANCEL_INSERT] Partial delete overlap — splitting: committedDelete={} remainingDelete={}",
-                    overlapLength, deleteTotalLength - overlapLength);
-
-            Delta committedDeleteDelta = new Delta();
-
-            for (int i = 0; i < payload.deleteComponentIndex(); i++) {
-                committedDeleteDelta.push(deleteOp.getDelta().ops.get(i));
-            }
-
-            committedDeleteDelta.delete(overlapLength);
-            log.info("[CANCEL_INSERT] committedDeleteDelta: delete({}) built", overlapLength);
-
-            TextOperation committedDeleteOp = new TextOperation(
-                    committedDeleteDelta,
-                    deleteOp.getActorEmail(),
-                    deleteOp.getRevision(),
-                    OpState.COMMITTED,
-                    deleteOp.getCreatedAt()
-            );
-            log.info("[CANCEL_INSERT] Created committedDeleteOp for actor={} revision={}", deleteOp.getActorEmail(), deleteOp.getRevision());
-
-            Delta remainingDeleteDelta = new Delta();
-
-            for (int i = 0; i < payload.deleteComponentIndex(); i++) {
-                remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
-            }
-
-            remainingDeleteDelta.delete(deleteTotalLength - overlapLength);
-            log.info("[CANCEL_INSERT] remainingDeleteDelta: delete({}) built", deleteTotalLength - overlapLength);
-
-            for (int i = payload.deleteComponentIndex() + 1; i < deleteOp.getDelta().ops.size(); i++) {
-                remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
-            }
-
-            deleteOp.setDelta(remainingDeleteDelta);
-
-            int deleteOpIndex = log_ops.indexOf(deleteOp);
-            log_ops.add(deleteOpIndex, committedDeleteOp);
-            log.info("[CANCEL_INSERT] Inserted committedDeleteOp at logIndex={} — new logSize={}", deleteOpIndex, log_ops.size());
-        }
+        commitOrSplitDeleteOp(
+                logOps,
+                deleteOp,
+                deleteComponentIndex,
+                totalCancelledLength
+        );
 
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-        log.info("[CANCEL_INSERT] Fetched NoteVersion for noteId={}", noteId);
 
         NoteDto updatedNote = new NoteDto(
                 note.id(),
                 note.ownerEmail(),
                 note.title(),
-                log_ops,
+                logOps,
                 note.visibility(),
                 note.accessRole(),
                 note.currentNoteVersionNumber(),
@@ -1624,40 +1292,20 @@ public class AttributionServiceImpl implements AttributionService {
         );
 
         redisService.updateNote(updatedNote, noteVersion);
-        log.info("[CANCEL_INSERT] Note updated in Redis — noteId={}", noteId);
-
         noteService.saveNote(actorEmail, noteId);
-        log.info("[CANCEL_INSERT] Note saved to persistent store — actor={} noteId={}", actorEmail, noteId);
-        log.info("[CANCEL_INSERT] END — actor={} noteId={} insertOpId={}", actorEmail, noteId, payload.insertOpId());
     }
 
     private void cancelFormat(String actorEmail, UUID noteId, CancelFormatPayload payload) {
-        log.info("[CANCEL_FORMAT] START — actor={} noteId={} cancellingOpId={} retainComponentIndex={} opLength={} consumedBefore={} targetReferenceCount={}",
-                actorEmail, noteId, payload.cancellingOpId(), payload.retainComponentIndex(),
-                payload.opLength(), payload.consumedBefore(), payload.targetReferences().size());
-
-        notePolicyService.validateOwner(actorEmail, noteId);
-        log.info("[CANCEL_FORMAT] Owner validation passed — actor={} noteId={}", actorEmail, noteId);
-
         NoteDto note = redisService.getNote(noteId);
-        List<TextOperation> log_ops = note.revisionLog();
-        log.info("[CANCEL_FORMAT] Loaded revision log — opCount={}", log_ops.size());
+        List<TextOperation> logOps = note.revisionLog();
 
-        TextOperation cancellingOp = log_ops.stream()
+        TextOperation cancellingOp = logOps.stream()
                 .filter(op -> op.getOpId().equals(payload.cancellingOpId()))
                 .findFirst()
-                .orElseThrow(() -> {
-                    log.warn("[CANCEL_FORMAT] ERROR — cancelling op not found: cancellingOpId={}", payload.cancellingOpId());
-                    return new BadRequestException("Cancelling op not found: " + payload.cancellingOpId());
-                });
-
-        log.info("[CANCEL_FORMAT] Found cancellingOp — opId={} actor={} state={} deltaOpCount={}",
-                cancellingOp.getOpId(), cancellingOp.getActorEmail(), cancellingOp.getState(), cancellingOp.getDelta().ops.size());
+                .orElseThrow(() -> new BadRequestException("Cancelling op not found: " + payload.cancellingOpId()));
 
         Op cancellingRetain = cancellingOp.getDelta().ops.get(payload.retainComponentIndex());
         if (cancellingRetain == null || !cancellingRetain.isRetain()) {
-            log.warn("[CANCEL_FORMAT] ERROR — retain component not found or not a retain at index={} for opId={}",
-                    payload.retainComponentIndex(), payload.cancellingOpId());
             throw new BadRequestException(
                     "Could not locate retain component at index "
                             + payload.retainComponentIndex()
@@ -1666,33 +1314,22 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         int cancellingRetainTotal = (Integer) cancellingRetain.getRetain();
-        log.info("[CANCEL_FORMAT] Found cancellingRetain at index={} — retainLength={}", payload.retainComponentIndex(), cancellingRetainTotal);
-
         int overlapLen = payload.opLength();
 
-        // Split each affected pending format op
-        for (OpReference ref : payload.targetReferences()) {
-            log.info("[CANCEL_FORMAT] Processing targetReference — refOpId={} refComponentIndex={}", ref.opId(), ref.componentIndex());
-
-            TextOperation targetOp = log_ops.stream()
+        for (OpReference ref : distinctRefs(payload.targetReferences())) {
+            TextOperation targetOp = logOps.stream()
                     .filter(op -> op.getOpId().equals(ref.opId()))
                     .findFirst()
                     .orElse(null);
 
             if (targetOp == null || targetOp.getState() != OpState.PENDING) {
-                log.info("[CANCEL_FORMAT] Skipping refOpId={} — notFound={} state={}",
-                        ref.opId(), targetOp == null, targetOp != null ? targetOp.getState() : "N/A");
                 continue;
             }
-
-            log.info("[CANCEL_FORMAT] Found targetOp — opId={} actor={} state={}",
-                    targetOp.getOpId(), targetOp.getActorEmail(), targetOp.getState());
 
             Delta originalTargetDelta = targetOp.getDelta();
             Op targetRetain = originalTargetDelta.ops.get(ref.componentIndex());
 
             if (targetRetain == null) {
-                log.warn("[CANCEL_FORMAT] ERROR — target retain not found at componentIndex={} for opId={}", ref.componentIndex(), ref.opId());
                 throw new BadRequestException(
                         "Could not locate target retain component at index "
                                 + ref.componentIndex()
@@ -1704,16 +1341,11 @@ public class AttributionServiceImpl implements AttributionService {
             int consumed = Math.min(payload.consumedBefore() + overlapLen, fullLen);
             int remainingLen = fullLen - consumed;
 
-            log.info("[CANCEL_FORMAT] targetRetain fullLen={} consumedBefore={} overlapLen={} consumed={} remainingLen={}",
-                    fullLen, payload.consumedBefore(), overlapLen, consumed, remainingLen);
-
             if (consumed <= 0) {
-                log.info("[CANCEL_FORMAT] consumed={} <= 0 — skipping this reference", consumed);
                 continue;
             }
 
             if (remainingLen == 0) {
-                log.info("[CANCEL_FORMAT] remainingLen=0 — marking targetOp as COMMITTED opId={}", targetOp.getOpId());
                 targetOp.setState(OpState.COMMITTED);
             } else {
                 Delta pendingRemainderDelta = new Delta();
@@ -1729,30 +1361,21 @@ public class AttributionServiceImpl implements AttributionService {
                 }
 
                 targetOp.setDelta(pendingRemainderDelta);
-                log.info("[CANCEL_FORMAT] Updated targetOp delta — retain({}, null) + retain({}, attrs) for opId={}",
-                        consumed, remainingLen, targetOp.getOpId());
             }
         }
 
-        // Persist the cancelling op split
         int cancellingConsumed = payload.consumedBefore() + overlapLen;
-        log.info("[CANCEL_FORMAT] Splitting cancellingOp — cancellingConsumed={} cancellingTotal={}",
-                cancellingConsumed, cancellingRetainTotal);
 
         if (cancellingConsumed >= cancellingRetainTotal) {
-            log.info("[CANCEL_FORMAT] cancellingConsumed >= total — marking cancellingOp as COMMITTED opId={}", cancellingOp.getOpId());
             cancellingOp.setState(OpState.COMMITTED);
         } else {
             int cancellingRemainder = cancellingRetainTotal - cancellingConsumed;
-            log.info("[CANCEL_FORMAT] Partial cancelling split — committedPortion={} remainderPortion={}", cancellingConsumed, cancellingRemainder);
 
             Delta committedDelta = new Delta();
             for (int i = 0; i < payload.retainComponentIndex(); i++) {
                 committedDelta.push(cancellingOp.getDelta().ops.get(i));
             }
             committedDelta.retain(cancellingConsumed, cancellingRetain.getAttributes());
-
-            log.info("[CANCEL_FORMAT] committedDelta: retain({}, attrs) built", cancellingConsumed);
 
             TextOperation committedPart = new TextOperation(
                     committedDelta,
@@ -1761,7 +1384,6 @@ public class AttributionServiceImpl implements AttributionService {
                     OpState.COMMITTED,
                     cancellingOp.getCreatedAt()
             );
-            log.info("[CANCEL_FORMAT] Created committedPart for actor={} revision={}", cancellingOp.getActorEmail(), cancellingOp.getRevision());
 
             Delta remainingDelta = new Delta();
             for (int i = 0; i < payload.retainComponentIndex(); i++) {
@@ -1774,21 +1396,18 @@ public class AttributionServiceImpl implements AttributionService {
             }
 
             cancellingOp.setDelta(remainingDelta);
-            log.info("[CANCEL_FORMAT] Updated cancellingOp delta — retain({}, null) + retain({}, attrs)", cancellingConsumed, cancellingRemainder);
 
-            int cancellingIndex = log_ops.indexOf(cancellingOp);
-            log_ops.add(cancellingIndex, committedPart);
-            log.info("[CANCEL_FORMAT] Inserted committedPart at logIndex={} — new logSize={}", cancellingIndex, log_ops.size());
+            int cancellingIndex = logOps.indexOf(cancellingOp);
+            logOps.add(cancellingIndex, committedPart);
         }
 
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-        log.info("[CANCEL_FORMAT] Fetched NoteVersion for noteId={}", noteId);
 
         NoteDto updatedNote = new NoteDto(
                 note.id(),
                 note.ownerEmail(),
                 note.title(),
-                log_ops,
+                logOps,
                 note.visibility(),
                 note.accessRole(),
                 note.currentNoteVersionNumber(),
@@ -1797,10 +1416,6 @@ public class AttributionServiceImpl implements AttributionService {
         );
 
         redisService.updateNote(updatedNote, noteVersion);
-        log.info("[CANCEL_FORMAT] Note updated in Redis — noteId={}", noteId);
-
         noteService.saveNote(actorEmail, noteId);
-        log.info("[CANCEL_FORMAT] Note saved to persistent store — actor={} noteId={}", actorEmail, noteId);
-        log.info("[CANCEL_FORMAT] END — actor={} noteId={} cancellingOpId={}", actorEmail, noteId, payload.cancellingOpId());
     }
 }

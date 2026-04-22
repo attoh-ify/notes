@@ -2,6 +2,11 @@ package com.example.notes.utils;
 
 import com.example.notes.dto.attribution.*;
 import com.example.notes.dto.note.OpReference;
+import com.example.notes.dto.ot.Delta;
+import com.example.notes.dto.ot.Op;
+import com.example.notes.dto.ot.OpState;
+import com.example.notes.dto.ot.TextOperation;
+import com.example.notes.exceptions.BadRequestException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.experimental.UtilityClass;
@@ -343,9 +348,10 @@ public class AttributionHelpers {
         }
 
         ReviewRun r = runs.get(idx);
-        log.debug("[SPLIT_AT] Splitting run at idx={} offset={} text=\"{}\" into \"{}\" and \"{}\"",
-                idx, offset, r.getText(),
-                r.getText().substring(0, offset), r.getText().substring(offset));
+        InsertSliceSplit insertSliceSplit = splitInsertSlices(
+                r.getInsertReferences() != null ? r.getInsertReferences() : Collections.emptyList(),
+                offset
+        );
 
         // Left half — keeps the original logicalStart
         ReviewRun left = ReviewRun.builder()
@@ -353,8 +359,7 @@ public class AttributionHelpers {
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
                 .logicalStart(r.getLogicalStart())
-                .opId(r.getOpId())
-                .insertComponentIndex(r.getInsertComponentIndex())
+                .insertReferences(insertSliceSplit.left())
                 .insertSuggestion(r.getInsertSuggestion() != null ? copyInsertSuggestion(r.getInsertSuggestion()) : null)
                 .deleteSuggestion(r.getDeleteSuggestion() != null ? copyDeleteSuggestion(r.getDeleteSuggestion()) : null)
                 .build();
@@ -365,8 +370,7 @@ public class AttributionHelpers {
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
                 .logicalStart(r.getLogicalStart() + offset)
-                .opId(r.getOpId())
-                .insertComponentIndex(r.getInsertComponentIndex())
+                .insertReferences(insertSliceSplit.right())
                 .insertSuggestion(r.getInsertSuggestion() != null ? copyInsertSuggestion(r.getInsertSuggestion()) : null)
                 .deleteSuggestion(r.getDeleteSuggestion() != null ? copyDeleteSuggestion(r.getDeleteSuggestion()) : null)
                 .build();
@@ -810,6 +814,266 @@ public class AttributionHelpers {
         if (!group.getDependsOnInsertGroupIds().contains(currentInsertGroupId)) {
             group.getDependsOnInsertGroupIds().add(currentInsertGroupId);
         }
+    }
+
+    public static boolean isOnlyMeaningfulComponent(Op target, List<Op> ops) {
+        int meaningfulCount = 0;
+        if (!ops.contains(target)) return false;
+
+        for (Op op : ops) {
+            boolean meaningful =
+                    op.isInsert()
+                            || op.isDelete()
+                            || (op.isRetain() && op.getAttributes() != null && !op.getAttributes().isEmpty());
+
+            if (!meaningful) continue;
+
+            meaningfulCount++;
+            if (meaningfulCount > 1) return false;
+        }
+
+        return meaningfulCount == 1;
+    }
+
+    public List<InsertSlice> cloneInsertSlices(List<InsertSlice> slices) {
+        if (slices == null) return new ArrayList<>();
+        return slices.stream()
+                .map(s -> InsertSlice.builder()
+                        .start(s.getStart())
+                        .length(s.getLength())
+                        .ref(new OpReference(s.getRef().opId(), s.getRef().componentIndex()))
+                        .build())
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    public List<InsertSlice> shiftInsertSlices(List<InsertSlice> slices, int delta) {
+        return cloneInsertSlices(slices).stream()
+                .peek(s -> s.setStart(s.getStart() + delta))
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private record InsertSliceSplit(
+            List<InsertSlice> left,
+            List<InsertSlice> right
+    ) {}
+
+    private InsertSliceSplit splitInsertSlices(List<InsertSlice> slices, int offset) {
+        List<InsertSlice> left = new ArrayList<>();
+        List<InsertSlice> right = new ArrayList<>();
+
+        if (slices == null || slices.isEmpty()) {
+            return new InsertSliceSplit(left, right);
+        }
+
+        for (InsertSlice slice : slices) {
+            int sliceStart = slice.getStart();
+            int sliceEnd = slice.getStart() + slice.getLength();
+
+            if (sliceEnd <= offset) {
+                left.add(InsertSlice.builder()
+                        .start(sliceStart)
+                        .length(slice.getLength())
+                        .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                        .build());
+            } else if (sliceStart >= offset) {
+                right.add(InsertSlice.builder()
+                        .start(sliceStart - offset)
+                        .length(slice.getLength())
+                        .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                        .build());
+            } else {
+                int leftLen = offset - sliceStart;
+                int rightLen = sliceEnd - offset;
+
+                if (leftLen > 0) {
+                    left.add(InsertSlice.builder()
+                            .start(sliceStart)
+                            .length(leftLen)
+                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                            .build());
+                }
+
+                if (rightLen > 0) {
+                    right.add(InsertSlice.builder()
+                            .start(0)
+                            .length(rightLen)
+                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                            .build());
+                }
+            }
+        }
+
+        return new InsertSliceSplit(left, right);
+    }
+
+    public List<OpReference> distinctRefs(List<OpReference> refs) {
+        if (refs == null) return new ArrayList<>();
+        Map<String, OpReference> unique = new LinkedHashMap<>();
+        for (OpReference ref : refs) {
+            unique.put(ref.opId() + "::" + ref.componentIndex(), ref);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private int meaningfulCharsBeforeComponent(TextOperation op, int componentIndex) {
+        int count = 0;
+        for (int i = 0; i < componentIndex; i++) {
+            Op part = op.getDelta().ops.get(i);
+            if (part.isInsert() && part.getInsert() instanceof String text) {
+                count += text.length();
+            } else if (part.isRetain() && part.getRetain() instanceof Integer retain) {
+                count += retain;
+            }
+        }
+        return count;
+    }
+
+    public void commitOrSplitInsertOp(
+            List<TextOperation> logOps,
+            TextOperation insertOp,
+            int insertComponentIndex,
+            int overlapLength
+    ) {
+        Op insertComponent = insertOp.getDelta().ops.get(insertComponentIndex);
+        if (insertComponent == null || !(insertComponent.getInsert() instanceof String fullInsertText)) {
+            throw new BadRequestException("Could not locate insert component in delta for op: " + insertOp.getOpId());
+        }
+
+        int charsBeforeInsert = meaningfulCharsBeforeComponent(insertOp, insertComponentIndex);
+        int insertTotalLength = insertComponent.length();
+
+        boolean wholeInsertComponentCovered = overlapLength == insertTotalLength;
+        boolean insertIsOnlyMeaningfulComponent =
+                isOnlyMeaningfulComponent(insertComponent, insertOp.getDelta().ops);
+
+        if (wholeInsertComponentCovered && insertIsOnlyMeaningfulComponent) {
+            insertOp.setState(OpState.COMMITTED);
+            return;
+        }
+
+        String committedText = fullInsertText.substring(0, overlapLength);
+        String remainingText = fullInsertText.substring(overlapLength);
+
+        Delta committedDelta = new Delta();
+        if (charsBeforeInsert > 0) {
+            committedDelta.retain(charsBeforeInsert, null);
+        }
+        if (!committedText.isEmpty()) {
+            committedDelta.insert(committedText, insertComponent.getAttributes());
+        }
+
+        TextOperation committedInsertOp = new TextOperation(
+                committedDelta,
+                insertOp.getActorEmail(),
+                insertOp.getRevision(),
+                OpState.COMMITTED,
+                insertOp.getCreatedAt()
+        );
+
+        Delta remainingDelta = new Delta();
+        for (int i = 0; i < insertComponentIndex; i++) {
+            remainingDelta.push(insertOp.getDelta().ops.get(i));
+        }
+
+        if (overlapLength > 0) {
+            remainingDelta.retain(overlapLength, null);
+        }
+        if (!remainingText.isEmpty()) {
+            remainingDelta.insert(remainingText, insertComponent.getAttributes());
+        }
+
+        for (int i = insertComponentIndex + 1; i < insertOp.getDelta().ops.size(); i++) {
+            remainingDelta.push(insertOp.getDelta().ops.get(i));
+        }
+
+        insertOp.setDelta(remainingDelta);
+
+        int insertOpIndex = logOps.indexOf(insertOp);
+        logOps.add(insertOpIndex, committedInsertOp);
+    }
+
+    public void commitOrSplitDeleteOp(
+            List<TextOperation> logOps,
+            TextOperation deleteOp,
+            int deleteComponentIndex,
+            int overlapLength
+    ) {
+        Op deleteComponent = deleteOp.getDelta().ops.get(deleteComponentIndex);
+        if (deleteComponent == null) {
+            throw new BadRequestException("Could not locate delete component in delta for op: " + deleteOp.getOpId());
+        }
+
+        int charsBeforeDelete = meaningfulCharsBeforeComponent(deleteOp, deleteComponentIndex);
+        int deleteTotalLength = deleteComponent.getDelete();
+
+        boolean wholeDeleteComponentCovered = overlapLength == deleteTotalLength;
+        boolean deleteIsOnlyMeaningfulComponent =
+                isOnlyMeaningfulComponent(deleteComponent, deleteOp.getDelta().ops);
+
+        if (wholeDeleteComponentCovered && deleteIsOnlyMeaningfulComponent) {
+            deleteOp.setState(OpState.COMMITTED);
+            return;
+        }
+
+        Delta committedDeleteDelta = new Delta();
+        if (charsBeforeDelete > 0) {
+            committedDeleteDelta.retain(charsBeforeDelete, null);
+        }
+        committedDeleteDelta.delete(overlapLength);
+
+        TextOperation committedDeleteOp = new TextOperation(
+                committedDeleteDelta,
+                deleteOp.getActorEmail(),
+                deleteOp.getRevision(),
+                OpState.COMMITTED,
+                deleteOp.getCreatedAt()
+        );
+
+        Delta remainingDeleteDelta = new Delta();
+        for (int i = 0; i < deleteComponentIndex; i++) {
+            remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
+        }
+
+        int remainingDeleteLen = deleteTotalLength - overlapLength;
+        if (remainingDeleteLen > 0) {
+            remainingDeleteDelta.delete(remainingDeleteLen);
+        }
+
+        for (int i = deleteComponentIndex + 1; i < deleteOp.getDelta().ops.size(); i++) {
+            remainingDeleteDelta.push(deleteOp.getDelta().ops.get(i));
+        }
+
+        deleteOp.setDelta(remainingDeleteDelta);
+
+        int deleteOpIndex = logOps.indexOf(deleteOp);
+        logOps.add(deleteOpIndex, committedDeleteOp);
+    }
+
+    public static boolean hasReference(List<OpReference> refs, String opId, Integer componentIndex) {
+        if (refs == null) return false;
+        return refs.stream().anyMatch(r ->
+                Objects.equals(r.opId(), opId) &&
+                        Objects.equals(r.componentIndex(), componentIndex));
+    }
+
+    public static List<OpReference> addReferenceIfMissing(
+            List<OpReference> refs,
+            String opId,
+            Integer componentIndex
+    ) {
+        List<OpReference> out = refs != null ? new ArrayList<>(refs) : new ArrayList<>();
+        if (!hasReference(out, opId, componentIndex)) {
+            out.add(new OpReference(opId, componentIndex));
+        }
+        return out;
+    }
+
+    public static boolean hasSliceReference(List<InsertSlice> slices, String opId, Integer componentIndex) {
+        if (slices == null) return false;
+        return slices.stream().anyMatch(s ->
+                s.getRef() != null &&
+                        Objects.equals(s.getRef().opId(), opId) &&
+                        Objects.equals(s.getRef().componentIndex(), componentIndex));
     }
 
     // ─── Copy helpers ─────────────────────────────────────────────────────────

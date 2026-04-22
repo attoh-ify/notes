@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 // ─── ReviewRun ────────────────────────────────────────────────────────────────
@@ -60,11 +61,7 @@ public class ReviewRun {
     // Position of this run in logical (non-deleted) document space
     private int logicalStart;
 
-    // Which pending op contributed this run (empty string for committed runs)
-    private String opId;
-
-    // Which component index within that op's delta produced this run
-    private int insertComponentIndex;
+    private List<InsertSlice> insertReferences;
 
     // Non-null when this run is part of an insert suggestion (pending, not yet accepted)
     private InsertSuggestion insertSuggestion;
