@@ -205,8 +205,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                 // ── Plain retain (no attributes) ──────────────────────────────
                 // Cursor advancing over existing content without changing it.
-                // Resets insert/delete group state (a gap in the document means
-                // we are no longer in a contiguous suggestion run).
+                // Resets insert/delete group state.
                 if (component.isRetain() && component.getAttributes() == null) {
                     int retainLen = (int) component.getRetain();
                     boolean isLastOp = (compIdx == components.size() - 1);
@@ -296,7 +295,6 @@ public class AttributionServiceImpl implements AttributionService {
                         ReviewRun run = runs.get(cursor);
 
                         if (run.getDeleteSuggestion() != null) {
-                            // Deleted runs don't consume logical positions — skip
                             log.debug("[RETAIN_FORMAT] opId={} cursor={} — skipping deleted run text=\"{}\"",
                                     opId, cursor, run.getText());
                             cursor++;
@@ -304,11 +302,10 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if ("\n".equals(run.getText())) {
-                            // Newlines are consumed logically but bridge the format group
                             log.debug("[RETAIN_FORMAT] opId={} cursor={} — newline run, bridging format group if active",
                                     opId, cursor);
                             cursor++;
-                            remaining--;
+//                            remaining--;
 
                             if (currentFormatGroup != null) {
                                 pendingFormatBridge = new HashMap<>();
@@ -322,7 +319,6 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if (run.getText().length() > remaining) {
-                            // Run is longer than what remains to process — split at the boundary
                             log.debug("[RETAIN_FORMAT] opId={} cursor={} run.text.length={} > remaining={} — splitting",
                                     opId, cursor, run.getText().length(), remaining);
                             splitAt(runs, cursor, remaining);
@@ -337,9 +333,6 @@ public class AttributionServiceImpl implements AttributionService {
 
                         Map<String, Object> rawIncomingAttrs = new LinkedHashMap<>(componentAttrs);
 
-                        // ── Check for format cancellation ────────────────────────
-                        // If existing format suggestions fully cover this run's range,
-                        // check whether the incoming format is cancelling (undoing) them.
                         final int finalSpanStart = spanStart;
                         final int finalSpanLen = spanLen;
                         List<FormatSuggestionItem> coveringFormats = formatSuggestions.stream()
@@ -351,111 +344,180 @@ public class AttributionServiceImpl implements AttributionService {
                         log.debug("[RETAIN_FORMAT] opId={} cursor={} coveringFormatCount={}",
                                 opId, cursor, coveringFormats.size());
 
-                        // Iterate over a copy since we may remove items from formatSuggestions
                         for (FormatSuggestionItem fmt : new ArrayList<>(coveringFormats)) {
                             Map<String, Object> fmtAttrs = parseAttrs(fmt.getAttributes());
                             Map<String, Object> baseAttrs = new LinkedHashMap<>(
-                                    target.getBaseAttributes() != null ? target.getBaseAttributes() : Collections.emptyMap());
+                                    target.getBaseAttributes() != null ? target.getBaseAttributes() : Collections.emptyMap()
+                            );
 
-                            Map<String, Object> cancelledKeys = pickCancelledFormatKeys(
-                                    fmtAttrs, rawIncomingAttrs, baseAttrs);
+                            List<FormatKeyDecision> decisions = classifyFormatKeyChanges(
+                                    baseAttrs,
+                                    fmtAttrs,
+                                    rawIncomingAttrs
+                            );
 
-                            String cancelledKeyNames = String.join(",", cancelledKeys.keySet());
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} checking cancellation against formatGroup={} cancelledKeys=\"{}\"",
-                                    opId, cursor, fmt.getGroupId(), cancelledKeyNames);
+                            Map<String, Object> cancelKeys = new LinkedHashMap<>();
+                            Map<String, Object> replacementKeys = new LinkedHashMap<>();
 
-                            if (cancelledKeys.isEmpty()) {
-                                log.debug("[RETAIN_FORMAT] opId={} cursor={} — no keys cancelled for formatGroup={}",
-                                        opId, cursor, fmt.getGroupId());
-                                continue;
-                            }
-
-                            log.debug("[RETAIN_FORMAT] opId={} cursor={} — CANCELLATION detected for formatGroup={} keys=\"{}\"",
-                                    opId, cursor, fmt.getGroupId(), cancelledKeyNames);
-
-                            int consumedBefore = retainLen - remaining - spanLen;
-
-                            // Try to extend an existing cancellation record for contiguous runs
-                            // rather than creating one record per run.
-                            int finalCompIdx1 = compIdx;
-                            Optional<PendingFormatCancellation> existingCancellation =
-                                    pendingFormatCancellations.stream()
-                                            .filter(c -> c.getGroupId().equals(fmt.getGroupId())
-                                                    && c.getCancellingOpId().equals(opId)
-                                                    && c.getRetainComponentIndex() == finalCompIdx1
-                                                    && c.getConsumedBefore() + c.getLength() == consumedBefore)
-                                            .findFirst();
-
-                            if (existingCancellation.isPresent()) {
-                                existingCancellation.get().setLength(
-                                        existingCancellation.get().getLength() + spanLen);
-                                log.debug("[RETAIN_FORMAT] opId={} — extending existing cancellation for formatGroup={} newLength={}",
-                                        opId, fmt.getGroupId(), existingCancellation.get().getLength());
-                            } else {
-                                pendingFormatCancellations.add(PendingFormatCancellation.builder()
-                                        .groupId(fmt.getGroupId())
-                                        .references(new ArrayList<>(fmt.getReferences()))
-                                        .cancellingOpId(opId)
-                                        .retainComponentIndex(compIdx)
-                                        .consumedBefore(consumedBefore)
-                                        .length(spanLen)
-                                        .build());
-                                log.debug("[RETAIN_FORMAT] opId={} — new cancellation queued for formatGroup={} length={} consumedBefore={}",
-                                        opId, fmt.getGroupId(), spanLen, consumedBefore);
-                            }
-
-                            // Trim the cancelled range from the format suggestion's spans
-                            removeRangeFromFormatSuggestion(fmt, spanStart, spanLen);
-
-                            if (fmt.getSpans().isEmpty()) {
-                                formatSuggestions.remove(fmt);
-                                log.debug("[RETAIN_FORMAT] opId={} — formatGroup={} fully cancelled and removed",
-                                        opId, fmt.getGroupId());
-                            }
-
-                            // Restore the run's suggestion attrs and strip the cancelled keys
-                            // from rawIncomingAttrs so they are not re-applied as a new suggestion.
-                            for (String key : cancelledKeys.keySet()) {
-                                if (target.getSuggestionAttributes() != null) {
-                                    target.getSuggestionAttributes().remove(key);
+                            for (FormatKeyDecision d : decisions) {
+                                switch (d.type()) {
+                                    case CANCEL -> cancelKeys.put(d.key(), d.incomingValue());
+                                    case REPLACE -> replacementKeys.put(d.key(), d.incomingValue());
                                 }
-                                rawIncomingAttrs.remove(key);
+                            }
+
+                            Set<String> removeFromOldGroup = new LinkedHashSet<>();
+                            removeFromOldGroup.addAll(cancelKeys.keySet());
+                            removeFromOldGroup.addAll(replacementKeys.keySet());
+
+                            if (!removeFromOldGroup.isEmpty()) {
+                                int consumedBefore = retainLen - remaining - spanLen;
+
+                                int finalCompIdx1 = compIdx;
+                                Optional<PendingFormatCancellation> existingCancellation =
+                                        pendingFormatCancellations.stream()
+                                                .filter(c -> c.getGroupId().equals(fmt.getGroupId())
+                                                        && c.getCancellingOpId().equals(opId)
+                                                        && c.getRetainComponentIndex() == finalCompIdx1
+                                                        && c.getConsumedBefore() + c.getLength() == consumedBefore)
+                                                .findFirst();
+
+                                if (existingCancellation.isPresent()) {
+                                    existingCancellation.get().setLength(
+                                            existingCancellation.get().getLength() + spanLen);
+                                    log.debug("[RETAIN_FORMAT] opId={} — extending existing cancellation for formatGroup={} newLength={}",
+                                            opId, fmt.getGroupId(), existingCancellation.get().getLength());
+                                } else {
+                                    pendingFormatCancellations.add(PendingFormatCancellation.builder()
+                                            .groupId(fmt.getGroupId())
+                                            .references(new ArrayList<>(fmt.getReferences()))
+                                            .cancellingOpId(opId)
+                                            .retainComponentIndex(compIdx)
+                                            .consumedBefore(consumedBefore)
+                                            .length(spanLen)
+                                            .build());
+                                    log.debug("[RETAIN_FORMAT] opId={} — new cancellation queued for formatGroup={} length={} consumedBefore={}",
+                                            opId, fmt.getGroupId(), spanLen, consumedBefore);
+                                }
+
+                                removeRangeFromFormatSuggestion(fmt, spanStart, spanLen);
+
+                                if (fmt.getSpans().isEmpty()) {
+                                    formatSuggestions.remove(fmt);
+                                    log.debug("[RETAIN_FORMAT] opId={} — formatGroup={} fully removed after cancel/replace",
+                                            opId, fmt.getGroupId());
+                                }
+
+                                if (target.getSuggestionAttributes() != null) {
+                                    for (String key : removeFromOldGroup) {
+                                        target.getSuggestionAttributes().remove(key);
+                                    }
+                                }
+
+                                for (String key : cancelKeys.keySet()) {
+                                    rawIncomingAttrs.remove(key);
+                                }
                             }
                         }
 
-                        // Apply the (potentially reduced) incoming attrs to the run's suggestion layer
-                        target.setSuggestionAttributes(applyDeltaAttrs(
-                                target.getSuggestionAttributes(), rawIncomingAttrs));
+                        target.setSuggestionAttributes(
+                                overlayAttrsPreserveNull(
+                                        target.getSuggestionAttributes(),
+                                        rawIncomingAttrs
+                                )
+                        );
 
-                        // Build the format suggestion from non-null attrs only — null attrs
-                        // were removal instructions, not "formatting to suggest".
-                        Map<String, Object> suggestionAttrs = stripNullAttrs(rawIncomingAttrs);
-                        String attrStr = attrsToJson(suggestionAttrs);
-                        String suggestionAttrKeys = String.join(",", suggestionAttrs.keySet());
+                        String attrStr = attrsToJson(rawIncomingAttrs);
+                        String suggestionAttrKeys = String.join(",", rawIncomingAttrs.keySet());
 
                         log.debug("[RETAIN_FORMAT] opId={} cursor={} suggestionAttrKeys=\"{}\" attrStr=\"{}\"",
                                 opId, cursor, suggestionAttrKeys, attrStr);
 
-                        if (!suggestionAttrs.isEmpty()) {
+                        if (!rawIncomingAttrs.isEmpty()) {
                             if (currentFormatGroup == null) {
-                                // Priority 1: find an existing adjacent group by the same actor
                                 final String finalAttrStr = attrStr;
                                 final String finalActorEmail = authorEmail;
                                 final int finalSpanStart2 = spanStart;
-                                FormatSuggestionItem existing = formatSuggestions.stream()
-                                        .filter(f -> f.getActorEmail().equals(finalActorEmail)
-                                                && f.getAttributes().equals(finalAttrStr)
-                                                && findAdjacentSpanIndex(f.getSpans(), finalSpanStart2) != -1)
+                                final int finalSpanEnd2 = spanStart + spanLen;
+                                log.info("finalSpanStart2: " + finalSpanStart2);
+                                log.info("finalSpanEnd2: " + finalSpanEnd2);
+
+                                FormatSuggestionItem prevAdj = formatSuggestions.stream()
+                                        .filter(f -> f.getActorEmail().equals(finalActorEmail))
+                                        .filter(f -> f.getAttributes().equals(finalAttrStr))
+                                        .filter(f -> f.getSpans().stream().anyMatch(s -> s.getStart() + s.getLength() == finalSpanStart2))
                                         .findFirst()
                                         .orElse(null);
 
-                                if (existing != null) {
-                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — found ADJACENT existing formatGroup={}, continuing",
-                                            opId, cursor, existing.getGroupId());
+                                FormatSuggestionItem nextAdj = formatSuggestions.stream()
+                                        .filter(f -> f.getActorEmail().equals(finalActorEmail))
+                                        .filter(f -> f.getAttributes().equals(finalAttrStr))
+                                        .filter(f -> f.getSpans().stream().anyMatch(s -> s.getStart() == finalSpanEnd2))
+                                        .findFirst()
+                                        .orElse(null);
+
+                                FormatSuggestionItem existing = null;
+                                if (prevAdj != null) {
+                                    log.info(prevAdj.toString());
+                                } else {
+                                    log.info("No prevAdj");
+                                }
+                                if (nextAdj != null) {
+                                    log.info(nextAdj.toString());
+                                } else {
+                                    log.info("No prevAdj");
                                 }
 
-                                // Priority 2: reconnect via the newline bridge
-                                if (existing == null && pendingFormatBridge != null
+                                if (prevAdj != null) {
+                                    existing = prevAdj;
+                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — JOINED PREV formatGroup={}",
+                                            opId, cursor, existing.getGroupId());
+
+                                    if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
+                                        log.debug("[RETAIN_FORMAT] opId={} cursor={} — UNIFYING next formatGroup={} into prev formatGroup={}",
+                                                opId, cursor, nextAdj.getGroupId(), prevAdj.getGroupId());
+
+                                        for (OpReference ref : nextAdj.getReferences()) {
+                                            boolean alreadyExists = existing.getReferences().stream()
+                                                    .anyMatch(r -> r.opId().equals(ref.opId()) && Objects.equals(r.componentIndex(), ref.componentIndex()));
+                                            if (!alreadyExists) {
+                                                existing.getReferences().add(ref);
+                                            }
+                                        }
+
+                                        List<FormatSuggestionSpan> mergedSpans = new ArrayList<>();
+                                        mergedSpans.addAll(existing.getSpans().stream()
+                                                .map(s -> FormatSuggestionSpan.builder()
+                                                        .start(s.getStart()).length(s.getLength()).build())
+                                                .toList());
+                                        mergedSpans.addAll(nextAdj.getSpans().stream()
+                                                .map(s -> FormatSuggestionSpan.builder()
+                                                        .start(s.getStart()).length(s.getLength()).build())
+                                                .toList());
+                                        existing.setSpans(mergeAdjacentSpans(mergedSpans));
+
+                                        for (String dep : nextAdj.getDependsOnInsertGroupIds()) {
+                                            if (!existing.getDependsOnInsertGroupIds().contains(dep)) {
+                                                existing.getDependsOnInsertGroupIds().add(dep);
+                                            }
+                                        }
+
+                                        if (nextAdj.getCreatedAt().compareTo(existing.getCreatedAt()) > 0) {
+                                            existing.setCreatedAt(nextAdj.getCreatedAt());
+                                        }
+
+                                        formatSuggestions.removeIf(f -> f.getGroupId().equals(nextAdj.getGroupId()));
+
+                                        log.debug("[RETAIN_FORMAT] opId={} cursor={} — next formatGroup={} unified into {}",
+                                                opId, cursor, nextAdj.getGroupId(), existing.getGroupId());
+                                    }
+
+                                } else if (nextAdj != null) {
+                                    existing = nextAdj;
+                                    log.debug("[RETAIN_FORMAT] opId={} cursor={} — JOINED NEXT formatGroup={}",
+                                            opId, cursor, existing.getGroupId());
+
+                                } else if (pendingFormatBridge != null
                                         && authorEmail.equals(pendingFormatBridge.get("actorEmail"))
                                         && attrStr.equals(pendingFormatBridge.get("attributes"))) {
                                     final String bridgeGroupId = pendingFormatBridge.get("groupId");
@@ -463,13 +525,13 @@ public class AttributionServiceImpl implements AttributionService {
                                             .filter(f -> f.getGroupId().equals(bridgeGroupId))
                                             .findFirst()
                                             .orElse(null);
+
                                     if (existing != null) {
                                         log.debug("[RETAIN_FORMAT] opId={} cursor={} — BRIDGE reconnected to formatGroup={} across newline",
                                                 opId, cursor, existing.getGroupId());
                                     }
                                 }
 
-                                // Priority 3: create a brand new format suggestion group
                                 if (existing == null) {
                                     existing = FormatSuggestionItem.builder()
                                             .groupId(nextId())
@@ -490,8 +552,6 @@ public class AttributionServiceImpl implements AttributionService {
                                 currentFormatGroup = existing;
                             }
 
-                            // If this run is part of an insert suggestion, the format suggestion
-                            // depends on it — you can't act on the format until the insert is resolved.
                             if (target.getInsertSuggestion() != null
                                     && !currentFormatGroup.getDependsOnInsertGroupIds()
                                     .contains(target.getInsertSuggestion().getGroupId())) {
@@ -502,7 +562,6 @@ public class AttributionServiceImpl implements AttributionService {
                                         target.getInsertSuggestion().getGroupId());
                             }
 
-                            // Add op reference if not already present
                             final int finalCompIdx = compIdx;
                             boolean refExists = currentFormatGroup.getReferences().stream()
                                     .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == finalCompIdx);
@@ -511,7 +570,6 @@ public class AttributionServiceImpl implements AttributionService {
                                         new OpReference(opId, compIdx));
                             }
 
-                            // Extend the last span if adjacent, otherwise add a new span
                             int adjacentIdx = findAdjacentSpanIndex(currentFormatGroup.getSpans(), spanStart);
                             if (adjacentIdx != -1) {
                                 currentFormatGroup.getSpans().get(adjacentIdx)
@@ -535,7 +593,6 @@ public class AttributionServiceImpl implements AttributionService {
                                         opId, cursor, currentFormatGroup.getGroupId(), spanStart, spanLen);
                             }
 
-                            // Keep bridge alive for the next loop iteration
                             pendingFormatBridge = new HashMap<>();
                             pendingFormatBridge.put("actorEmail", authorEmail);
                             pendingFormatBridge.put("attributes", attrStr);
@@ -546,15 +603,13 @@ public class AttributionServiceImpl implements AttributionService {
                                     opId, cursor);
                         }
 
+                        log.info(currentFormatGroup.toString());
+
                         remaining -= spanLen;
                         cursor++;
                     }
 
                     localLogPos += retainLen;
-
-                    // ── Insert ────────────────────────────────────────────────────
-                    // New text is being inserted by this actor. Splice new runs for
-                    // the inserted text and mark them as part of an insert suggestion group.
                 } else if (component.isInsert() && component.getInsert() instanceof String insertText) {
                     currentDeleteGroup = null;
                     currentFormatGroup = null;
@@ -697,93 +752,27 @@ public class AttributionServiceImpl implements AttributionService {
                                 log.debug("[INSERT] opId={} compIdx={} — creating/extending inherited-attr format suggestion from prevGroup owner={} spanStart={} spanEnd={}",
                                         opId, compIdx, prevRun.getInsertSuggestion().getActorEmail(), spanStart, spanEnd);
 
-                                // First: try to extend an already-existing adjacent format suggestion at boundary
-                                final String finalAttrStr2 = attrStr;
-                                int finalLocalLogPos = localLogPos;
-                                FormatSuggestionItem existingAtBoundary = formatSuggestions.stream()
-                                        .filter(f -> f.getAttributes().equals(finalAttrStr2)
-                                                && f.getSpans().stream().anyMatch(s -> s.getStart() + s.getLength() == finalLocalLogPos))
-                                        .findFirst().orElse(null);
+                                // Fallback: find or create by spanStart
+                                String ownerEmail = prevRun.getInsertSuggestion().getActorEmail();
 
-                                if (existingAtBoundary != null) {
-                                    int tIdx = -1;
-                                    for (int si = 0; si < existingAtBoundary.getSpans().size(); si++) {
-                                        FormatSuggestionSpan s = existingAtBoundary.getSpans().get(si);
-                                        if (s.getStart() + s.getLength() == localLogPos) { tIdx = si; break; }
-                                    }
-                                    if (tIdx != -1) {
-                                        existingAtBoundary.getSpans().get(tIdx)
-                                                .setLength(existingAtBoundary.getSpans().get(tIdx).getLength() + insertText.length());
-                                        existingAtBoundary.setSpans(mergeAdjacentSpans(existingAtBoundary.getSpans().stream()
-                                                .map(s -> FormatSuggestionSpan.builder().start(s.getStart()).length(s.getLength()).build())
-                                                .collect(Collectors.toList())));
-                                    }
-                                    final int fc2 = compIdx;
-                                    if (existingAtBoundary.getReferences().stream().noneMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc2)) {
-                                        existingAtBoundary.getReferences().add(new OpReference(opId, compIdx));
-                                    }
-                                    if (!existingAtBoundary.getDependsOnInsertGroupIds().contains(currentInsertGroup.getGroupId())) {
-                                        existingAtBoundary.getDependsOnInsertGroupIds().add(currentInsertGroup.getGroupId());
-                                    }
-                                    extendedGroupIds.add(existingAtBoundary.getGroupId());
-                                    log.debug("[INSERT] opId={} compIdx={} — EXTENDED adjacent existing formatGroup={} from prev neighbor",
-                                            opId, compIdx, existingAtBoundary.getGroupId());
-                                } else {
-                                    // Fallback: find or create by spanStart
-                                    String ownerEmail = prevRun.getInsertSuggestion().getActorEmail();
-                                    final String fas2 = attrStr;
-                                    FormatSuggestionItem existing = formatSuggestions.stream()
-                                            .filter(f -> f.getActorEmail().equals(ownerEmail)
-                                                    && f.getAttributes().equals(fas2)
-                                                    && f.getSpans().stream().anyMatch(s -> s.getStart() == spanStart))
-                                            .findFirst().orElse(null);
-
-                                    if (existing != null) {
-                                        int tIdx = -1;
-                                        for (int si = 0; si < existing.getSpans().size(); si++) {
-                                            if (existing.getSpans().get(si).getStart() == spanStart) { tIdx = si; break; }
-                                        }
-                                        if (tIdx != -1) {
-                                            existing.getSpans().get(tIdx).setLength(
-                                                    Math.max(existing.getSpans().get(tIdx).getLength(), spanEnd - spanStart));
-                                            existing.setSpans(mergeAdjacentSpans(existing.getSpans().stream()
-                                                    .map(s -> FormatSuggestionSpan.builder().start(s.getStart()).length(s.getLength()).build())
-                                                    .collect(Collectors.toList())));
-                                        }
-                                        final int fc3 = compIdx;
-                                        if (existing.getReferences().stream().noneMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc3)) {
-                                            existing.getReferences().add(new OpReference(opId, compIdx));
-                                        }
-                                        if (!existing.getDependsOnInsertGroupIds().contains(prevRun.getInsertSuggestion().getGroupId())) {
-                                            existing.getDependsOnInsertGroupIds().add(prevRun.getInsertSuggestion().getGroupId());
-                                        }
-                                        if (!existing.getDependsOnInsertGroupIds().contains(currentInsertGroup.getGroupId())) {
-                                            existing.getDependsOnInsertGroupIds().add(currentInsertGroup.getGroupId());
-                                        }
-                                        extendedGroupIds.add(existing.getGroupId());
-                                        log.debug("[INSERT] opId={} compIdx={} — EXTENDED fallback inherited-attr formatGroup={} from prev neighbor",
-                                                opId, compIdx, existing.getGroupId());
-                                    } else {
-                                        FormatSuggestionItem g = FormatSuggestionItem.builder()
-                                                .groupId(nextId())
-                                                .actorEmail(ownerEmail)
-                                                .createdAt(prevRun.getInsertSuggestion().getCreatedAt())
-                                                .attributes(attrStr)
-                                                .references(new ArrayList<>(prevRun.getInsertSuggestion().getReferences()))
-                                                .spans(new ArrayList<>(Collections.singletonList(
-                                                        FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
-                                                .previewText("")
-                                                .dependsOnInsertGroupIds(new ArrayList<>(Arrays.asList(
-                                                        prevRun.getInsertSuggestion().getGroupId(),
-                                                        currentInsertGroup.getGroupId())))
-                                                .build();
-                                        g.getReferences().add(new OpReference(opId, compIdx));
-                                        formatSuggestions.add(g);
-                                        extendedGroupIds.add(g.getGroupId());
-                                        log.debug("[INSERT] opId={} compIdx={} — CREATED fallback inherited-attr formatGroup={} from prev neighbor",
-                                                opId, compIdx, g.getGroupId());
-                                    }
-                                }
+                                FormatSuggestionItem g = FormatSuggestionItem.builder()
+                                        .groupId(nextId())
+                                        .actorEmail(ownerEmail)
+                                        .createdAt(prevRun.getInsertSuggestion().getCreatedAt())
+                                        .attributes(attrStr)
+                                        .references(new ArrayList<>(prevRun.getInsertSuggestion().getReferences()))
+                                        .spans(new ArrayList<>(Collections.singletonList(
+                                                FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
+                                        .previewText("")
+                                        .dependsOnInsertGroupIds(new ArrayList<>(Arrays.asList(
+                                                prevRun.getInsertSuggestion().getGroupId(),
+                                                currentInsertGroup.getGroupId())))
+                                        .build();
+                                g.getReferences().add(new OpReference(opId, compIdx));
+                                formatSuggestions.add(g);
+                                extendedGroupIds.add(g.getGroupId());
+                                log.debug("[INSERT] opId={} compIdx={} — CREATED fallback inherited-attr formatGroup={} from prev neighbor",
+                                        opId, compIdx, g.getGroupId());
 
                                 stripAttrsFromRuns(runs, prevGroup.indices, inherited);
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
@@ -819,49 +808,24 @@ public class AttributionServiceImpl implements AttributionService {
                                 log.debug("[INSERT] opId={} compIdx={} — creating/extending inherited-attr format suggestion from nextGroup owner={} spanStart={} spanEnd={}",
                                         opId, compIdx, ownerEmail, spanStart, spanEnd);
 
-                                final String fas3 = attrStr;
-                                FormatSuggestionItem existing = formatSuggestions.stream()
-                                        .filter(f -> f.getActorEmail().equals(ownerEmail)
-                                                && f.getAttributes().equals(fas3)
-                                                && f.getSpans().stream().anyMatch(s -> s.getStart() == spanStart))
-                                        .findFirst().orElse(null);
-
-                                if (existing != null) {
-                                    int tIdx = -1;
-                                    for (int si = 0; si < existing.getSpans().size(); si++) {
-                                        if (existing.getSpans().get(si).getStart() == spanStart) { tIdx = si; break; }
-                                    }
-                                    if (tIdx != -1) {
-                                        existing.getSpans().get(tIdx).setLength(
-                                                Math.max(existing.getSpans().get(tIdx).getLength(), spanEnd - spanStart));
-                                    }
-                                    final int fc4 = compIdx;
-                                    if (existing.getReferences().stream().noneMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc4)) {
-                                        existing.getReferences().add(new OpReference(opId, compIdx));
-                                    }
-                                    extendedGroupIds.add(existing.getGroupId());
-                                    log.debug("[INSERT] opId={} compIdx={} — EXTENDED existing inherited-attr formatGroup={} from next neighbor",
-                                            opId, compIdx, existing.getGroupId());
-                                } else {
-                                    FormatSuggestionItem g = FormatSuggestionItem.builder()
-                                            .groupId(nextId())
-                                            .actorEmail(ownerEmail)
-                                            .createdAt(nextRun.getInsertSuggestion().getCreatedAt())
-                                            .attributes(attrStr)
-                                            .references(new ArrayList<>(nextRun.getInsertSuggestion().getReferences()))
-                                            .spans(new ArrayList<>(Collections.singletonList(
-                                                    FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
-                                            .previewText("")
-                                            .dependsOnInsertGroupIds(new ArrayList<>(Arrays.asList(
-                                                    nextRun.getInsertSuggestion().getGroupId(),
-                                                    currentInsertGroup.getGroupId())))
-                                            .build();
-                                    g.getReferences().add(new OpReference(opId, compIdx));
-                                    formatSuggestions.add(g);
-                                    extendedGroupIds.add(g.getGroupId());
-                                    log.debug("[INSERT] opId={} compIdx={} — CREATED inherited-attr formatGroup={} from next neighbor attrKeys=\"{}\"",
-                                            opId, compIdx, g.getGroupId(), inheritedKeys);
-                                }
+                                FormatSuggestionItem g = FormatSuggestionItem.builder()
+                                        .groupId(nextId())
+                                        .actorEmail(ownerEmail)
+                                        .createdAt(nextRun.getInsertSuggestion().getCreatedAt())
+                                        .attributes(attrStr)
+                                        .references(new ArrayList<>(nextRun.getInsertSuggestion().getReferences()))
+                                        .spans(new ArrayList<>(Collections.singletonList(
+                                                FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
+                                        .previewText("")
+                                        .dependsOnInsertGroupIds(new ArrayList<>(Arrays.asList(
+                                                nextRun.getInsertSuggestion().getGroupId(),
+                                                currentInsertGroup.getGroupId())))
+                                        .build();
+                                g.getReferences().add(new OpReference(opId, compIdx));
+                                formatSuggestions.add(g);
+                                extendedGroupIds.add(g.getGroupId());
+                                log.debug("[INSERT] opId={} compIdx={} — CREATED inherited-attr formatGroup={} from next neighbor attrKeys=\"{}\"",
+                                        opId, compIdx, g.getGroupId(), inheritedKeys);
 
                                 stripAttrsFromRuns(runs, nextGroup.indices, inherited);
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
@@ -882,18 +846,61 @@ public class AttributionServiceImpl implements AttributionService {
 
                     for (int i = 0; i < parts.length; i++) {
                         if (!parts[i].isEmpty()) {
-                            ReviewRun newRun = ReviewRun.builder()
-                                    .text(parts[i])
-                                    .baseAttributes(new LinkedHashMap<>(ownAttrs))
-                                    .suggestionAttributes(new LinkedHashMap<>())
-                                    .logicalStart(runPos)
-                                    .opId(opId)
-                                    .insertComponentIndex(compIdx)
-                                    .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
-                                    .build();
-                            runs.add(spliceAt++, newRun);
-                            log.debug("[INSERT] opId={} compIdx={} — inserted run text=\"{}\" at logicalStart={} group={}",
-                                    opId, compIdx, parts[i], runPos, currentInsertGroup.getGroupId());
+                            ReviewRun prevInsertedRun = (spliceAt > 0) ? runs.get(spliceAt - 1) : null;
+
+                            boolean canMergeIntoPrev =
+                                    prevInsertedRun != null
+                                            && prevInsertedRun.getDeleteSuggestion() == null
+                                            && prevInsertedRun.getInsertSuggestion() != null
+                                            && currentInsertGroup != null
+                                            && prevInsertedRun.getInsertSuggestion().getGroupId()
+                                            .equals(currentInsertGroup.getGroupId())
+                                            && !"\n".equals(prevInsertedRun.getText())
+                                            && !"\n".equals(parts[i])
+                                            && attrsEq(
+                                            prevInsertedRun.getBaseAttributes() != null
+                                                    ? prevInsertedRun.getBaseAttributes()
+                                                    : Collections.emptyMap(),
+                                            ownAttrs
+                                    )
+                                            && (prevInsertedRun.getSuggestionAttributes() == null
+                                            || prevInsertedRun.getSuggestionAttributes().isEmpty())
+                                            && prevInsertedRun.getLogicalStart() + prevInsertedRun.getText().length() == runPos;
+
+                            if (canMergeIntoPrev) {
+                                prevInsertedRun.setText(prevInsertedRun.getText() + parts[i]);
+
+                                // Keep the insert suggestion metadata fresh/merged
+                                InsertSuggestion mergedInsertSuggestion = prevInsertedRun.getInsertSuggestion();
+                                final int finalCompIdx = compIdx;
+                                boolean refExists = mergedInsertSuggestion.getReferences().stream()
+                                        .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == finalCompIdx);
+                                if (!refExists) {
+                                    mergedInsertSuggestion.getReferences().add(new OpReference(opId, compIdx));
+                                }
+                                if (createdAt.compareTo(mergedInsertSuggestion.getCreatedAt()) > 0) {
+                                    mergedInsertSuggestion.setCreatedAt(createdAt);
+                                }
+
+                                prevInsertedRun.setInsertSuggestion(copyInsertSuggestion(mergedInsertSuggestion));
+
+                                log.debug("[INSERT] opId={} compIdx={} — MERGED text=\"{}\" into previous run at logicalStart={} group={}",
+                                        opId, compIdx, parts[i], prevInsertedRun.getLogicalStart(), currentInsertGroup.getGroupId());
+                            } else {
+                                ReviewRun newRun = ReviewRun.builder()
+                                        .text(parts[i])
+                                        .baseAttributes(new LinkedHashMap<>(ownAttrs))
+                                        .suggestionAttributes(new LinkedHashMap<>())
+                                        .logicalStart(runPos)
+                                        .opId(opId)
+                                        .insertComponentIndex(compIdx)
+                                        .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
+                                        .build();
+                                runs.add(spliceAt++, newRun);
+                                log.debug("[INSERT] opId={} compIdx={} — inserted run text=\"{}\" at logicalStart={} group={}",
+                                        opId, compIdx, parts[i], runPos, currentInsertGroup.getGroupId());
+                            }
+
                             runPos += parts[i].length();
                         }
                         if (i < parts.length - 1) {
@@ -954,22 +961,23 @@ public class AttributionServiceImpl implements AttributionService {
 
                     if (currentDeleteGroup == null) {
                         ReviewRun prevRunD = (cursor > 0) ? runs.get(cursor - 1) : null;
-                        ReviewRun nextRunD = (cursor < runs.size()) ? runs.get(cursor) : null;
+                        ReviewRun nextRunD = (cursor + 1 < runs.size()) ? runs.get(cursor + 1) : null;
 
                         DeleteSuggestion prevAdj = (prevRunD != null
                                 && prevRunD.getDeleteSuggestion() != null
                                 && authorEmail.equals(prevRunD.getDeleteSuggestion().getActorEmail()))
-                                ? prevRunD.getDeleteSuggestion() : null;
+                                ? prevRunD.getDeleteSuggestion()
+                                : null;
 
                         DeleteSuggestion nextAdj = (nextRunD != null
                                 && nextRunD.getDeleteSuggestion() != null
                                 && authorEmail.equals(nextRunD.getDeleteSuggestion().getActorEmail()))
-                                ? nextRunD.getDeleteSuggestion() : null;
+                                ? nextRunD.getDeleteSuggestion()
+                                : null;
 
-                        DeleteSuggestion adj = (prevAdj != null) ? prevAdj : nextAdj;
+                        if (prevAdj != null) {
+                            currentDeleteGroup = prevAdj;
 
-                        if (adj != null) {
-                            currentDeleteGroup = adj;
                             final int fc5 = compIdx;
                             boolean refExists = currentDeleteGroup.getReferences().stream()
                                     .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc5);
@@ -977,7 +985,51 @@ public class AttributionServiceImpl implements AttributionService {
                                 currentDeleteGroup.getReferences().add(
                                         new OpReference(opId, compIdx));
                             }
-                            log.debug("[DELETE] opId={} compIdx={} — JOINED adjacent deleteGroup={}", opId, compIdx, currentDeleteGroup.getGroupId());
+
+                            log.debug("[DELETE] opId={} compIdx={} — JOINED PREV deleteGroup={}",
+                                    opId, compIdx, currentDeleteGroup.getGroupId());
+
+                            if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
+                                log.debug("[DELETE] opId={} compIdx={} — UNIFYING next deleteGroup={} into prev deleteGroup={}",
+                                        opId, compIdx, nextAdj.getGroupId(), prevAdj.getGroupId());
+
+                                for (OpReference ref : nextAdj.getReferences()) {
+                                    boolean alreadyExists = currentDeleteGroup.getReferences().stream()
+                                            .anyMatch(r -> r.opId().equals(ref.opId()) && r.componentIndex() == ref.componentIndex());
+                                    if (!alreadyExists) {
+                                        currentDeleteGroup.getReferences().add(ref);
+                                    }
+                                }
+
+                                if (nextAdj.getCreatedAt().compareTo(currentDeleteGroup.getCreatedAt()) > 0) {
+                                    currentDeleteGroup.setCreatedAt(nextAdj.getCreatedAt());
+                                }
+
+                                for (ReviewRun existingRun : runs) {
+                                    if (existingRun.getDeleteSuggestion() != null
+                                            && nextAdj.getGroupId().equals(existingRun.getDeleteSuggestion().getGroupId())) {
+                                        existingRun.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
+                                    }
+                                }
+
+                                log.debug("[DELETE] opId={} compIdx={} — next deleteGroup={} unified into {}",
+                                        opId, compIdx, nextAdj.getGroupId(), currentDeleteGroup.getGroupId());
+                            }
+
+                        } else if (nextAdj != null) {
+                            currentDeleteGroup = nextAdj;
+
+                            final int fc5 = compIdx;
+                            boolean refExists = currentDeleteGroup.getReferences().stream()
+                                    .anyMatch(r -> r.opId().equals(opId) && r.componentIndex() == fc5);
+                            if (!refExists) {
+                                currentDeleteGroup.getReferences().add(
+                                        new OpReference(opId, compIdx));
+                            }
+
+                            log.debug("[DELETE] opId={} compIdx={} — JOINED NEXT deleteGroup={}",
+                                    opId, compIdx, currentDeleteGroup.getGroupId());
+
                         } else {
                             currentDeleteGroup = DeleteSuggestion.builder()
                                     .groupId(nextId())
@@ -986,6 +1038,7 @@ public class AttributionServiceImpl implements AttributionService {
                                     .references(new ArrayList<>(Collections.singletonList(
                                             new OpReference(opId, compIdx))))
                                     .build();
+
                             log.debug("[DELETE] opId={} compIdx={} — CREATED new deleteGroup={} for actor={}",
                                     opId, compIdx, currentDeleteGroup.getGroupId(), authorEmail);
                         }
@@ -1004,7 +1057,6 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if ("\n".equals(run.getText())) {
-                            // Mark the newline as deleted — renders as "↵" in review
                             run.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
                             log.debug("[DELETE] opId={} cursor={} — marked NEWLINE run as DELETE suggestion group={}",
                                     opId, cursor, currentDeleteGroup.getGroupId());
@@ -1024,9 +1076,6 @@ public class AttributionServiceImpl implements AttributionService {
                         int len = target.getText().length();
 
                         if (target.getInsertSuggestion() != null) {
-                            // SPECIAL CASE: the text being deleted is itself an insert suggestion.
-                            // Net effect is zero — remove the run entirely and call the split API
-                            // to cancel the original insert op on the backend.
                             log.debug("[DELETE] opId={} cursor={} — run text=\"{}\" is INSERT SUGGESTION (insertGroup={}), cancelling via API",
                                     opId, cursor, target.getText(), target.getInsertSuggestion().getGroupId());
 
@@ -1052,11 +1101,10 @@ public class AttributionServiceImpl implements AttributionService {
                                     opId, cursor, target.getOpId(), len);
 
                             remaining -= len;
-                            localLogPos += len;
+//                            localLogPos += len;
                             continue;
                         }
 
-                        // Normal case: mark as delete suggestion (stays visible in review)
                         target.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
                         log.debug("[DELETE] opId={} cursor={} — marked run text=\"{}\" as DELETE suggestion group={}",
                                 opId, cursor, target.getText(), currentDeleteGroup.getGroupId());

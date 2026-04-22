@@ -130,28 +130,28 @@ public class AttributionHelpers {
         return out;
     }
 
-    // ─── applyDeltaAttrs ──────────────────────────────────────────────────────
-    //
-    // Applies a Quill delta attribute map onto a base attribute map.
-    // - null values mean "remove this key" (Quill's un-format convention)
-    // - non-null values are set / overwritten
-    //
-    // Used when processing a format-retain component to update a run's
-    // baseAttributes or suggestionAttributes to reflect the applied formatting.
-    // ─────────────────────────────────────────────────────────────────────────
-    public static Map<String, Object> applyDeltaAttrs(
+    public static Map<String, Object> overlayAttrsPreserveNull(
             Map<String, Object> baseAttrs,
             Map<String, Object> deltaAttrs
     ) {
-        Map<String, Object> out = new LinkedHashMap<>(baseAttrs != null ? baseAttrs : Collections.emptyMap());
-        if (deltaAttrs == null) return out;
-        for (Map.Entry<String, Object> entry : deltaAttrs.entrySet()) {
-            if (entry.getValue() == null) {
-                out.remove(entry.getKey());
-            } else {
-                out.put(entry.getKey(), entry.getValue());
-            }
+        Map<String, Object> out = new LinkedHashMap<>(
+                baseAttrs != null ? baseAttrs : Collections.emptyMap()
+        );
+        if (deltaAttrs != null) {
+            out.putAll(deltaAttrs);
         }
+        return out;
+    }
+
+    public static Map<String, Object> applyAttrsForEffectiveView(
+            Map<String, Object> baseAttrs,
+            Map<String, Object> deltaAttrs
+    ) {
+        Map<String, Object> out = new LinkedHashMap<>(
+                baseAttrs != null ? baseAttrs : Collections.emptyMap()
+        );
+        out.putAll(deltaAttrs);
+
         return out;
     }
 
@@ -168,13 +168,10 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
     public static Map<String, Object> getEffectiveAttrs(ReviewRun run) {
         if (run == null) return Collections.emptyMap();
-        Map<String, Object> out = new LinkedHashMap<>(
-                run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()
+        return applyAttrsForEffectiveView(
+                run.getBaseAttributes(),
+                run.getSuggestionAttributes()
         );
-        if (run.getSuggestionAttributes() != null) {
-            out.putAll(run.getSuggestionAttributes());
-        }
-        return out;
     }
 
     // ─── parseAttrs ───────────────────────────────────────────────────────────
@@ -236,51 +233,45 @@ public class AttributionHelpers {
         return new ArrayList<>(seen.values());
     }
 
-    // ─── pickCancelledFormatKeys ──────────────────────────────────────────────
-    //
-    // Determines which keys in a format suggestion are being "cancelled" by an
-    // incoming format-retain operation.
-    //
-    // A key is cancelled when:
-    //   1. It is present in the existing format suggestion (formatAttrs)
-    //   2. The incoming retain also touches that key (incomingAttrs contains it)
-    //   3. The incoming value would RESTORE the pre-suggestion state:
-    //        - incoming null → removes the key → restores "absent" (same as baseAttrs having no key)
-    //        - incoming value == baseAttrs[key] → sets it back to what it was before the suggestion
-    //
-    // Example:
-    //   baseAttrs    = {}            (no bold before the suggestion)
-    //   formatAttrs  = {bold: true}  (the suggestion added bold)
-    //   incomingAttrs= {bold: null}  (incoming removes bold)
-    //   → after = null → undefined  which equals  before = undefined (key absent)
-    //   → "bold" is cancelled
-    //
-    // Returns the map of cancelled keys so the caller can:
-    //   a) Remove them from rawIncomingAttrs (don't re-apply as a new suggestion)
-    //   b) Restore the run's base attributes to their pre-suggestion state
-    //   c) Queue a PendingFormatCancellation for the backend
-    // ─────────────────────────────────────────────────────────────────────────
-    public static Map<String, Object> pickCancelledFormatKeys(
-            Map<String, Object> formatAttrs,
-            Map<String, Object> incomingAttrs,
-            Map<String, Object> baseAttrs
+    public static List<FormatKeyDecision> classifyFormatKeyChanges(
+            Map<String, Object> baseAttrs,
+            Map<String, Object> suggestionAttrs,
+            Map<String, Object> incomingAttrs
     ) {
-        Map<String, Object> cancelled = new LinkedHashMap<>();
-        if (formatAttrs == null || incomingAttrs == null) return cancelled;
+        List<FormatKeyDecision> decisions = new ArrayList<>();
+        if (incomingAttrs == null || incomingAttrs.isEmpty()) return decisions;
 
-        for (String key : formatAttrs.keySet()) {
-            if (!incomingAttrs.containsKey(key)) continue;
+        Map<String, Object> base = baseAttrs != null ? baseAttrs : Collections.emptyMap();
+        Map<String, Object> suggested = suggestionAttrs != null ? suggestionAttrs : Collections.emptyMap();
 
-            Object before = (baseAttrs != null) ? baseAttrs.get(key) : null;
-            Object rawAfter = incomingAttrs.get(key);
-            // null in Quill delta means "remove" — equivalent to the key being absent
-            Object after = (rawAfter == null) ? null : rawAfter;
+        for (String key : incomingAttrs.keySet()) {
+            Object baseValue = base.get(key);
+            boolean hasSuggestedKey = suggested.containsKey(key);
+            Object currentSuggestedValue = hasSuggestedKey ? suggested.get(key) : baseValue;
+            Object incomingValue = incomingAttrs.get(key);
 
-            if (Objects.equals(after, before)) {
-                cancelled.put(key, incomingAttrs.get(key));
+            FormatKeyChangeType type;
+
+            if (Objects.equals(incomingValue, currentSuggestedValue)) {
+                type = FormatKeyChangeType.NO_OP;
+            } else if (Objects.equals(incomingValue, baseValue)) {
+                type = FormatKeyChangeType.CANCEL;
+            } else if (hasSuggestedKey) {
+                type = FormatKeyChangeType.REPLACE;
+            } else {
+                type = FormatKeyChangeType.NEW_SUGGESTION;
             }
+
+            decisions.add(new FormatKeyDecision(
+                    key,
+                    baseValue,
+                    currentSuggestedValue,
+                    incomingValue,
+                    type
+            ));
         }
-        return cancelled;
+
+        return decisions;
     }
 
     // ─── findRunPos ───────────────────────────────────────────────────────────
@@ -388,7 +379,7 @@ public class AttributionHelpers {
 
     // ─── isOnlyNewlineRetain ──────────────────────────────────────────────────
     //
-    // Returns true if the logical range [logicalStart, logicalStart + retainLength)
+    // Returns true if the logical range [logicalStart, logicalStart + retainLength]
     // consists entirely of "\n" characters.
     //
     // This is the key "bridge" condition for multi-line format suggestions. In Quill,
@@ -479,7 +470,7 @@ public class AttributionHelpers {
             next.add(FormatSuggestionSpan.builder().start(spanStart).length(spanLen).build());
         }
 
-        return mergeAdjacentSpans(next);
+        return next;
     }
 
     // ─── mergeAdjacentSpans ───────────────────────────────────────────────────
@@ -602,7 +593,7 @@ public class AttributionHelpers {
 
     // ─── removeRangeFromFormatSuggestion ──────────────────────────────────────
     //
-    // Removes the range [start, start+length) from a format suggestion's spans.
+    // Removes the range [start, start+length] from a format suggestion's spans.
     //
     // Used when:
     //   1. A format cancellation is detected — the cancelled range is trimmed out.
@@ -658,7 +649,7 @@ public class AttributionHelpers {
             }
         }
 
-        item.setSpans(mergeAdjacentSpans(next));
+        item.setSpans(next);
         log.debug("[REMOVE_RANGE_FROM_FORMAT] groupId={} remaining span count={}",
                 item.getGroupId(), item.getSpans().size());
     }
@@ -801,11 +792,10 @@ public class AttributionHelpers {
 
         if (idx != -1) {
             group.getSpans().get(idx).setLength(group.getSpans().get(idx).getLength() + insertLength);
-            group.setSpans(mergeAdjacentSpans(
-                    group.getSpans().stream()
+            group.setSpans(group.getSpans().stream()
                             .map(s -> FormatSuggestionSpan.builder()
                                     .start(s.getStart()).length(s.getLength()).build())
-                            .collect(Collectors.toList())
+                            .collect(Collectors.toList()
             ));
         }
 
