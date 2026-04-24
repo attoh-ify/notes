@@ -537,13 +537,8 @@ public class AttributionHelpers {
     ) {
         int insertEnd = insertStart + insertLength;
 
-        log.debug("[SHIFT_FORMAT_SPANS] insertStart={} insertLength={} insertEnd={} totalGroups={} skipCount={}",
-                insertStart, insertLength, insertEnd, formatSuggestions.size(),
-                skipGroupIds != null ? skipGroupIds.size() : 0);
-
         for (FormatSuggestionItem fmt : formatSuggestions) {
             if (skipGroupIds != null && skipGroupIds.contains(fmt.getGroupId())) {
-                log.debug("[SHIFT_FORMAT_SPANS] Skipping groupId={} (already extended by this insert)", fmt.getGroupId());
                 continue;
             }
 
@@ -555,16 +550,11 @@ public class AttributionHelpers {
 
                 if (spanEnd <= insertStart) {
                     // Entirely before — unchanged
-                    log.debug("[SHIFT_FORMAT_SPANS] groupId={} span=[{},{}] BEFORE insertion — unchanged",
-                            fmt.getGroupId(), spanStart, spanEnd);
                     nextSpans.add(FormatSuggestionSpan.builder()
                             .start(spanStart).length(span.getLength()).build());
 
                 } else if (spanStart >= insertStart) {
                     // Entirely after — shift right
-                    log.debug("[SHIFT_FORMAT_SPANS] groupId={} span=[{},{}] AFTER insertion — shifting right to [{},{}]",
-                            fmt.getGroupId(), spanStart, spanEnd,
-                            spanStart + insertLength, spanEnd + insertLength);
                     nextSpans.add(FormatSuggestionSpan.builder()
                             .start(spanStart + insertLength).length(span.getLength()).build());
 
@@ -572,11 +562,6 @@ public class AttributionHelpers {
                     // Straddles — split into left and right
                     int leftLen = insertStart - spanStart;
                     int rightLen = spanEnd - insertStart;
-
-                    log.debug("[SHIFT_FORMAT_SPANS] groupId={} span=[{},{}] STRADDLES at {} — left=[{},{}] right=[{},{}]",
-                            fmt.getGroupId(), spanStart, spanEnd, insertStart,
-                            spanStart, spanStart + leftLen,
-                            insertEnd, insertEnd + rightLen);
 
                     if (leftLen > 0) {
                         nextSpans.add(FormatSuggestionSpan.builder()
@@ -590,7 +575,6 @@ public class AttributionHelpers {
             }
 
             List<FormatSuggestionSpan> merged = mergeAdjacentSpans(nextSpans);
-            log.debug("[SHIFT_FORMAT_SPANS] groupId={} spansAfterShift count={}", fmt.getGroupId(), merged.size());
             fmt.setSpans(merged);
         }
     }
@@ -619,9 +603,6 @@ public class AttributionHelpers {
     ) {
         int end = start + length;
 
-        log.debug("[REMOVE_RANGE_FROM_FORMAT] groupId={} removing range=[{},{}] from {} span(s)",
-                item.getGroupId(), start, end, item.getSpans().size());
-
         List<FormatSuggestionSpan> next = new ArrayList<>();
 
         for (FormatSuggestionSpan span : item.getSpans()) {
@@ -640,22 +621,16 @@ public class AttributionHelpers {
             int rightLen = Math.max(0, spanEnd - end);
 
             if (leftLen > 0) {
-                log.debug("[REMOVE_RANGE_FROM_FORMAT] groupId={} keeping LEFT [{},{}]",
-                        item.getGroupId(), spanStart, spanStart + leftLen);
                 next.add(FormatSuggestionSpan.builder()
                         .start(spanStart).length(leftLen).build());
             }
             if (rightLen > 0) {
-                log.debug("[REMOVE_RANGE_FROM_FORMAT] groupId={} keeping RIGHT [{},{}]",
-                        item.getGroupId(), end, end + rightLen);
                 next.add(FormatSuggestionSpan.builder()
                         .start(end).length(rightLen).build());
             }
         }
 
         item.setSpans(next);
-        log.debug("[REMOVE_RANGE_FROM_FORMAT] groupId={} remaining span count={}",
-                item.getGroupId(), item.getSpans().size());
     }
 
     // ─── collectInsertGroupRunsWithAttrs ─────────────────────────────────────
@@ -697,12 +672,9 @@ public class AttributionHelpers {
         }
 
         if (indices.isEmpty()) {
-            log.debug("[COLLECT_INSERT_GROUP_RUNS] groupId={} — no runs found with the requested attributes", groupId);
             return null;
         }
 
-        log.debug("[COLLECT_INSERT_GROUP_RUNS] groupId={} foundRunCount={} logicalRange=[{},{}]",
-                groupId, indices.size(), start, end);
         return new InsertGroupCollection(indices, start, end);
     }
 
@@ -726,8 +698,6 @@ public class AttributionHelpers {
         String attrKeys = String.join(",", attrs.keySet());
         for (int idx : indices) {
             ReviewRun run = runs.get(idx);
-            log.debug("[STRIP_ATTRS_FROM_RUNS] runIdx={} text=\"{}\" stripping keys=\"{}\"",
-                    idx, run.getText(), attrKeys);
             for (String key : attrs.keySet()) {
                 // Remove from suggestionAttributes first (pending layer), then base
                 if (run.getSuggestionAttributes() != null

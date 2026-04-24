@@ -6,22 +6,38 @@ import java.util.List;
 
 // ─── ReviewProjection ─────────────────────────────────────────────────────────
 //
-// The final output of AttributionServiceImpl.buildReviewProjection().
+// The result of buildReviewProjection().
+//
+// baseDelta:
+//   The plain document expressed as a Quill insert-only delta.
+//   The frontend calls quill.setContents(baseDelta) first to load the
+//   base document with its real formatting. No suggestion metadata
+//   is present here.
 //
 // visualDelta:
-//   A Quill-compatible delta (list of insert ops with attributes) ready to be
-//   applied to the Quill editor via setContents(). Encodes all suggestion metadata
-//   as special Quill attributes ("suggestion-insert", "suggestion-delete", etc.)
-//   that registered Quill blots render as highlights/strikethroughs.
+//   A retain-based delta that the frontend applies on top of baseDelta via
+//   quill.updateContents(visualDelta). Using retains instead of inserts means
+//   suggestion attrs are scoped precisely to the runs they belong to and cannot
+//   bleed into surrounding committed text through Quill's inline attr inheritance.
+//
+//   Each retain op may carry:
+//     - base-attributes        : the run's committed formatting snapshot (Map)
+//     - suggestion-attributes  : pending format attrs as a map (for format suggestions)
+//     - suggestion-insert      : insert suggestion metadata
+//     - suggestion-delete      : delete suggestion metadata
+//     - suggestion-delete-newline : delete suggestion metadata for a newline run
+//
+//   Pending insert runs that don't exist in the committed document are still
+//   emitted as insert ops (retain is impossible for absent text).
+//
+//   Deleted committed runs are emitted as insert("↵"/"text") ops with
+//   suggestion-delete metadata attached.
 //
 // formatSuggestions:
-//   The list of format suggestion groups. Sent to the frontend alongside visualDelta
-//   so the sidebar panel can display them and the accept/reject handlers can act on them.
+//   All active format suggestion groups, for the sidebar review panel.
 // ──────────────────────────────────────────────────────────────────────────────
-public record ReviewProjection (
-    // Quill delta ready for quill.setContents() on the frontend
-    Delta visualDelta,
-    // All format suggestion groups generated during this projection build
-    List<FormatSuggestionItem> formatSuggestions
-){
-}
+public record ReviewProjection(
+        Delta baseDelta,
+        Delta visualDelta,
+        List<FormatSuggestionItem> formatSuggestions
+) {}

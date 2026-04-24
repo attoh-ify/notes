@@ -2,7 +2,6 @@ package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.*;
 import com.example.notes.dto.note.CancelFormatPayload;
-import com.example.notes.dto.note.CancelInsertPayload;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.note.OpReference;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
@@ -32,8 +31,12 @@ import static com.example.notes.utils.AttributionHelpers.*;
 //
 // Converts a list of COMMITTED textOps and PENDING textOps into a ReviewProjection
 // containing:
-//   - visualDelta        : a Quill-compatible delta for the frontend to render
-//   - formatSuggestions  : all format suggestion groups for the sidebar panel
+//   - baseDelta    : the base document as a plain Quill delta (inserts only)
+//   - visualDelta       : a retain-based Quill delta the frontend applies on top of
+//                         baseDelta via updateContents(). Uses retains instead
+//                         of inserts so that suggestion attrs never bleed into
+//                         surrounding committed text.
+//   - formatSuggestions : all format suggestion groups for the sidebar panel
 //
 // The algorithm follows five steps:
 //
@@ -60,7 +63,9 @@ import static com.example.notes.utils.AttributionHelpers.*;
 //     Persist any queued format cancellation records to the backend split API.
 //
 //   STEP 5 — BUILD OUTPUT
-//     Apply format suggestion attrs onto cloned runs, then build the visual delta.
+//     Apply format suggestion attrs onto cloned runs, then build:
+//       - baseDelta : plain base document (inserts)
+//       - visualDelta    : retain-based overlay with suggestion attrs + base-attributes
 //
 // Dependencies:
 //   - TextOperation   : your existing domain class holding opId, actorEmail, createdAt,
@@ -92,7 +97,7 @@ public class AttributionServiceImpl implements AttributionService {
     // @param noteId        used in split-API calls during delete/format cancellation
     // @param committedTextOps  ops in COMMITTED state — form the base document
     // @param pendingTextOps    ops in PENDING state — the changes under review
-    // @return              ReviewProjection with visualDelta + formatSuggestions
+    // @return              ReviewProjection with baseDelta + visualDelta + formatSuggestions
     // ─────────────────────────────────────────────────────────────────────────
     @Override
     public ReviewProjection buildReviewProjection(
@@ -108,7 +113,7 @@ public class AttributionServiceImpl implements AttributionService {
         List<TextOperation> pendingTextOps = note.revisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.PENDING))
                 .toList();
-        
+
         // Reset the group ID counter so IDs are predictable (g_1, g_2...) for each build
         resetGroupCounter();
 
@@ -124,6 +129,11 @@ public class AttributionServiceImpl implements AttributionService {
         // Break the committed delta into individual runs. Text segments are split on
         // "\n" so that each newline becomes its own run — required because Quill treats
         // "\n" as a paragraph terminator carrying block-level formatting.
+        //
+        // baseAttributes on each run represents exactly what the text had at insert/commit
+        // time. It is never modified after seeding (except for new insert runs, which also
+        // set baseAttributes to the insert-time attrs). This gives us a reliable "previous
+        // state" for undo: to undo a bold:null suggestion, read baseAttributes.bold → true.
         List<ReviewRun> runs = new ArrayList<>();
         int seedPos = 0;
 
@@ -166,8 +176,6 @@ public class AttributionServiceImpl implements AttributionService {
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
 
         // Accumulate format cancellations to flush after the run loop.
-        // We defer API calls so we don't interleave async I/O with the synchronous
-        // run-mutation pipeline.
         List<PendingFormatCancellation> pendingFormatCancellations = new ArrayList<>();
 
         for (TextOperation textOp : pendingTextOps) {
@@ -218,7 +226,6 @@ public class AttributionServiceImpl implements AttributionService {
                         int absPos = absPosResult.absPos();
                         int absLength = nextAbsPosResult.absPos() - absPos;
 
-                        int beforeSpanCount = currentFormatGroup.getSpans().size();
                         currentFormatGroup.setSpans(extendOrAddSpan(
                                 currentFormatGroup.getSpans(), absPos, absLength));
 
@@ -242,7 +249,6 @@ public class AttributionServiceImpl implements AttributionService {
 
                     int retainLen = (int) component.getRetain();
                     Map<String, Object> componentAttrs = new LinkedHashMap<>(component.getAttributes());
-                    String attrKeys = String.join(",", componentAttrs.keySet());
 
                     RunPosition startPos = findRunPos(runs, localLogPos);
                     int runIdx = startPos.idx();
@@ -265,7 +271,6 @@ public class AttributionServiceImpl implements AttributionService {
 
                         if ("\n".equals(run.getText())) {
                             cursor++;
-//                            remaining--;
 
                             if (currentFormatGroup != null) {
                                 pendingFormatBridge = new HashMap<>();
@@ -296,6 +301,9 @@ public class AttributionServiceImpl implements AttributionService {
 
                         for (FormatSuggestionItem fmt : new ArrayList<>(coveringFormats)) {
                             Map<String, Object> fmtAttrs = parseAttrs(fmt.getAttributes());
+                            // Use baseAttributes (insert-time attrs) as the authoritative
+                            // "before suggestion" state when classifying key changes.
+                            // This is why baseAttributes must never be mutated after seeding.
                             Map<String, Object> baseAttrs = new LinkedHashMap<>(
                                     target.getBaseAttributes() != null ? target.getBaseAttributes() : Collections.emptyMap()
                             );
@@ -352,6 +360,8 @@ public class AttributionServiceImpl implements AttributionService {
                                     formatSuggestions.remove(fmt);
                                 }
 
+                                // Remove cancelled keys from suggestionAttributes only —
+                                // baseAttributes is never touched here.
                                 if (target.getSuggestionAttributes() != null) {
                                     for (String key : removeFromOldGroup) {
                                         target.getSuggestionAttributes().remove(key);
@@ -364,6 +374,7 @@ public class AttributionServiceImpl implements AttributionService {
                             }
                         }
 
+                        // Pending format attrs go into suggestionAttributes, never baseAttributes.
                         target.setSuggestionAttributes(
                                 overlayAttrsPreserveNull(
                                         target.getSuggestionAttributes(),
@@ -372,7 +383,6 @@ public class AttributionServiceImpl implements AttributionService {
                         );
 
                         String attrStr = attrsToJson(rawIncomingAttrs);
-                        String suggestionAttrKeys = String.join(",", rawIncomingAttrs.keySet());
 
                         if (!rawIncomingAttrs.isEmpty()) {
                             if (currentFormatGroup == null) {
@@ -514,7 +524,6 @@ public class AttributionServiceImpl implements AttributionService {
                     Map<String, Object> rawAttrs = component.getAttributes() != null
                             ? new LinkedHashMap<>(component.getAttributes())
                             : new LinkedHashMap<>();
-                    String rawAttrKeys = String.join(",", rawAttrs.keySet());
 
                     RunPosition insertPos = findRunPos(runs, localLogPos);
                     int runIndex = insertPos.idx();
@@ -547,7 +556,6 @@ public class AttributionServiceImpl implements AttributionService {
 
                         if (adj != null) {
                             currentInsertGroup = adj;
-                            final int finalCompIdx2 = compIdx;
                             currentInsertGroup.setReferences(addReferenceIfMissing(
                                     currentInsertGroup.getReferences(),
                                     opId,
@@ -592,9 +600,6 @@ public class AttributionServiceImpl implements AttributionService {
                     }
 
                     // ── Check prev neighbor for inherited attrs (different actor) ──
-                    // If actor A inserted bold text and actor B inserts text immediately
-                    // after with the same bold, the bold is "inherited" from A.
-                    // We create a format suggestion owned by A spanning both A's and B's text.
                     Map<String, Object> prevEffectiveAttrs = getEffectiveAttrs(prevRun);
                     Map<String, Object> nextEffectiveAttrs = getEffectiveAttrs(nextRun);
 
@@ -605,7 +610,6 @@ public class AttributionServiceImpl implements AttributionService {
                             && !prevEffectiveAttrs.isEmpty()) {
 
                         Map<String, Object> inherited = intersectAttrs(ownAttrs, prevEffectiveAttrs);
-                        String inheritedKeys = String.join(",", inherited.keySet());
 
                         if (!inherited.isEmpty()) {
                             String attrStr = attrsToJson(inherited);
@@ -616,7 +620,6 @@ public class AttributionServiceImpl implements AttributionService {
                                 int spanStart = prevGroup.start;
                                 int spanEnd = localLogPos + insertText.length();
 
-                                // Fallback: find or create by spanStart
                                 String ownerEmail = prevRun.getInsertSuggestion().getActorEmail();
 
                                 FormatSuggestionItem g = FormatSuggestionItem.builder()
@@ -643,7 +646,6 @@ public class AttributionServiceImpl implements AttributionService {
                     }
 
                     // ── Check next neighbor for inherited attrs (different actor) ──
-                    // Mirror of prev-neighbor check — handles B inserting text BEFORE A's bold insert.
                     if (!ownAttrs.isEmpty()
                             && nextRun != null
                             && nextRun.getInsertSuggestion() != null
@@ -687,6 +689,8 @@ public class AttributionServiceImpl implements AttributionService {
 
                     // ── Splice new runs into the runs list ───────────────────────
                     // Split insertText on "\n" so each newline becomes its own run.
+                    // baseAttributes for new insert runs = the insert-time attrs (ownAttrs).
+                    // This is the insert-time snapshot — consistent with committed run seeding.
                     String[] parts = insertText.split("\n", -1);
                     int spliceAt = insertAtIdx;
                     int runPos = insertAbsPos;
@@ -744,6 +748,7 @@ public class AttributionServiceImpl implements AttributionService {
                             } else {
                                 ReviewRun newRun = ReviewRun.builder()
                                         .text(parts[i])
+                                        // baseAttributes = insert-time attrs, same contract as committed runs
                                         .baseAttributes(new LinkedHashMap<>(ownAttrs))
                                         .suggestionAttributes(new LinkedHashMap<>())
                                         .logicalStart(runPos)
@@ -784,10 +789,8 @@ public class AttributionServiceImpl implements AttributionService {
 
                     // Shift all subsequent runs right to fill the inserted space
                     int shiftLen = insertText.length();
-                    int shiftedCount = 0;
                     for (int i = spliceAt; i < runs.size(); i++) {
                         runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() + shiftLen);
-                        shiftedCount++;
                     }
 
                     // Shift format spans to account for the inserted text
@@ -932,8 +935,6 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         // ── STEP 3: Build preview texts ───────────────────────────────────────
-        // Compute a short text preview for each format suggestion so the sidebar
-        // can display it without parsing the full delta.
         for (FormatSuggestionItem fmt : formatSuggestions) {
             if (fmt.getPreviewText() != null && !fmt.getPreviewText().isEmpty()) {
                 continue;
@@ -981,53 +982,55 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         // ── STEP 4: Flush pending format cancellations ────────────────────────
-        // Now that all run mutations are complete, make the backend split calls
-        // for format cancellations.
         for (PendingFormatCancellation c : pendingFormatCancellations) {
             cancelFormat(
                     actorEmail,
                     noteId,
                     new CancelFormatPayload(
-                        c.getReferences(),
-                        c.getCancellingOpId(),
-                        c.getRetainComponentIndex(),
-                        c.getLength(),
-                        c.getConsumedBefore()));
+                            c.getReferences(),
+                            c.getCancellingOpId(),
+                            c.getRetainComponentIndex(),
+                            c.getLength(),
+                            c.getConsumedBefore()));
         }
 
         // ── STEP 5: Build output ──────────────────────────────────────────────
+        //
+        // baseDelta: the plain base document — used by the frontend as
+        //   the base for setContents(). Contains only base inserts with their
+        //   real formatting. No suggestion metadata.
+        //
+        // visualDelta: a retain-based delta the frontend applies on top of baseDelta
+        //   via updateContents(). Using retains (not inserts) prevents suggestion attrs
+        //   from bleeding into surrounding committed text. Each retain op carries:
+        //     - suggestion-insert / suggestion-delete / suggestion-delete-newline
+        //     - base-attributes: the run's committed formatting snapshot
+        //     - suggestion-attributes: the pending format attrs (if any)
+        //
+        // For deleted committed runs, the run must appear as an insert of "↵" in the
+        // visual delta (since the committed document doesn't contain them, there is
+        // nothing to retain at that position).
+
+        Delta baseDelta = new Delta();
+        for (TextOperation textOp : note.revisionLog()) {
+            baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
+        }
+
         List<ReviewRun> visualRuns = applyFormatSuggestionAttrsToRuns(runs, formatSuggestions);
         Delta visualDelta = buildVisualDelta(visualRuns);
 
-        for (FormatSuggestionItem fmt : formatSuggestions) {
-            String spanSummary = fmt.getSpans().stream()
-                    .map(s -> "[" + s.getStart() + "," + (s.getStart() + s.getLength()) + "]")
-                    .collect(Collectors.joining(" "));
-        }
-
-        log.info("Revision log: " + redisService.getNote(noteId).revisionLog().toString());
-
-        return new ReviewProjection(visualDelta, formatSuggestions);
+        return new ReviewProjection(baseDelta, visualDelta, formatSuggestions);
     }
 
     // ─── applyFormatSuggestionAttrsToRuns ─────────────────────────────────────
     //
     // Clones the runs array and overlays format suggestion attributes onto the
-    // appropriate runs. This is done as a final step before building the visual
-    // delta so that format suggestion styling appears in the initial render.
-    //
-    // The original runs array is not mutated — we work on clones so the format
-    // suggestion overlay can be toggled independently on the frontend without
-    // recomputing the whole projection.
-    //
-    // Uses a binary search to find the first run overlapping each span (O(log n)
-    // instead of O(n) per span).
+    // appropriate runs (into suggestionAttributes only — never baseAttributes).
     // ─────────────────────────────────────────────────────────────────────────
     private List<ReviewRun> applyFormatSuggestionAttrsToRuns(
             List<ReviewRun> runs,
             List<FormatSuggestionItem> formatSuggestions
     ) {
-        // Deep-clone runs so we don't mutate the pipeline state
         List<ReviewRun> cloned = runs.stream()
                 .map(r -> ReviewRun.builder()
                         .text(r.getText())
@@ -1042,12 +1045,9 @@ public class AttributionServiceImpl implements AttributionService {
 
         for (FormatSuggestionItem fmt : formatSuggestions) {
             Map<String, Object> fmtAttrs = parseAttrs(fmt.getAttributes());
-            if (fmtAttrs.isEmpty()) {
-                continue;
-            }
+            if (fmtAttrs.isEmpty()) continue;
 
             for (FormatSuggestionSpan span : fmt.getSpans()) {
-                // Binary search for the first run overlapping this span
                 int left = 0, right = cloned.size() - 1, startIdx = cloned.size();
                 while (left <= right) {
                     int mid = (left + right) >>> 1;
@@ -1069,6 +1069,7 @@ public class AttributionServiceImpl implements AttributionService {
                     if (run.getSuggestionAttributes() == null) {
                         run.setSuggestionAttributes(new LinkedHashMap<>());
                     }
+                    // Only overlay into suggestionAttributes — baseAttributes untouched
                     run.getSuggestionAttributes().putAll(fmtAttrs);
                 }
             }
@@ -1079,21 +1080,27 @@ public class AttributionServiceImpl implements AttributionService {
 
     // ─── buildVisualDelta ─────────────────────────────────────────────────────
     //
-    // Converts the final runs array into a Quill Delta ready for setContents().
+    // Converts the final runs array into a Quill Delta ready for updateContents().
     //
-    // Pass 1 — Collapse adjacent runs that can be merged. Two runs can merge when:
-    //   - Neither is a newline (newlines carry paragraph-level formatting and must
-    //     remain isolated in Quill's model)
-    //   - Both have identical effective attributes (base ∪ suggestion)
-    //   - Both belong to the same insert suggestion group (or neither does)
-    //   - Both belong to the same delete suggestion group (or neither does)
+    // KEY CHANGE: Instead of emitting inserts for all runs, we emit RETAINS for
+    // committed/deleted-committed runs (those without insertSuggestion). This prevents
+    // suggestion attrs from bleeding into surrounding text when Quill applies inline
+    // attribute inheritance.
     //
-    // Pass 2 — Build the delta from collapsed runs. Suggestion metadata is embedded
-    // as special Quill attributes ("suggestion-insert", "suggestion-delete", etc.)
-    // that registered Quill blots render as highlights/strikethroughs.
+    // Run categories and their delta representation:
+    //   - Committed, no suggestions       → retain(len) with base-attributes
+    //   - Committed, format suggestion    → retain(len) with base-attributes +
+    //                                       suggestion-attributes + suggestion-format
+    //   - Committed, deleted              → insert("↵"/"text") with suggestion-delete(-newline)
+    //                                       (no retain possible — text absent from committed doc)
+    //   - Inserted pending run            → insert(text) with suggestion-insert +
+    //                                       base-attributes + any suggestion-attributes
     //
-    // Deleted newlines are rendered as "↵" (the return symbol) rather than "\n"
-    // because inserting "\n" into Quill would create a new paragraph.
+    // Each op also carries "base-attributes" so the frontend can distinguish
+    // the committed formatting from suggestion-applied formatting.
+    //
+    // Pass 1 — Collapse adjacent mergeable runs.
+    // Pass 2 — Build the delta.
     // ─────────────────────────────────────────────────────────────────────────
     private Delta buildVisualDelta(List<ReviewRun> runs) {
         List<ReviewRun> collapsed = new ArrayList<>();
@@ -1115,7 +1122,11 @@ public class AttributionServiceImpl implements AttributionService {
                     run.getInsertSuggestion() != null ? run.getInsertSuggestion().getGroupId() : null)
                     && Objects.equals(
                     last.getDeleteSuggestion() != null ? last.getDeleteSuggestion().getGroupId() : null,
-                    run.getDeleteSuggestion() != null ? run.getDeleteSuggestion().getGroupId() : null);
+                    run.getDeleteSuggestion() != null ? run.getDeleteSuggestion().getGroupId() : null)
+                    && (last.getInsertSuggestion() == null) == (run.getInsertSuggestion() == null)
+                    && attrsEq(
+                    last.getBaseAttributes() != null ? last.getBaseAttributes() : Collections.emptyMap(),
+                    run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
 
             if (canMerge) {
                 last.setText(last.getText() + run.getText());
@@ -1146,6 +1157,7 @@ public class AttributionServiceImpl implements AttributionService {
                             mergeUniqueRefs(last.getInsertSuggestion().getReferences(),
                                     run.getInsertSuggestion().getReferences()));
                 }
+
                 if (last.getDeleteSuggestion() != null && run.getDeleteSuggestion() != null) {
                     String mergedCreatedAt = run.getDeleteSuggestion().getCreatedAt()
                             .compareTo(last.getDeleteSuggestion().getCreatedAt()) > 0
@@ -1169,15 +1181,30 @@ public class AttributionServiceImpl implements AttributionService {
             }
         }
 
-        // ── Pass 2: Build the delta from collapsed runs ──
+        // ── Pass 2: Build retain-based overlay ──
         Delta delta = new Delta();
 
         for (ReviewRun run : collapsed) {
-            // Effective attrs = base ∪ suggestion, suggestion wins on conflict
-            Map<String, Object> attrs = new LinkedHashMap<>(
-                    run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
-            if (run.getSuggestionAttributes() != null) {
-                attrs.putAll(run.getSuggestionAttributes());
+            Map<String, Object> baseAttrs = run.getBaseAttributes() != null
+                    ? run.getBaseAttributes()
+                    : Collections.emptyMap();
+            Map<String, Object> suggestionAttrs = run.getSuggestionAttributes() != null
+                    ? run.getSuggestionAttributes()
+                    : Collections.emptyMap();
+
+            boolean isInsertedPending = run.getInsertSuggestion() != null;
+            boolean isDeletedPending = run.getDeleteSuggestion() != null && !isInsertedPending;
+            boolean isDeletedNewline = "\n".equals(run.getText()) && run.getDeleteSuggestion() != null;
+
+            Map<String, Object> attrs = new LinkedHashMap<>();
+
+            if (!baseAttrs.isEmpty()) {
+                attrs.put("base-attributes", new LinkedHashMap<>(baseAttrs));
+            }
+
+            if (!suggestionAttrs.isEmpty()) {
+                attrs.put("suggestion-attributes", new LinkedHashMap<>(suggestionAttrs));
+                attrs.putAll(suggestionAttrs);
             }
 
             if (run.getInsertSuggestion() != null) {
@@ -1196,25 +1223,22 @@ public class AttributionServiceImpl implements AttributionService {
                 deletePayload.put("createdAt", run.getDeleteSuggestion().getCreatedAt());
                 deletePayload.put("references", run.getDeleteSuggestion().getReferences());
 
-                if ("\n".equals(run.getText())) {
-                    // Deleted newlines get their own attribute type — the frontend
-                    // "suggestion-delete-newline" blot renders as the "↵" symbol.
+                if (isDeletedNewline) {
                     attrs.put("suggestion-delete-newline", deletePayload);
                 } else {
                     attrs.put("suggestion-delete", deletePayload);
                 }
             }
 
-            // For deleted newlines, render "↵" instead of "\n" to avoid creating
-            // a real paragraph break in the Quill editor.
-            String textToRender = ("\n".equals(run.getText()) && run.getDeleteSuggestion() != null)
-                    ? "↵"
-                    : run.getText();
-
-            if (!attrs.isEmpty()) {
-                delta.insert(textToRender, attrs);
+            if (isDeletedPending) {
+                // Still needed with your current base-doc contract:
+                // deleted committed text is absent from `doc`, so it cannot be retained.
+                String textToInsert = isDeletedNewline ? "↵" : run.getText();
+                delta.insert(textToInsert, attrs.isEmpty() ? null : attrs);
             } else {
-                delta.insert(textToRender, null);
+                // Committed runs and pending inserted runs are already present in `doc`
+                int retainLen = run.getText().length();
+                delta.retain(retainLen, attrs.isEmpty() ? null : attrs);
             }
         }
 
