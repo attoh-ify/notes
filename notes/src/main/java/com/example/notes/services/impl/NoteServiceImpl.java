@@ -1,5 +1,6 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.attribution.SuggestionSlice;
 import com.example.notes.dto.note.OpReferenceResponse;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
@@ -183,7 +184,10 @@ public class NoteServiceImpl implements NoteService {
         Delta masterDelta = noteVersion.masterDelta();
         NoteVersionDto newNoteVersion = noteVersion;
 
-        if (!payload.rejectedChange().getDelta().ops.isEmpty()) {
+        if (payload.rejectedChange() != null
+                && payload.rejectedChange().getDelta() != null
+                && !payload.rejectedChange().getDelta().ops.isEmpty()) {
+
             TextOperation newTextOp = new TextOperation(
                     payload.rejectedChange().getDelta(),
                     actorEmail,
@@ -204,85 +208,63 @@ public class NoteServiceImpl implements NoteService {
             );
         }
 
-        Set<String> acceptedIds = payload.acceptedReferences().stream()
-                .map(OpReferenceResponse::opId)
-                .collect(Collectors.toSet());
+        Map<String, List<SuggestionSlice>> acceptedByOpId =
+                payload.acceptedReferences() == null
+                        ? new LinkedHashMap<>()
+                        : payload.acceptedReferences().stream()
+                        .filter(s -> s.getRef() != null)
+                        .collect(Collectors.groupingBy(
+                                s -> s.getRef().opId(),
+                                LinkedHashMap::new,
+                                Collectors.toList()
+                        ));
 
-        note.revisionLog().forEach(textOp -> {
-            if (acceptedIds.contains(textOp.getOpId())) {
-                long meaningfulOpCount = textOp.getDelta().ops.stream()
-                                .filter(component ->
-                                        component.isInsert() ||
-                                        component.isDelete() ||
-                                                (component.isRetain() && component.getAttributes() != null && !component.getAttributes().isEmpty()))
-                                        .count();
-                long referenceCount = payload.acceptedReferences().stream()
-                        .filter(ref -> ref.opId().equals(textOp.getOpId()))
-                        .mapToLong(ref -> ref.componentIndexes().size())
-                        .sum();
+        for (TextOperation textOp : new ArrayList<>(note.revisionLog())) {
+            List<SuggestionSlice> slicesForOp = acceptedByOpId.get(textOp.getOpId());
+            if (slicesForOp == null || slicesForOp.isEmpty()) continue;
 
-                if (meaningfulOpCount == referenceCount) {
-                    textOp.setState(OpState.COMMITTED);
-                } else {
-                    OpReferenceResponse opReferenceResponse = payload.acceptedReferences().stream()
-                            .filter(opRef -> opRef.opId().equals(textOp.getOpId()))
-                            .findFirst()
-                            .orElseThrow();
+            Delta committedDelta = new Delta();
+            Delta remainingDelta = new Delta();
 
-                    Delta committedDelta = new Delta();
-                    Delta remainingDelta = new Delta();
+            for (int i = 0; i < textOp.getDelta().ops.size(); i++) {
+                Op op = textOp.getDelta().ops.get(i);
 
-                    for (int i = 0; i < textOp.getDelta().ops.size(); i++) {
-                        Op op = textOp.getDelta().ops.get(i);
+                int finalI = i;
+                List<SuggestionSlice> acceptedSlicesForComponent = slicesForOp.stream()
+                        .filter(s -> Objects.equals(s.getRef().componentIndex(), finalI))
+                        .sorted(Comparator.comparingInt(SuggestionSlice::getStart))
+                        .toList();
 
-                        if (op.isRetain() && op.getAttributes() == null) {
-                            committedDelta.retain(op.getRetain(), null);
-                            remainingDelta.retain(op.getRetain(), null);
-                            continue;
-                        }
-
-                        boolean accepted = opReferenceResponse.componentIndexes().contains(i);
-
-                        if (accepted) {
-                            if (op.isDelete()) {
-                                committedDelta.delete(op.getDelete());
-                            } else if (op.isInsert()) {
-                                committedDelta.insert(op.getInsert(), op.getAttributes());
-                                remainingDelta.retain(op.length(), null);
-                            } else if (op.isRetain()) {
-                                committedDelta.retain(op.getRetain(), op.getAttributes());
-                                remainingDelta.retain(op.getRetain(), null);
-                            }
-                        } else {
-                            if (op.isDelete()) {
-                                remainingDelta.delete(op.getDelete());
-                            } else if (op.isInsert()) {
-                                remainingDelta.insert(op.getInsert(), op.getAttributes());
-                                committedDelta.retain(op.length(), null);
-                            } else if (op.isRetain()) {
-                                remainingDelta.retain(op.getRetain(), op.getAttributes());
-                                committedDelta.retain(op.getRetain(), null);
-                            }
-                        }
-                    }
-
-                    TextOperation committedOp = new TextOperation(
-                            committedDelta,
-                            textOp.getActorEmail(),
-                            textOp.getRevision(),
-                            OpState.COMMITTED,
-                            textOp.getCreatedAt()
-                    );
-
-                    textOp.setDelta(remainingDelta);
-
-                    int textOpIndex = note.revisionLog().indexOf(textOp);
-                    note.revisionLog().add(textOpIndex, committedOp);
+                if (acceptedSlicesForComponent.isEmpty()) {
+                    appendOpToRemainingAndRetainInCommitted(op, remainingDelta, committedDelta);
+                    continue;
                 }
 
-                log.debug("Committed operation: {}", textOp.getOpId());
+                applyAcceptedSlicesForComponent(
+                        op,
+                        acceptedSlicesForComponent,
+                        committedDelta,
+                        remainingDelta
+                );
             }
-        });
+
+            if (remainingDelta.ops.isEmpty()) {
+                textOp.setState(OpState.COMMITTED);
+            } else {
+                TextOperation committedOp = new TextOperation(
+                        committedDelta,
+                        textOp.getActorEmail(),
+                        textOp.getRevision(),
+                        OpState.COMMITTED,
+                        textOp.getCreatedAt()
+                );
+
+                textOp.setDelta(remainingDelta);
+
+                int textOpIndex = note.revisionLog().indexOf(textOp);
+                note.revisionLog().add(textOpIndex, committedOp);
+            }
+        }
 
         redisService.updateNote(note, newNoteVersion);
         saveNote(actorEmail, noteId);
@@ -327,5 +309,122 @@ public class NoteServiceImpl implements NoteService {
         Note note = notePolicyService.validateSuper(userEmail, noteId);
         note.setVisibility(visibility);
         noteRepository.save(note);
+    }
+
+    private void appendOpToRemainingAndRetainInCommitted(
+            Op op,
+            Delta remainingDelta,
+            Delta committedDelta
+    ) {
+        if (op.isDelete()) {
+            remainingDelta.delete(op.getDelete());
+        } else if (op.isInsert()) {
+            remainingDelta.insert(op.getInsert(), op.getAttributes());
+            committedDelta.retain(op.length(), null);
+        } else if (op.isRetain()) {
+            if (op.getAttributes() != null && !op.getAttributes().isEmpty()) {
+                remainingDelta.retain(op.getRetain(), op.getAttributes());
+                committedDelta.retain(op.getRetain(), null);
+            } else {
+                remainingDelta.retain(op.getRetain(), null);
+                committedDelta.retain(op.getRetain(), null);
+            }
+        }
+    }
+
+    private void applyAcceptedSlicesForComponent(
+            Op op,
+            List<SuggestionSlice> acceptedSlices,
+            Delta committedDelta,
+            Delta remainingDelta
+    ) {
+        int cursor = 0;
+        int totalLen = op.length();
+
+        int componentLength = op.length();
+
+        for (SuggestionSlice slice : acceptedSlices) {
+            int start = Math.max(0, Math.min(slice.getStart(), componentLength));
+            int end = Math.max(start, Math.min(slice.getStart() + slice.getLength(), componentLength));
+
+            if (start > cursor) {
+                appendUnacceptedPart(op, cursor, start - cursor, committedDelta, remainingDelta);
+            }
+
+            if (end > start) {
+                appendAcceptedPart(op, start, end - start, committedDelta, remainingDelta);
+            }
+
+            cursor = Math.max(cursor, end);
+        }
+
+        if (cursor < totalLen) {
+            appendUnacceptedPart(op, cursor, totalLen - cursor, committedDelta, remainingDelta);
+        }
+    }
+
+    private String safeSubstring(String text, int start, int length) {
+        int safeStart = Math.max(0, Math.min(start, text.length()));
+        int safeEnd = Math.max(safeStart, Math.min(start + length, text.length()));
+        return text.substring(safeStart, safeEnd);
+    }
+
+    private void appendAcceptedPart(
+            Op op,
+            int start,
+            int length,
+            Delta committedDelta,
+            Delta remainingDelta
+    ) {
+        if (length <= 0) return;
+
+        if (op.isInsert()) {
+            String text = String.valueOf(op.getInsert());
+
+            String safe = safeSubstring(text, start, length);
+
+            if (!safe.isEmpty()) {
+                committedDelta.insert(safe, op.getAttributes());
+                remainingDelta.retain(safe.length(), null);
+            }
+
+        } else if (op.isDelete()) {
+            committedDelta.delete(Math.min(length, op.getDelete()));
+        } else if (op.isRetain()) {
+            committedDelta.retain(length, op.getAttributes());
+            remainingDelta.retain(length, null);
+        }
+    }
+
+    private void appendUnacceptedPart(
+            Op op,
+            int start,
+            int length,
+            Delta committedDelta,
+            Delta remainingDelta
+    ) {
+        if (length <= 0) return;
+
+        if (op.isInsert()) {
+            String text = String.valueOf(op.getInsert());
+
+            String safe = safeSubstring(text, start, length);
+
+            if (!safe.isEmpty()) {
+                remainingDelta.insert(safe, op.getAttributes());
+                committedDelta.retain(safe.length(), null);
+            }
+
+        } else if (op.isDelete()) {
+            remainingDelta.delete(Math.min(length, op.getDelete()));
+        } else if (op.isRetain()) {
+            if (op.getAttributes() != null && !op.getAttributes().isEmpty()) {
+                remainingDelta.retain(length, op.getAttributes());
+                committedDelta.retain(length, null);
+            } else {
+                remainingDelta.retain(length, null);
+                committedDelta.retain(length, null);
+            }
+        }
     }
 }

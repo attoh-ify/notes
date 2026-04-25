@@ -153,7 +153,6 @@ public class AttributionServiceImpl implements AttributionService {
                             .baseAttributes(new LinkedHashMap<>(opAttrs))
                             .suggestionAttributes(new LinkedHashMap<>())
                             .logicalStart(seedPos)
-                            .insertReferences(new ArrayList<>())
                             .build());
                     seedPos += parts[i].length();
                 }
@@ -164,7 +163,6 @@ public class AttributionServiceImpl implements AttributionService {
                             .baseAttributes(new LinkedHashMap<>())
                             .suggestionAttributes(new LinkedHashMap<>())
                             .logicalStart(seedPos)
-                            .insertReferences(new ArrayList<>())
                             .build());
                     seedPos += 1;
                 }
@@ -346,7 +344,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 } else {
                                     pendingFormatCancellations.add(PendingFormatCancellation.builder()
                                             .groupId(fmt.getGroupId())
-                                            .references(new ArrayList<>(fmt.getReferences()))
+                                            .references(refsFromSlices(fmt.getReferences()))
                                             .cancellingOpId(opId)
                                             .retainComponentIndex(compIdx)
                                             .consumedBefore(consumedBefore)
@@ -411,13 +409,10 @@ public class AttributionServiceImpl implements AttributionService {
                                     existing = prevAdj;
 
                                     if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
-                                        for (OpReference ref : nextAdj.getReferences()) {
-                                            existing.setReferences(addReferenceIfMissing(
-                                                    existing.getReferences(),
-                                                    ref.opId(),
-                                                    ref.componentIndex()
-                                            ));
-                                        }
+                                        existing.setReferences(mergeSuggestionSlices(
+                                                existing.getReferences(),
+                                                nextAdj.getReferences()
+                                        ));
 
                                         List<FormatSuggestionSpan> mergedSpans = new ArrayList<>();
                                         mergedSpans.addAll(existing.getSpans().stream()
@@ -461,8 +456,7 @@ public class AttributionServiceImpl implements AttributionService {
                                             .actorEmail(authorEmail)
                                             .createdAt(createdAt)
                                             .attributes(attrStr)
-                                            .references(new ArrayList<>(Collections.singletonList(
-                                                    new OpReference(opId, compIdx))))
+                                            .references(new ArrayList<>())
                                             .spans(new ArrayList<>())
                                             .previewText("")
                                             .dependsOnInsertGroupIds(new ArrayList<>())
@@ -480,8 +474,11 @@ public class AttributionServiceImpl implements AttributionService {
                                         .add(target.getInsertSuggestion().getGroupId());
                             }
 
-                            currentFormatGroup.setReferences(addReferenceIfMissing(
+                            int componentLocalStart = retainLen - remaining;
+                            currentFormatGroup.setReferences(addComponentLocalSlice(
                                     currentFormatGroup.getReferences(),
+                                    componentLocalStart,
+                                    spanLen,
                                     opId,
                                     compIdx
                             ));
@@ -556,18 +553,12 @@ public class AttributionServiceImpl implements AttributionService {
 
                         if (adj != null) {
                             currentInsertGroup = adj;
-                            currentInsertGroup.setReferences(addReferenceIfMissing(
-                                    currentInsertGroup.getReferences(),
-                                    opId,
-                                    compIdx
-                            ));
                         } else {
                             currentInsertGroup = InsertSuggestion.builder()
                                     .groupId(nextId())
                                     .actorEmail(authorEmail)
                                     .createdAt(createdAt)
-                                    .references(new ArrayList<>(Collections.singletonList(
-                                            new OpReference(opId, compIdx))))
+                                    .references(new ArrayList<>())
                                     .startIndex(localLogPos)
                                     .build();
                         }
@@ -627,7 +618,7 @@ public class AttributionServiceImpl implements AttributionService {
                                         .actorEmail(ownerEmail)
                                         .createdAt(prevRun.getInsertSuggestion().getCreatedAt())
                                         .attributes(attrStr)
-                                        .references(new ArrayList<>(prevRun.getInsertSuggestion().getReferences()))
+                                        .references(new ArrayList<>())
                                         .spans(new ArrayList<>(Collections.singletonList(
                                                 FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
                                         .previewText("")
@@ -635,7 +626,20 @@ public class AttributionServiceImpl implements AttributionService {
                                                 prevRun.getInsertSuggestion().getGroupId(),
                                                 currentInsertGroup.getGroupId())))
                                         .build();
-                                g.getReferences().add(new OpReference(opId, compIdx));
+
+                                g.setReferences(mergeSuggestionSlices(
+                                        g.getReferences(),
+                                        prevRun.getInsertSuggestion().getReferences()
+                                ));
+
+                                g.setReferences(addComponentLocalSlice(
+                                        g.getReferences(),
+                                        0,
+                                        insertText.length(),
+                                        opId,
+                                        compIdx
+                                ));
+
                                 formatSuggestions.add(g);
                                 extendedGroupIds.add(g.getGroupId());
 
@@ -669,7 +673,7 @@ public class AttributionServiceImpl implements AttributionService {
                                         .actorEmail(ownerEmail)
                                         .createdAt(nextRun.getInsertSuggestion().getCreatedAt())
                                         .attributes(attrStr)
-                                        .references(new ArrayList<>(nextRun.getInsertSuggestion().getReferences()))
+                                        .references(cloneSuggestionSlices(nextRun.getInsertSuggestion().getReferences()))
                                         .spans(new ArrayList<>(Collections.singletonList(
                                                 FormatSuggestionSpan.builder().start(spanStart).length(spanEnd - spanStart).build())))
                                         .previewText("")
@@ -677,7 +681,15 @@ public class AttributionServiceImpl implements AttributionService {
                                                 nextRun.getInsertSuggestion().getGroupId(),
                                                 currentInsertGroup.getGroupId())))
                                         .build();
-                                g.getReferences().add(new OpReference(opId, compIdx));
+
+                                g.setReferences(addSuggestionSlice(
+                                        g.getReferences(),
+                                        localLogPos,
+                                        insertText.length(),
+                                        opId,
+                                        compIdx
+                                ));
+
                                 formatSuggestions.add(g);
                                 extendedGroupIds.add(g.getGroupId());
 
@@ -691,6 +703,7 @@ public class AttributionServiceImpl implements AttributionService {
                     // Split insertText on "\n" so each newline becomes its own run.
                     // baseAttributes for new insert runs = the insert-time attrs (ownAttrs).
                     // This is the insert-time snapshot — consistent with committed run seeding.
+                    int componentLocalInsertCursor = 0;
                     String[] parts = insertText.split("\n", -1);
                     int spliceAt = insertAtIdx;
                     int runPos = insertAbsPos;
@@ -719,69 +732,69 @@ public class AttributionServiceImpl implements AttributionService {
                                             && prevInsertedRun.getLogicalStart() + prevInsertedRun.getText().length() == runPos;
 
                             if (canMergeIntoPrev) {
-                                int previousLength = prevInsertedRun.getText().length();
                                 prevInsertedRun.setText(prevInsertedRun.getText() + parts[i]);
 
-                                List<InsertSlice> slices = prevInsertedRun.getInsertReferences() != null
-                                        ? prevInsertedRun.getInsertReferences()
-                                        : new ArrayList<>();
+                                InsertSuggestion merged = copyInsertSuggestion(prevInsertedRun.getInsertSuggestion());
 
-                                slices.add(InsertSlice.builder()
-                                        .start(previousLength)
-                                        .length(parts[i].length())
-                                        .ref(new OpReference(opId, compIdx))
-                                        .build());
-
-                                prevInsertedRun.setInsertReferences(slices);
-
-                                InsertSuggestion mergedInsertSuggestion = prevInsertedRun.getInsertSuggestion();
-                                mergedInsertSuggestion.setReferences(addReferenceIfMissing(
-                                        mergedInsertSuggestion.getReferences(),
+                                merged.setReferences(addComponentLocalSlice(
+                                        merged.getReferences(),
+                                        componentLocalInsertCursor,
+                                        parts[i].length(),
                                         opId,
                                         compIdx
                                 ));
-                                if (createdAt.compareTo(mergedInsertSuggestion.getCreatedAt()) > 0) {
-                                    mergedInsertSuggestion.setCreatedAt(createdAt);
+
+                                if (createdAt.compareTo(merged.getCreatedAt()) > 0) {
+                                    merged.setCreatedAt(createdAt);
                                 }
 
-                                prevInsertedRun.setInsertSuggestion(copyInsertSuggestion(mergedInsertSuggestion));
+                                prevInsertedRun.setInsertSuggestion(merged);
                             } else {
+                                InsertSuggestion runSuggestion = copyInsertSuggestion(currentInsertGroup);
+
+                                runSuggestion.setReferences(addComponentLocalSlice(
+                                        runSuggestion.getReferences(),
+                                        componentLocalInsertCursor,
+                                        parts[i].length(),
+                                        opId,
+                                        compIdx
+                                ));
+
                                 ReviewRun newRun = ReviewRun.builder()
                                         .text(parts[i])
-                                        // baseAttributes = insert-time attrs, same contract as committed runs
                                         .baseAttributes(new LinkedHashMap<>(ownAttrs))
                                         .suggestionAttributes(new LinkedHashMap<>())
                                         .logicalStart(runPos)
-                                        .insertReferences(new ArrayList<>(Collections.singletonList(
-                                                InsertSlice.builder()
-                                                        .start(0)
-                                                        .length(parts[i].length())
-                                                        .ref(new OpReference(opId, compIdx))
-                                                        .build()
-                                        )))
-                                        .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
+                                        .insertSuggestion(runSuggestion)
                                         .build();
+
                                 runs.add(spliceAt++, newRun);
                             }
 
+                            componentLocalInsertCursor += parts[i].length();
                             runPos += parts[i].length();
                         }
 
                         if (i < parts.length - 1) {
+                            InsertSuggestion newlineSuggestion = copyInsertSuggestion(currentInsertGroup);
+
+                            newlineSuggestion.setReferences(addComponentLocalSlice(
+                                    newlineSuggestion.getReferences(),
+                                    componentLocalInsertCursor,
+                                    1,
+                                    opId,
+                                    compIdx
+                            ));
+
                             ReviewRun newlineRun = ReviewRun.builder()
                                     .text("\n")
                                     .baseAttributes(new LinkedHashMap<>())
                                     .suggestionAttributes(new LinkedHashMap<>())
                                     .logicalStart(runPos)
-                                    .insertReferences(new ArrayList<>(Collections.singletonList(
-                                            InsertSlice.builder()
-                                                    .start(0)
-                                                    .length(1)
-                                                    .ref(new OpReference(opId, compIdx))
-                                                    .build()
-                                    )))
-                                    .insertSuggestion(copyInsertSuggestion(currentInsertGroup))
+                                    .insertSuggestion(newlineSuggestion)
                                     .build();
+
+                            componentLocalInsertCursor += 1;
                             runs.add(spliceAt++, newlineRun);
                             runPos += 1;
                         }
@@ -816,7 +829,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                     if (currentDeleteGroup == null) {
                         ReviewRun prevRunD = (cursor > 0) ? runs.get(cursor - 1) : null;
-                        ReviewRun nextRunD = (cursor + 1 < runs.size()) ? runs.get(cursor + 1) : null;
+                        ReviewRun nextRunD = (cursor < runs.size()) ? runs.get(cursor) : null;
 
                         DeleteSuggestion prevAdj = (prevRunD != null
                                 && prevRunD.getDeleteSuggestion() != null
@@ -831,22 +844,13 @@ public class AttributionServiceImpl implements AttributionService {
                                 : null;
 
                         if (prevAdj != null) {
-                            currentDeleteGroup = prevAdj;
-
-                            currentDeleteGroup.setReferences(addReferenceIfMissing(
-                                    currentDeleteGroup.getReferences(),
-                                    opId,
-                                    compIdx
-                            ));
+                            currentDeleteGroup = copyDeleteSuggestion(prevAdj);
 
                             if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
-                                for (OpReference ref : nextAdj.getReferences()) {
-                                    currentDeleteGroup.setReferences(addReferenceIfMissing(
-                                            currentDeleteGroup.getReferences(),
-                                            ref.opId(),
-                                            ref.componentIndex()
-                                    ));
-                                }
+                                currentDeleteGroup.setReferences(mergeSuggestionSlices(
+                                        currentDeleteGroup.getReferences(),
+                                        nextAdj.getReferences()
+                                ));
 
                                 if (nextAdj.getCreatedAt().compareTo(currentDeleteGroup.getCreatedAt()) > 0) {
                                     currentDeleteGroup.setCreatedAt(nextAdj.getCreatedAt());
@@ -861,28 +865,24 @@ public class AttributionServiceImpl implements AttributionService {
                             }
 
                         } else if (nextAdj != null) {
-                            currentDeleteGroup = nextAdj;
+                            currentDeleteGroup = copyDeleteSuggestion(nextAdj);
 
-                            currentDeleteGroup.setReferences(addReferenceIfMissing(
-                                    currentDeleteGroup.getReferences(),
-                                    opId,
-                                    compIdx
-                            ));
                         } else {
                             currentDeleteGroup = DeleteSuggestion.builder()
                                     .groupId(nextId())
                                     .actorEmail(authorEmail)
                                     .createdAt(createdAt)
-                                    .references(new ArrayList<>(Collections.singletonList(
-                                            new OpReference(opId, compIdx))))
+                                    .references(new ArrayList<>())
                                     .build();
                         }
                     }
 
                     int remaining = component.getDelete();
+                    int deleteComponentLength = component.getDelete();
 
                     while (remaining > 0 && cursor < runs.size()) {
                         ReviewRun run = runs.get(cursor);
+                        int deleteComponentLocalStart = deleteComponentLength - remaining;
 
                         if (run.getDeleteSuggestion() != null) {
                             cursor++;
@@ -890,7 +890,18 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if ("\n".equals(run.getText()) && run.getInsertSuggestion() == null) {
-                            run.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
+                            DeleteSuggestion newlineDelete = copyDeleteSuggestion(currentDeleteGroup);
+
+                            newlineDelete.setReferences(addComponentLocalSlice(
+                                    newlineDelete.getReferences(),
+                                    deleteComponentLocalStart,
+                                    1,
+                                    opId,
+                                    compIdx
+                            ));
+
+                            run.setDeleteSuggestion(newlineDelete);
+
                             remaining--;
                             localLogPos++;
                             cursor++;
@@ -905,7 +916,8 @@ public class AttributionServiceImpl implements AttributionService {
                         int len = target.getText().length();
 
                         if (target.getInsertSuggestion() != null) {
-                            List<InsertSlice> targetSlices = cloneInsertSlices(target.getInsertReferences());
+                            List<SuggestionSlice> targetSlices =
+                                    cloneSuggestionSlices(target.getInsertSuggestion().getReferences());
 
                             runs.remove(cursor);
                             for (int i = cursor; i < runs.size(); i++) {
@@ -925,7 +937,18 @@ public class AttributionServiceImpl implements AttributionService {
                             continue;
                         }
 
-                        target.setDeleteSuggestion(copyDeleteSuggestion(currentDeleteGroup));
+                        DeleteSuggestion runDelete = copyDeleteSuggestion(currentDeleteGroup);
+
+                        runDelete.setReferences(addComponentLocalSlice(
+                                runDelete.getReferences(),
+                                deleteComponentLocalStart,
+                                len,
+                                opId,
+                                compIdx
+                        ));
+
+                        target.setDeleteSuggestion(runDelete);
+
                         remaining -= len;
                         localLogPos += len;
                         cursor++;
@@ -1037,7 +1060,6 @@ public class AttributionServiceImpl implements AttributionService {
                         .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                         .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
                         .logicalStart(r.getLogicalStart())
-                        .insertReferences(cloneInsertSlices(r.getInsertReferences()))
                         .insertSuggestion(r.getInsertSuggestion() != null ? copyInsertSuggestion(r.getInsertSuggestion()) : null)
                         .deleteSuggestion(r.getDeleteSuggestion() != null ? copyDeleteSuggestion(r.getDeleteSuggestion()) : null)
                         .build())
@@ -1131,42 +1153,18 @@ public class AttributionServiceImpl implements AttributionService {
             if (canMerge) {
                 last.setText(last.getText() + run.getText());
 
-                if (run.getInsertReferences() != null && !run.getInsertReferences().isEmpty()) {
-                    List<InsertSlice> mergedSlices = last.getInsertReferences() != null
-                            ? last.getInsertReferences()
-                            : new ArrayList<>();
-
-                    int offsetBase = last.getText().length() - run.getText().length();
-                    for (InsertSlice slice : run.getInsertReferences()) {
-                        mergedSlices.add(InsertSlice.builder()
-                                .start(offsetBase + slice.getStart())
-                                .length(slice.getLength())
-                                .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                                .build());
-                    }
-                    last.setInsertReferences(mergedSlices);
-                }
-
                 if (last.getInsertSuggestion() != null && run.getInsertSuggestion() != null) {
-                    String mergedCreatedAt = run.getInsertSuggestion().getCreatedAt()
-                            .compareTo(last.getInsertSuggestion().getCreatedAt()) > 0
-                            ? run.getInsertSuggestion().getCreatedAt()
-                            : last.getInsertSuggestion().getCreatedAt();
-                    last.getInsertSuggestion().setCreatedAt(mergedCreatedAt);
-                    last.getInsertSuggestion().setReferences(
-                            mergeUniqueRefs(last.getInsertSuggestion().getReferences(),
-                                    run.getInsertSuggestion().getReferences()));
+                    last.getInsertSuggestion().setReferences(mergeSuggestionSlices(
+                            last.getInsertSuggestion().getReferences(),
+                            run.getInsertSuggestion().getReferences()
+                    ));
                 }
 
                 if (last.getDeleteSuggestion() != null && run.getDeleteSuggestion() != null) {
-                    String mergedCreatedAt = run.getDeleteSuggestion().getCreatedAt()
-                            .compareTo(last.getDeleteSuggestion().getCreatedAt()) > 0
-                            ? run.getDeleteSuggestion().getCreatedAt()
-                            : last.getDeleteSuggestion().getCreatedAt();
-                    last.getDeleteSuggestion().setCreatedAt(mergedCreatedAt);
-                    last.getDeleteSuggestion().setReferences(
-                            mergeUniqueRefs(last.getDeleteSuggestion().getReferences(),
-                                    run.getDeleteSuggestion().getReferences()));
+                    last.getDeleteSuggestion().setReferences(mergeSuggestionSlices(
+                            last.getDeleteSuggestion().getReferences(),
+                            run.getDeleteSuggestion().getReferences()
+                    ));
                 }
             } else {
                 collapsed.add(ReviewRun.builder()
@@ -1174,7 +1172,6 @@ public class AttributionServiceImpl implements AttributionService {
                         .baseAttributes(new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()))
                         .suggestionAttributes(new LinkedHashMap<>(run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap()))
                         .logicalStart(run.getLogicalStart())
-                        .insertReferences(cloneInsertSlices(run.getInsertReferences()))
                         .insertSuggestion(run.getInsertSuggestion() != null ? copyInsertSuggestion(run.getInsertSuggestion()) : null)
                         .deleteSuggestion(run.getDeleteSuggestion() != null ? copyDeleteSuggestion(run.getDeleteSuggestion()) : null)
                         .build());
@@ -1248,25 +1245,19 @@ public class AttributionServiceImpl implements AttributionService {
     private void cancelInsert(
             String actorEmail,
             UUID noteId,
-            List<InsertSlice> targetSlices,
+            List<SuggestionSlice> targetSlices,
             String deleteOpId,
             int deleteComponentIndex
     ) {
-        if (targetSlices == null || targetSlices.isEmpty()) {
-            return;
-        }
+        if (targetSlices == null || targetSlices.isEmpty()) return;
 
         NoteDto note = redisService.getNote(noteId);
         List<TextOperation> logOps = note.revisionLog();
 
-        List<InsertSlice> orderedSlices = cloneInsertSlices(targetSlices).stream()
-                .sorted(Comparator.comparingInt(InsertSlice::getStart))
-                .toList();
-
         int totalCancelledLength = 0;
 
-        for (InsertSlice slice : orderedSlices) {
-            if (slice.getLength() <= 0) continue;
+        for (SuggestionSlice slice : cloneSuggestionSlices(targetSlices)) {
+            if (slice.getLength() <= 0 || slice.getRef() == null) continue;
 
             OpReference ref = slice.getRef();
 
@@ -1279,15 +1270,14 @@ public class AttributionServiceImpl implements AttributionService {
                     logOps,
                     insertOp,
                     ref.componentIndex(),
+                    slice.getStart(),
                     slice.getLength()
             );
 
             totalCancelledLength += slice.getLength();
         }
 
-        if (totalCancelledLength <= 0) {
-            return;
-        }
+        if (totalCancelledLength <= 0) return;
 
         TextOperation deleteOp = logOps.stream()
                 .filter(op -> op.getOpId().equals(deleteOpId))
@@ -1298,6 +1288,7 @@ public class AttributionServiceImpl implements AttributionService {
                 logOps,
                 deleteOp,
                 deleteComponentIndex,
+                0,
                 totalCancelledLength
         );
 
