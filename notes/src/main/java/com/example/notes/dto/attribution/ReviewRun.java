@@ -16,16 +16,11 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReviewRun {
     private String text;
-
     @Builder.Default
     private Map<String, Object> baseAttributes = new HashMap<>();
-
     @Builder.Default
     private Map<String, Object> suggestionAttributes = new HashMap<>();
-
     private int logicalStart;
-
     private InsertSuggestion insertSuggestion;
-
     private DeleteSuggestion deleteSuggestion;
 }

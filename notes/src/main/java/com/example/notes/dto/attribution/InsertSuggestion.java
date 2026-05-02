@@ -20,5 +20,4 @@ public class InsertSuggestion {
     private String createdAt;
     @Builder.Default
     private List<SuggestionSlice> references = new ArrayList<>();
-    private int startIndex;
 }

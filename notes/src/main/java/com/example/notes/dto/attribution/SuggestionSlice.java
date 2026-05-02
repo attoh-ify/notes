@@ -10,7 +10,8 @@ import lombok.*;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SuggestionSlice {
-    private int start;
+    private int reviewStart;
+    private int componentStart;
     private int length;
     private OpReference ref;
 }

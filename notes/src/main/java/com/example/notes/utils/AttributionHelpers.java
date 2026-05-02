@@ -152,8 +152,6 @@ public class AttributionHelpers {
 
             decisions.add(new FormatKeyDecision(
                     key,
-                    baseValue,
-                    currentSuggestedValue,
                     incomingValue,
                     type
             ));
@@ -571,6 +569,16 @@ public class AttributionHelpers {
             int acceptedStart,
             int acceptedLength
     ) {
+        if (insertComponentIndex < 0 || insertComponentIndex >= insertOp.getDelta().ops.size()) {
+            log.warn(
+                    "[COMMIT_OR_SPLIT_INSERT] Skipping stale component ref opId={} componentIndex={} opSize={}",
+                    insertOp.getOpId(),
+                    insertComponentIndex,
+                    insertOp.getDelta().ops.size()
+            );
+            return;
+        }
+
         Op insertComponent = insertOp.getDelta().ops.get(insertComponentIndex);
         if (insertComponent == null || !(insertComponent.getInsert() instanceof String fullInsertText)) {
             throw new BadRequestException("Could not locate insert component in delta for op: " + insertOp.getOpId());
@@ -606,7 +614,7 @@ public class AttributionHelpers {
 
         for (int i = insertComponentIndex + 1; i < insertOp.getDelta().ops.size(); i++) {
             Op op = insertOp.getDelta().ops.get(i);
-            committedDelta.push(retainEquivalent(op));
+//            committedDelta.push(retainEquivalent(op));
             remainingDelta.push(op);
         }
 
@@ -629,7 +637,7 @@ public class AttributionHelpers {
         logOps.add(insertOpIndex, committedInsertOp);
     }
 
-    private Op retainEquivalent(Op op) {
+    public Op retainEquivalent(Op op) {
         Op retainOp = new Op();
         retainOp.setRetain(op.length());
         retainOp.setAttributes(null);
@@ -676,7 +684,7 @@ public class AttributionHelpers {
 
         for (int i = deleteComponentIndex + 1; i < deleteOp.getDelta().ops.size(); i++) {
             Op op = deleteOp.getDelta().ops.get(i);
-            committedDelta.push(op.isRetain() ? op : retainEquivalent(op));
+//            committedDelta.push(op.isRetain() ? op : retainEquivalent(op));
             remainingDelta.push(op);
         }
 
@@ -704,38 +712,82 @@ public class AttributionHelpers {
 
         return slices.stream()
                 .map(s -> SuggestionSlice.builder()
-                        .start(s.getStart())
+                        .reviewStart(s.getReviewStart())
+                        .componentStart(s.getComponentStart())
                         .length(s.getLength())
                         .ref(new OpReference(s.getRef().opId(), s.getRef().componentIndex()))
                         .build())
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 
-    public static List<SuggestionSlice> addSuggestionSlice(
-            List<SuggestionSlice> slices,
-            int start,
-            int length,
-            String opId,
-            int componentIndex
-    ) {
-        List<SuggestionSlice> out = cloneSuggestionSlices(slices);
-
-        out.add(SuggestionSlice.builder()
-                .start(start)
-                .length(length)
-                .ref(new OpReference(opId, componentIndex))
-                .build());
-
-        return out;
+    public static SuggestionSlice cloneSlice(SuggestionSlice s) {
+        return SuggestionSlice.builder()
+                .reviewStart(s.getReviewStart()
+                )
+                .componentStart(s.getComponentStart())
+                .length(s.getLength())
+                .ref(new OpReference(s.getRef().opId(), s.getRef().componentIndex()))
+                .build();
     }
 
-    public static List<SuggestionSlice> mergeSuggestionSlices(
-            List<SuggestionSlice> a,
-            List<SuggestionSlice> b
+    public static SuggestionSliceSplit splitSuggestionSlices(
+            List<SuggestionSlice> slices,
+            int offset
     ) {
-        List<SuggestionSlice> out = new ArrayList<>();
-        out.addAll(cloneSuggestionSlices(a));
-        out.addAll(cloneSuggestionSlices(b));
+        List<SuggestionSlice> left = new ArrayList<>();
+        List<SuggestionSlice> right = new ArrayList<>();
+
+        if (slices == null || slices.isEmpty()) {
+            return new SuggestionSliceSplit(left, right);
+        }
+
+        for (SuggestionSlice slice : slices) {
+            int start = slice.getReviewStart();
+            int end = start + slice.getLength();
+
+            if (end <= offset) {
+                left.add(cloneSlice(slice));
+            } else if (start >= offset) {
+                SuggestionSlice shifted = cloneSlice(slice);
+                shifted.setReviewStart(start - offset);
+                right.add(shifted);
+            } else {
+                int leftLen = offset - start;
+                int rightLen = end - offset;
+
+                if (leftLen > 0) {
+                    left.add(SuggestionSlice.builder()
+                            .reviewStart(start)
+                            .componentStart(slice.getComponentStart())
+                            .length(leftLen)
+                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                            .build());
+                }
+
+                if (rightLen > 0) {
+                    right.add(SuggestionSlice.builder()
+                            .reviewStart(0)
+                            .componentStart(slice.getComponentStart() + leftLen)
+                            .length(rightLen)
+                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
+                            .build());
+                }
+            }
+        }
+
+        return new SuggestionSliceSplit(left, right);
+    }
+
+    public static List<SuggestionSlice> appendSuggestionSlices(
+            List<SuggestionSlice> base,
+            List<SuggestionSlice> incoming
+    ) {
+        List<SuggestionSlice> out = new ArrayList<>(base);
+
+        for (SuggestionSlice s : incoming) {
+            out.add(cloneSlice(s));
+        }
+
         return out;
     }
 
@@ -753,62 +805,6 @@ public class AttributionHelpers {
         return new ArrayList<>(out.values());
     }
 
-    public static SuggestionSliceSplit splitSuggestionSlices(
-            List<SuggestionSlice> slices,
-            int offset
-    ) {
-        List<SuggestionSlice> left = new ArrayList<>();
-        List<SuggestionSlice> right = new ArrayList<>();
-
-        if (slices == null || slices.isEmpty()) {
-            return new SuggestionSliceSplit(left, right);
-        }
-
-        int runCursor = 0;
-
-        for (SuggestionSlice slice : slices) {
-            int sliceRunStart = runCursor;
-            int sliceRunEnd = runCursor + slice.getLength();
-
-            if (sliceRunEnd <= offset) {
-                left.add(SuggestionSlice.builder()
-                        .start(slice.getStart())
-                        .length(slice.getLength())
-                        .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                        .build());
-            } else if (sliceRunStart >= offset) {
-                right.add(SuggestionSlice.builder()
-                        .start(slice.getStart())
-                        .length(slice.getLength())
-                        .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                        .build());
-            } else {
-                int leftLen = offset - sliceRunStart;
-                int rightLen = sliceRunEnd - offset;
-
-                if (leftLen > 0) {
-                    left.add(SuggestionSlice.builder()
-                            .start(slice.getStart())
-                            .length(leftLen)
-                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                            .build());
-                }
-
-                if (rightLen > 0) {
-                    right.add(SuggestionSlice.builder()
-                            .start(slice.getStart() + leftLen)
-                            .length(rightLen)
-                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                            .build());
-                }
-            }
-
-            runCursor += slice.getLength();
-        }
-
-        return new SuggestionSliceSplit(left, right);
-    }
-
     public static InsertSuggestion copyInsertSuggestion(InsertSuggestion src) {
         if (src == null) return null;
 
@@ -817,7 +813,6 @@ public class AttributionHelpers {
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
                 .references(cloneSuggestionSlices(src.getReferences()))
-                .startIndex(src.getStartIndex())
                 .build();
     }
 
@@ -850,6 +845,26 @@ public class AttributionHelpers {
         return 0;
     }
 
+    public static List<SuggestionSlice> addSuggestionSlice(
+            List<SuggestionSlice> slices,
+            int reviewStart,
+            int componentStart,
+            int length,
+            String opId,
+            int componentIndex
+    ) {
+        List<SuggestionSlice> out = cloneSuggestionSlices(slices);
+
+        out.add(SuggestionSlice.builder()
+                .reviewStart(reviewStart)
+                .componentStart(componentStart)
+                .length(length)
+                .ref(new OpReference(opId, componentIndex))
+                .build());
+
+        return out;
+    }
+
     public static List<SuggestionSlice> addComponentLocalSlice(
             List<SuggestionSlice> slices,
             int componentStart,
@@ -861,7 +876,7 @@ public class AttributionHelpers {
             return cloneSuggestionSlices(slices);
         }
 
-        return addSuggestionSlice(
+        return addComponentLocalSlice(
                 slices,
                 componentStart,
                 length,

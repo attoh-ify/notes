@@ -1,7 +1,6 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.SuggestionSlice;
-import com.example.notes.dto.note.OpReferenceResponse;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
@@ -232,7 +231,7 @@ public class NoteServiceImpl implements NoteService {
                 int finalI = i;
                 List<SuggestionSlice> acceptedSlicesForComponent = slicesForOp.stream()
                         .filter(s -> Objects.equals(s.getRef().componentIndex(), finalI))
-                        .sorted(Comparator.comparingInt(SuggestionSlice::getStart))
+                        .sorted(Comparator.comparingInt(SuggestionSlice::getComponentStart))
                         .toList();
 
                 if (acceptedSlicesForComponent.isEmpty()) {
@@ -344,8 +343,8 @@ public class NoteServiceImpl implements NoteService {
         int componentLength = op.length();
 
         for (SuggestionSlice slice : acceptedSlices) {
-            int start = Math.max(0, Math.min(slice.getStart(), componentLength));
-            int end = Math.max(start, Math.min(slice.getStart() + slice.getLength(), componentLength));
+            int start = Math.max(0, Math.min(slice.getComponentStart(), componentLength));
+            int end = Math.max(start, Math.min(slice.getComponentStart() + slice.getLength(), componentLength));
 
             if (start > cursor) {
                 appendUnacceptedPart(op, cursor, start - cursor, committedDelta, remainingDelta);

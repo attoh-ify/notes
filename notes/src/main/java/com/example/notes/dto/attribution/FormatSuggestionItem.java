@@ -16,22 +16,15 @@ import java.util.List;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class FormatSuggestionItem {
     private String groupId;
-
     private String actorEmail;
-
     private String createdAt;
-
     private String attributes;
-
     @Builder.Default
     private List<SuggestionSlice> references = new ArrayList<>();
-
     @Builder.Default
     private List<FormatSuggestionSpan> spans = new ArrayList<>();
-
     @Builder.Default
     private String previewText = "";
-
     @Builder.Default
     private List<String> dependsOnInsertGroupIds = new ArrayList<>();
 }
