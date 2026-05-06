@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
         description = "Simple health check"
 )
 public class HealthCheckController {
-    @GetMapping("/")
+    @GetMapping()
     @Operation(
             summary = "Health check"
     )
