@@ -66,7 +66,7 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
 
         config.setAllowedOrigins(List.of(
-                "http://localhost:3000", "https://notes-f97tzejk9-alexs-projects-f06eb64b.vercel.app"
+                "http://localhost:3000", "https://notes-ui-kohl.vercel.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
