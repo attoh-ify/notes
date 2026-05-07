@@ -101,7 +101,6 @@ public class AttributionServiceImpl implements AttributionService {
 
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
         List<PendingFormatCancellation> pendingFormatCancellations = new ArrayList<>();
-        List<PendingCancellation> pendingCancellations = new ArrayList<>();
 
         for (TextOperation textOp : pendingTextOps) {
             String opId = textOp.getOpId();
