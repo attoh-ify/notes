@@ -3,6 +3,7 @@ package com.example.notes.config.websocket;
 import com.example.notes.interceptors.StompAuthInterceptor;
 import com.example.notes.services.JwtService;
 import com.example.notes.services.impl.NotePolicyService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
@@ -24,10 +25,13 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         this.context = context;
     }
 
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/relay")
-                .setAllowedOrigins("http://localhost:3000", "https://notes-ui-production-5472.up.railway.app")
+                .setAllowedOrigins(frontendUrl)
                 .addInterceptors(new HandshakeInterceptorImpl())
                 .setHandshakeHandler(new HandshakeHandler())
                 .withSockJS();
