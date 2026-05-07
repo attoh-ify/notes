@@ -33,9 +33,6 @@ public class SecurityConfig {
         this.jwtFilter = jwtFilter;
     }
 
-    @Value("${app.frontend.url}")
-    private String frontendUrl;
-
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
@@ -69,7 +66,7 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
 
         config.setAllowedOrigins(List.of(
-                "http://localhost:3000", "https://notes-ui-kohl.vercel.app"
+                "http://localhost:3000", "https://notes-f97tzejk9-alexs-projects-f06eb64b.vercel.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
