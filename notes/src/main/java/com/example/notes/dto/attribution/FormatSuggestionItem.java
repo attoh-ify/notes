@@ -18,7 +18,8 @@ public class FormatSuggestionItem {
     private String groupId;
     private String actorEmail;
     private String createdAt;
-    private String attributes;
+    private String attributeKey;
+    private Object attributeValue;
     @Builder.Default
     private List<SuggestionSlice> references = new ArrayList<>();
     @Builder.Default
@@ -27,4 +28,6 @@ public class FormatSuggestionItem {
     private String previewText = "";
     @Builder.Default
     private List<String> dependsOnInsertGroupIds = new ArrayList<>();
+    @Builder.Default
+    private List<String> dependsOnDeleteGroupIds = new ArrayList<>();
 }
