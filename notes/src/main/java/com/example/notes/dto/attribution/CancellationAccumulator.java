@@ -79,13 +79,25 @@ public class CancellationAccumulator {
             SplitDelta split = buildCommittedAndRemaining(original, data);
             Delta committed = split.committed;
             Delta remaining = split.remaining;
+            remaining = remaining.chop();
+            committed = committed.chop();
+            System.out.println("original: " + original.toString());
+            System.out.println("opId: " + opId);
+            System.out.println("data: " + data.toString());
+            System.out.println("Committed: " + committed.toString());
+            System.out.println("Remaining: " + remaining.toString());
 
-            boolean hasRemaining = remaining.ops.stream().anyMatch(
-                    o -> o.isInsert() || o.isDelete() || (o.isRetain() && o.getAttributes() != null && !o.getAttributes().isEmpty())
-            );
+            boolean hasRemaining = !remaining.ops.isEmpty() &&
+                    remaining.ops.stream().anyMatch(
+                            o -> o.isInsert()
+                                    || o.isDelete()
+                                    || (o.isRetain()
+                                    && o.getAttributes() != null
+                                    && !o.getAttributes().isEmpty())
+                    );
 
             if (!hasRemaining) {
-                textOp.setState(OpState.COMMITTED);
+                textOp.setState(OpState.DEAD);
                 continue;
             }
 
@@ -93,7 +105,7 @@ public class CancellationAccumulator {
                     committed,
                     textOp.getActorEmail(),
                     textOp.getRevision(),
-                    OpState.COMMITTED,
+                    OpState.DEAD,
                     textOp.getCreatedAt()
             );
 
@@ -115,9 +127,7 @@ public class CancellationAccumulator {
 
                 committed.retain(len, null);
                 remaining.retain(len, null);
-            }
-
-            else if (op.isInsert() && op.getInsert() instanceof String text) {
+            } else if (op.isInsert() && op.getInsert() instanceof String text) {
                 List<CharRange> cancelled = data.insertRanges.get(i);
 
                 if (cancelled == null || cancelled.isEmpty()) {
@@ -155,9 +165,7 @@ public class CancellationAccumulator {
                     committed.retain(tail.length(), null);
                     remaining.insert(tail, op.getAttributes());
                 }
-            }
-
-            else if (op.isRetain() && op.getAttributes() != null) {
+            } else if (op.isRetain() && op.getAttributes() != null) {
                 int len = (Integer) op.getRetain();
                 Map<String, List<CharRange>> attrRanges = data.formatRanges.get(i);
 
@@ -192,7 +200,8 @@ public class CancellationAccumulator {
                     int segLen = cursor - start;
 
                     if (keys == null || keys.isEmpty()) {
-                        committed.retain(segLen, base);
+                        // Not cancelled — stays fully pending; committed skips with plain retain
+                        committed.retain(segLen, null);
                         remaining.retain(segLen, base);
                     } else {
                         Map<String, Object> removed = new LinkedHashMap<>(base);
@@ -202,19 +211,23 @@ public class CancellationAccumulator {
                         remaining.retain(segLen, base);
                     }
                 }
-            }
-
-            else if (op.isDelete()) {
+            } else if (op.isDelete()) {
                 int len = op.getDelete();
                 int credit = data.deleteCredits.getOrDefault(i, 0);
 
                 int commitLen = Math.min(len, credit);
 
                 if (commitLen > 0) {
+                    // Credited chars: committed as delete (they cancelled pending inserts)
+                    // remaining skips them with plain retain — they're gone from the logical doc
                     committed.delete(commitLen);
+                    remaining.retain(commitLen, null);
                 }
 
                 if (commitLen < len) {
+                    // Leftover chars: still a real pending delete
+                    // committed skips with plain retain (positional skip)
+                    committed.retain(len - commitLen, null);
                     remaining.delete(len - commitLen);
                 }
             }
@@ -262,9 +275,9 @@ public class CancellationAccumulator {
                 merged.add(r);
             } else {
                 CharRange last = merged.get(merged.size() - 1);
-                int lastEnd = last.start() + last.length;
+                int lastEnd = last.start() + last.length();
                 if (r.start() <= lastEnd) {
-                    int newEnd = Math.max(lastEnd, r.start + r.length());
+                    int newEnd = Math.max(lastEnd, r.start() + r.length());
                     merged.set(merged.size() - 1, new CharRange(last.start(), newEnd - last.start()));
                 } else {
                     merged.add(r);
@@ -282,6 +295,15 @@ public class CancellationAccumulator {
         Map<Integer, List<CharRange>> insertRanges = new HashMap<>();
         Map<Integer, Map<String, List<CharRange>>> formatRanges = new HashMap<>();
         Map<Integer, Integer> deleteCredits = new HashMap<>();
+
+        @Override
+        public String toString() {
+            return "OpCancellationDelta{" +
+                    "insertRanges=" + insertRanges +
+                    ", formatRanges=" + formatRanges +
+                    ", deleteCredits=" + deleteCredits +
+                    '}';
+        }
     }
 
     record SplitDelta(Delta committed, Delta remaining) {};

@@ -20,5 +20,10 @@ public record JoinNoteResponse (
     @Schema(
             description = "Number pointing to the current state of the server"
     )
-    int revision
+    int revision,
+
+    @Schema(
+            description = "Boolean indicating if the owner of the note is currently reviewing it"
+    )
+    boolean isReviewing
 ) {}

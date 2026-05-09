@@ -288,6 +288,7 @@ public class AttributionServiceImpl implements AttributionService {
                                             .spans(new ArrayList<>())
                                             .previewText("")
                                             .dependsOnInsertGroupIds(new ArrayList<>())
+                                            .dependsOnDeleteGroupIds(new ArrayList<>())
                                             .build();
                                     formatSuggestions.add(existing);
                                 }
@@ -570,6 +571,15 @@ public class AttributionServiceImpl implements AttributionService {
 
                             InsertSuggestion newlineSuggestion = copyInsertSuggestion(currentInsertGroup);
 
+                            newlineSuggestion.setReferences(addSuggestionSlice(
+                                    newlineSuggestion.getReferences(),
+                                    0,
+                                    componentLocalInsertCursor,
+                                    1,
+                                    opId,
+                                    compIdx
+                            ));
+
                             ReviewRun newlineRun = ReviewRun.builder()
                                     .text("\n")
                                     .baseAttributes(new LinkedHashMap<>())
@@ -705,8 +715,18 @@ public class AttributionServiceImpl implements AttributionService {
 
                         if (target.getInsertSuggestion() != null) {
 
+                            int runStart = target.getLogicalStart();
+                            int runEnd = runStart + target.getText().length();
+
                             List<SuggestionSlice> targetSlices =
-                                    cloneSuggestionSlices(target.getInsertSuggestion().getReferences());
+                                    target.getInsertSuggestion().getReferences().stream()
+                                            .filter(slice -> {
+                                                int s = slice.getReviewStart();
+                                                int e = s + slice.getLength();
+
+                                                return s < runEnd && e > runStart;
+                                            })
+                                            .toList();
 
                             int deleteStartPos = target.getLogicalStart();
                             int deleteLen = target.getText().length();
@@ -721,17 +741,27 @@ public class AttributionServiceImpl implements AttributionService {
                             for (SuggestionSlice slice : targetSlices) {
                                 if (slice.getRef() == null) continue;
 
+                                int sliceStart = slice.getReviewStart();
+                                int sliceEnd = sliceStart + slice.getLength();
+
+                                int overlapStart = Math.max(runStart, sliceStart);
+                                int overlapEnd = Math.min(runEnd, sliceEnd);
+
+                                if (overlapStart >= overlapEnd) continue;
+
+                                int overlapLen = overlapEnd - overlapStart;
+
                                 accumulator.recordInsertCancellation(
                                         slice.getRef().opId(),
                                         slice.getRef().componentIndex(),
-                                        slice.getComponentStart(),
-                                        slice.getLength()
+                                        slice.getComponentStart() + (overlapStart - sliceStart),
+                                        overlapLen
                                 );
 
                                 accumulator.recordDeleteCancellation(
                                         opId,
                                         compIdx,
-                                        slice.getLength()
+                                        overlapLen
                                 );
                             }
 
@@ -746,18 +776,23 @@ public class AttributionServiceImpl implements AttributionService {
                                 boolean touched = false;
 
                                 for (SuggestionSlice slice : fmtRefs) {
-                                    int sliceStart = slice.getComponentStart();
-                                    int sliceEnd = sliceStart + slice.getLength();
+                                    // slice.getReviewStart() is the logical document position where
+                                    // this slice begins — same coordinate space as deleteStartPos/deleteEndPos.
+                                    // slice.getComponentStart() is the offset within the format retain
+                                    // component — a different space; never compare with doc positions.
+                                    int sliceDocStart = slice.getReviewStart();
+                                    int sliceDocEnd   = sliceDocStart + slice.getLength();
 
-                                    int overlapStart = Math.max(deleteStartPos, sliceStart);
-                                    int overlapEnd = Math.min(deleteEndPos, sliceEnd);
+                                    int overlapStart = Math.max(deleteStartPos, sliceDocStart);
+                                    int overlapEnd   = Math.min(deleteEndPos,   sliceDocEnd);
 
                                     if (overlapStart < overlapEnd) {
+                                        int offsetWithinSlice = overlapStart - sliceDocStart;
                                         accumulator.recordFormatCancellation(
                                                 slice.getRef().opId(),
                                                 slice.getRef().componentIndex(),
                                                 fmt.getAttributeKey(),
-                                                overlapStart,
+                                                slice.getComponentStart() + offsetWithinSlice,
                                                 overlapEnd - overlapStart
                                         );
 
@@ -878,13 +913,14 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         Delta baseDelta = new Delta();
-        for (TextOperation textOp : note.revisionLog()) {
+        NoteDto postFlushNote = redisService.getNote(noteId);
+        for (TextOperation textOp : postFlushNote.revisionLog()) {
             baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
 
         Delta visualDelta = buildVisualDelta(runs);
 
-        return new ReviewProjection(baseDelta, visualDelta, formatSuggestions);
+        return new ReviewProjection(new Delta(), visualDelta, formatSuggestions);
     }
 
     private static FormatKeyChangeType getFormatKeyChangeType(FormatSuggestionItem fmt, Object attrValue, Object baseValue) {
@@ -1008,9 +1044,19 @@ public class AttributionServiceImpl implements AttributionService {
             if (isDeletedPending) {
                 String textToInsert = isDeletedNewline ? "↵" : run.getText();
                 delta.insert(textToInsert, attrs.isEmpty() ? null : attrs);
-            } else {
-                int retainLen = run.getText().length();
-                delta.retain(retainLen, attrs.isEmpty() ? null : attrs);
+            }
+
+//            else {
+//                int retainLen = run.getText().length();
+//                delta.retain(retainLen, attrs.isEmpty() ? null : attrs);
+//            }
+
+            else {
+                // TEMPORARY:
+                // Build full visual document directly from review runs
+                // instead of retain overlays on top of baseDelta.
+                // This lets us inspect the actual fully materialized review state.
+                delta.insert(run.getText(), attrs.isEmpty() ? null : attrs);
             }
         }
 
