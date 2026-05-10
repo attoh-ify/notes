@@ -55,7 +55,7 @@ public class NotePolicyService {
     }
 
     public NoteAccessRole resolveRole(String actorEmail, Note note) {
-        NoteAccessRole accessRole = null;
+        NoteAccessRole accessRole = NoteAccessRole.RESTRICTED;
 
         if (note == null) {
             log.warn("Note is required");

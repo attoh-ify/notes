@@ -12,6 +12,7 @@ import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.note.NoteVisibility;
+import com.example.notes.entities.noteAccess.NoteAccessRole;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
@@ -79,11 +80,11 @@ public class NoteServiceImpl implements NoteService {
     public NoteDto fetchNote(String actorEmail, UUID noteId) {
         Note note = notePolicyService.findNoteById(noteId);
 
-        if (notePolicyService.resolveRole(actorEmail, note) == null) {
-            if (!note.getVisibility().equals(NoteVisibility.PUBLIC)) {
-                log.warn("Note with id={} visibility is not public", noteId);
-                throw new BadRequestException("Note is not visible to the public");
-            }
+        boolean hasAccess = notePolicyService.resolveRole(actorEmail, note) != NoteAccessRole.RESTRICTED;
+        boolean isPublic = note.getVisibility() == NoteVisibility.PUBLIC;
+
+        if (!hasAccess && !isPublic) {
+            return noteMapper.toDtoRestricted();
         }
 
         return noteMapper.toDto(note, actorEmail);

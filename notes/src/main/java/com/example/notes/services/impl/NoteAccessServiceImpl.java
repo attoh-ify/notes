@@ -1,5 +1,7 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.message_payload.CollaboratorsPayload;
+import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteAccess.NoteAccessPayload;
 import com.example.notes.dto.noteAccess.NoteAccessDto;
 import com.example.notes.entities.note.Note;
@@ -8,16 +10,20 @@ import com.example.notes.entities.noteAccess.NoteAccessRole;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteAccessMapper;
+import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.repositories.NoteAccessRepository;
 import com.example.notes.services.EmailService;
 import com.example.notes.services.NoteAccessService;
+import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -27,16 +33,21 @@ public class NoteAccessServiceImpl implements NoteAccessService {
     private final NotePolicyService notePolicyService;
     private final UserPolicyService userPolicyService;
     private final EmailService emailService;
+    private final RedisService redisService;
+
+    @Autowired
+    public CollaboratorCountNotifier collaboratorCountNotifier;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteAccessServiceImpl.class);
 
-    public NoteAccessServiceImpl(NoteAccessRepository noteAccessRepository, NoteAccessMapper noteAccessMapper, NotePolicyService notePolicyService, UserPolicyService userPolicyService, EmailService emailService) {
+    public NoteAccessServiceImpl(NoteAccessRepository noteAccessRepository, NoteAccessMapper noteAccessMapper, NotePolicyService notePolicyService, UserPolicyService userPolicyService, EmailService emailService, RedisService redisService) {
         this.noteAccessRepository = noteAccessRepository;
         this.noteAccessMapper = noteAccessMapper;
         this.userPolicyService = userPolicyService;
         this.notePolicyService = notePolicyService;
         this.emailService = emailService;
+        this.redisService = redisService;
     }
 
     @Transactional
@@ -86,6 +97,17 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                     );
                 });
         updateNoteAccess.setRole(noteAccess.role());
+
+        if (noteAccess.role() != NoteAccessRole.EDITOR
+                && noteAccess.role() != NoteAccessRole.SUPER) {
+            redisService.removeCollaboratorFromNote(noteId, updateNoteAccess.getEmail());
+            Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
+
+            collaboratorCountNotifier.notifyCount(
+                    noteId,
+                    new CollaboratorsPayload(collaborators)
+            );
+        }
         emailService.sendAccessUpdatedEmail(noteAccess.email(), note.getTitle(), noteAccess.role());
         return noteAccessMapper.toDto(noteAccessRepository.save(updateNoteAccess));
     }
@@ -102,6 +124,14 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                     );
                 });
         noteAccessRepository.deleteById(noteAccessId);
+
+        redisService.removeCollaboratorFromNote(noteId, noteAccess.getEmail());
+        Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
+
+        collaboratorCountNotifier.notifyCount(
+                noteId,
+                new CollaboratorsPayload(collaborators)
+        );
         emailService.sendAccessDeletedEmail(noteAccess.getEmail(), note.getTitle());
     }
 

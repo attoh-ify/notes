@@ -2,6 +2,7 @@ package com.example.notes.mappers.impl;
 
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.entities.note.Note;
+import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.noteAccess.NoteAccessRole;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
@@ -57,6 +58,21 @@ public class NoteMapperImpl implements NoteMapper {
                 note.getCurrentNoteVersionNumber(),
                 note.getCreatedAt(),
                 note.getUpdatedAt()
+        );
+    }
+
+    @Override
+    public NoteDto toDtoRestricted() {
+        return new NoteDto(
+                null,
+                null,
+                null,
+                null,
+                NoteVisibility.PRIVATE,
+                NoteAccessRole.RESTRICTED,
+                0,
+                null,
+                null
         );
     }
 }
