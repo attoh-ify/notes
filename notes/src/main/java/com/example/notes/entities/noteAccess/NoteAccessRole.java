@@ -4,5 +4,6 @@ public enum NoteAccessRole {
     OWNER,
     SUPER,
     EDITOR,
-    VIEWER
+    VIEWER,
+    RESTRICTED
 }
