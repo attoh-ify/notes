@@ -164,7 +164,7 @@ public class NoteServiceImpl implements NoteService {
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
-        if (!actorEmail.equals(note.ownerEmail()) && redisService.isReviewInProgress(noteId, note.ownerEmail())) {
+        if (redisService.isReviewInProgress(noteId, note.ownerEmail())) {
             reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
             return new JoinNoteResponse(null, null, 0, true);
         }
