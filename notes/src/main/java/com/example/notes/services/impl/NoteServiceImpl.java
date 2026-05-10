@@ -120,18 +120,32 @@ public class NoteServiceImpl implements NoteService {
         );
         newNote = noteRepository.save(newNote);
 
+        Delta initialDelta = payload.initialDelta() != null ? payload.initialDelta() : new Delta();
+        boolean hasContent = initialDelta.ops != null && !initialDelta.ops.isEmpty();
+
         NoteVersion firstNoteVersion = new NoteVersion(
                 null,
                 newNote,
-                new Delta(),
+                hasContent ? initialDelta : new Delta(),
                 0,
                 "Note copy",
                 0
         );
-
         noteVersionRepository.save(firstNoteVersion);
-
         newNote.getNoteVersions().add(firstNoteVersion);
+
+        if (hasContent) {
+            NoteVersion masterVersion = new NoteVersion(
+                    null,
+                    newNote,
+                    initialDelta,
+                    0,
+                    "Imported from document",
+                    1
+            );
+            noteVersionRepository.save(masterVersion);
+            newNote.getNoteVersions().add(masterVersion);
+        }
 
         noteRepository.save(newNote);
         redisService.initializeNote(actorEmail, newNote.getId());
@@ -140,6 +154,7 @@ public class NoteServiceImpl implements NoteService {
         if (newNote.getUser() == null) {
             newNote.setUser(user);
         }
+
         return noteMapper.toDto(newNote, actorEmail);
     }
 
@@ -149,9 +164,9 @@ public class NoteServiceImpl implements NoteService {
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
-        if (!actorEmail.equals(note.ownerEmail()) && redisService.isReviewInProgress(noteId, note.ownerEmail())) {
+        if (redisService.isReviewInProgress(noteId, note.ownerEmail())) {
             reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
-            return null;
+            return new JoinNoteResponse(null, null, 0, true);
         }
 
         redisService.addCollaboratorToNote(noteId, actorEmail);
@@ -159,7 +174,7 @@ public class NoteServiceImpl implements NoteService {
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
-        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision());
+        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision(), false);
     }
 
     @Override
@@ -338,8 +353,6 @@ public class NoteServiceImpl implements NoteService {
             Delta remainingDelta
     ) {
         int cursor = 0;
-        int totalLen = op.length();
-
         int componentLength = op.length();
 
         for (SuggestionSlice slice : acceptedSlices) {
@@ -357,8 +370,8 @@ public class NoteServiceImpl implements NoteService {
             cursor = Math.max(cursor, end);
         }
 
-        if (cursor < totalLen) {
-            appendUnacceptedPart(op, cursor, totalLen - cursor, committedDelta, remainingDelta);
+        if (cursor < componentLength) {
+            appendUnacceptedPart(op, cursor, componentLength - cursor, committedDelta, remainingDelta);
         }
     }
 

@@ -2,12 +2,6 @@ package com.example.notes.utils;
 
 import com.example.notes.dto.attribution.*;
 import com.example.notes.dto.note.OpReference;
-import com.example.notes.dto.ot.Delta;
-import com.example.notes.dto.ot.Op;
-import com.example.notes.dto.ot.OpState;
-import com.example.notes.dto.ot.TextOperation;
-import com.example.notes.exceptions.BadRequestException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
@@ -50,7 +44,7 @@ public class AttributionHelpers {
         if (candidate == null || reference == null) return out;
         for (Map.Entry<String, Object> entry : candidate.entrySet()) {
             Object refVal = reference.get(entry.getKey());
-            if (refVal != null && Objects.equals(refVal, entry.getValue())) {
+            if (Objects.equals(refVal, entry.getValue())) {
                 out.put(entry.getKey(), entry.getValue());
             }
         }
@@ -81,34 +75,15 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static Map<String, Object> applyAttrsForEffectiveView(
-            Map<String, Object> baseAttrs,
-            Map<String, Object> deltaAttrs
-    ) {
-        Map<String, Object> out = new LinkedHashMap<>(
-                baseAttrs != null ? baseAttrs : Collections.emptyMap()
-        );
-        out.putAll(deltaAttrs);
-
-        return out;
-    }
-
     public static Map<String, Object> getEffectiveAttrs(ReviewRun run) {
         if (run == null) return Collections.emptyMap();
-        return applyAttrsForEffectiveView(
-                run.getBaseAttributes(),
-                run.getSuggestionAttributes()
-        );
-    }
 
-    public static Map<String, Object> parseAttrs(String json) {
-        if (json == null || json.isBlank()) return Collections.emptyMap();
-        try {
-            return MAPPER.readValue(json, new TypeReference<Map<String, Object>>() {});
-        } catch (Exception e) {
-            log.warn("[PARSE_ATTRS] Failed to parse attribute JSON: {} — returning empty map", json);
-            return Collections.emptyMap();
-        }
+        Map<String, Object> out = new LinkedHashMap<>(
+                run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()
+        );
+        out.putAll(run.getSuggestionAttributes());
+
+        return out;
     }
 
     public static String attrsToJson(Map<String, Object> attrs) {
@@ -119,45 +94,6 @@ public class AttributionHelpers {
             log.warn("[ATTRS_TO_JSON] Serialisation failed — returning {}", e.getMessage());
             return "{}";
         }
-    }
-
-    public static List<FormatKeyDecision> classifyFormatKeyChanges(
-            Map<String, Object> baseAttrs,
-            Map<String, Object> suggestionAttrs,
-            Map<String, Object> incomingAttrs
-    ) {
-        List<FormatKeyDecision> decisions = new ArrayList<>();
-        if (incomingAttrs == null || incomingAttrs.isEmpty()) return decisions;
-
-        Map<String, Object> base = baseAttrs != null ? baseAttrs : Collections.emptyMap();
-        Map<String, Object> suggested = suggestionAttrs != null ? suggestionAttrs : Collections.emptyMap();
-
-        for (String key : incomingAttrs.keySet()) {
-            Object baseValue = base.get(key);
-            boolean hasSuggestedKey = suggested.containsKey(key);
-            Object currentSuggestedValue = hasSuggestedKey ? suggested.get(key) : baseValue;
-            Object incomingValue = incomingAttrs.get(key);
-
-            FormatKeyChangeType type;
-
-            if (Objects.equals(incomingValue, currentSuggestedValue)) {
-                type = FormatKeyChangeType.NO_OP;
-            } else if (Objects.equals(incomingValue, baseValue)) {
-                type = FormatKeyChangeType.CANCEL;
-            } else if (hasSuggestedKey) {
-                type = FormatKeyChangeType.REPLACE;
-            } else {
-                type = FormatKeyChangeType.NEW_SUGGESTION;
-            }
-
-            decisions.add(new FormatKeyDecision(
-                    key,
-                    incomingValue,
-                    type
-            ));
-        }
-
-        return decisions;
     }
 
     public static RunPosition findRunPos(List<ReviewRun> runs, int logicalPos) {
@@ -282,27 +218,6 @@ public class AttributionHelpers {
             }
         }
         return -1;
-    }
-
-    public static List<FormatSuggestionSpan> extendOrAddSpan(
-            List<FormatSuggestionSpan> spans,
-            int spanStart,
-            int spanLen
-    ) {
-        // Copy to avoid mutating the original
-        List<FormatSuggestionSpan> next = spans.stream()
-                .map(s -> FormatSuggestionSpan.builder()
-                        .start(s.getStart()).length(s.getLength()).build())
-                .collect(Collectors.toList());
-
-        int adjacentIdx = findAdjacentSpanIndex(next, spanStart);
-        if (adjacentIdx != -1) {
-            next.get(adjacentIdx).setLength(next.get(adjacentIdx).getLength() + spanLen);
-        } else {
-            next.add(FormatSuggestionSpan.builder().start(spanStart).length(spanLen).build());
-        }
-
-        return next;
     }
 
     public static List<FormatSuggestionSpan> mergeAdjacentSpans(List<FormatSuggestionSpan> spans) {
@@ -470,19 +385,6 @@ public class AttributionHelpers {
         }
     }
 
-    public static FormatSuggestionItem findAdjacentFormatGroupByBoundary(
-            List<FormatSuggestionItem> formatSuggestions,
-            String attrStr,
-            int boundaryPos
-    ) {
-        return formatSuggestions.stream()
-                .filter(f -> f.getAttributes().equals(attrStr))
-                .filter(f -> f.getSpans().stream()
-                        .anyMatch(s -> s.getStart() + s.getLength() == boundaryPos))
-                .findFirst()
-                .orElse(null);
-    }
-
     public static void extendFormatGroupAtBoundary(
             FormatSuggestionItem group,
             int boundaryPos,
@@ -501,15 +403,18 @@ public class AttributionHelpers {
             }
         }
 
-        if (idx != -1) {
-            group.getSpans().get(idx).setLength(
-                    group.getSpans().get(idx).getLength() + insertLength
-            );
-            group.setSpans(mergeAdjacentSpans(group.getSpans()));
+        if (idx == -1) {
+            return;
         }
+
+        FormatSuggestionSpan span = group.getSpans().get(idx);
+
+        span.setLength(span.getLength() + insertLength);
+        group.setSpans(mergeAdjacentSpans(group.getSpans()));
 
         group.setReferences(addComponentLocalSlice(
                 group.getReferences(),
+                0,
                 0,
                 insertLength,
                 opId,
@@ -519,192 +424,6 @@ public class AttributionHelpers {
         if (!group.getDependsOnInsertGroupIds().contains(currentInsertGroupId)) {
             group.getDependsOnInsertGroupIds().add(currentInsertGroupId);
         }
-    }
-
-    public static boolean isOnlyMeaningfulComponent(Op target, List<Op> ops) {
-        int meaningfulCount = 0;
-        if (!ops.contains(target)) return false;
-
-        for (Op op : ops) {
-            boolean meaningful =
-                    op.isInsert()
-                            || op.isDelete()
-                            || (op.isRetain() && op.getAttributes() != null && !op.getAttributes().isEmpty());
-
-            if (!meaningful) continue;
-
-            meaningfulCount++;
-            if (meaningfulCount > 1) return false;
-        }
-
-        return meaningfulCount == 1;
-    }
-
-    public List<OpReference> distinctRefs(List<OpReference> refs) {
-        if (refs == null) return new ArrayList<>();
-        Map<String, OpReference> unique = new LinkedHashMap<>();
-        for (OpReference ref : refs) {
-            unique.put(ref.opId() + "::" + ref.componentIndex(), ref);
-        }
-        return new ArrayList<>(unique.values());
-    }
-
-    private int meaningfulCharsBeforeComponent(TextOperation op, int componentIndex) {
-        int count = 0;
-        for (int i = 0; i < componentIndex; i++) {
-            Op part = op.getDelta().ops.get(i);
-            if (part.isInsert() && part.getInsert() instanceof String text) {
-                count += text.length();
-            } else if (part.isRetain() && part.getRetain() instanceof Integer retain) {
-                count += retain;
-            }
-        }
-        return count;
-    }
-
-    public void commitOrSplitInsertOp(
-            List<TextOperation> logOps,
-            TextOperation insertOp,
-            int insertComponentIndex,
-            int acceptedStart,
-            int acceptedLength
-    ) {
-        if (insertComponentIndex < 0 || insertComponentIndex >= insertOp.getDelta().ops.size()) {
-            log.warn(
-                    "[COMMIT_OR_SPLIT_INSERT] Skipping stale component ref opId={} componentIndex={} opSize={}",
-                    insertOp.getOpId(),
-                    insertComponentIndex,
-                    insertOp.getDelta().ops.size()
-            );
-            return;
-        }
-
-        Op insertComponent = insertOp.getDelta().ops.get(insertComponentIndex);
-        if (insertComponent == null || !(insertComponent.getInsert() instanceof String fullInsertText)) {
-            throw new BadRequestException("Could not locate insert component in delta for op: " + insertOp.getOpId());
-        }
-
-        int componentLength = fullInsertText.length();
-        int start = Math.max(0, Math.min(acceptedStart, componentLength));
-        int end = Math.max(start, Math.min(start + acceptedLength, componentLength));
-
-        if (end <= start) return;
-
-        Delta committedDelta = new Delta();
-        Delta remainingDelta = new Delta();
-
-        for (int i = 0; i < insertComponentIndex; i++) {
-            Op op = insertOp.getDelta().ops.get(i);
-            committedDelta.push(retainEquivalent(op));
-            remainingDelta.push(op);
-        }
-
-        if (start > 0) {
-            committedDelta.retain(start, null);
-            remainingDelta.insert(fullInsertText.substring(0, start), insertComponent.getAttributes());
-        }
-
-        committedDelta.insert(fullInsertText.substring(start, end), insertComponent.getAttributes());
-        remainingDelta.retain(end - start, null);
-
-        if (end < componentLength) {
-            committedDelta.retain(componentLength - end, null);
-            remainingDelta.insert(fullInsertText.substring(end), insertComponent.getAttributes());
-        }
-
-        for (int i = insertComponentIndex + 1; i < insertOp.getDelta().ops.size(); i++) {
-            Op op = insertOp.getDelta().ops.get(i);
-//            committedDelta.push(retainEquivalent(op));
-            remainingDelta.push(op);
-        }
-
-        if (remainingDelta.ops.isEmpty()) {
-            insertOp.setState(OpState.COMMITTED);
-            return;
-        }
-
-        TextOperation committedInsertOp = new TextOperation(
-                committedDelta,
-                insertOp.getActorEmail(),
-                insertOp.getRevision(),
-                OpState.COMMITTED,
-                insertOp.getCreatedAt()
-        );
-
-        insertOp.setDelta(remainingDelta);
-
-        int insertOpIndex = logOps.indexOf(insertOp);
-        logOps.add(insertOpIndex, committedInsertOp);
-    }
-
-    public Op retainEquivalent(Op op) {
-        Op retainOp = new Op();
-        retainOp.setRetain(op.length());
-        retainOp.setAttributes(null);
-        return retainOp;
-    }
-
-    public void commitOrSplitDeleteOp(
-            List<TextOperation> logOps,
-            TextOperation deleteOp,
-            int deleteComponentIndex,
-            int acceptedStart,
-            int acceptedLength
-    ) {
-        Op deleteComponent = deleteOp.getDelta().ops.get(deleteComponentIndex);
-        if (deleteComponent == null || !deleteComponent.isDelete()) {
-            throw new BadRequestException("Could not locate delete component in delta for op: " + deleteOp.getOpId());
-        }
-
-        int componentLength = deleteComponent.getDelete();
-        int start = Math.max(0, Math.min(acceptedStart, componentLength));
-        int end = Math.max(start, Math.min(start + acceptedLength, componentLength));
-
-        if (end <= start) return;
-
-        Delta committedDelta = new Delta();
-        Delta remainingDelta = new Delta();
-
-        for (int i = 0; i < deleteComponentIndex; i++) {
-            Op op = deleteOp.getDelta().ops.get(i);
-            committedDelta.push(op.isRetain() ? op : retainEquivalent(op));
-            remainingDelta.push(op);
-        }
-
-        if (start > 0) {
-            committedDelta.retain(start, null);
-            remainingDelta.delete(start);
-        }
-
-        committedDelta.delete(end - start);
-
-        if (end < componentLength) {
-            remainingDelta.delete(componentLength - end);
-        }
-
-        for (int i = deleteComponentIndex + 1; i < deleteOp.getDelta().ops.size(); i++) {
-            Op op = deleteOp.getDelta().ops.get(i);
-//            committedDelta.push(op.isRetain() ? op : retainEquivalent(op));
-            remainingDelta.push(op);
-        }
-
-        if (remainingDelta.ops.isEmpty()) {
-            deleteOp.setState(OpState.COMMITTED);
-            return;
-        }
-
-        TextOperation committedDeleteOp = new TextOperation(
-                committedDelta,
-                deleteOp.getActorEmail(),
-                deleteOp.getRevision(),
-                OpState.COMMITTED,
-                deleteOp.getCreatedAt()
-        );
-
-        deleteOp.setDelta(remainingDelta);
-
-        int deleteOpIndex = logOps.indexOf(deleteOp);
-        logOps.add(deleteOpIndex, committedDeleteOp);
     }
 
     public static List<SuggestionSlice> cloneSuggestionSlices(List<SuggestionSlice> slices) {
@@ -791,20 +510,6 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static List<OpReference> refsFromSlices(List<SuggestionSlice> slices) {
-        if (slices == null) return new ArrayList<>();
-
-        Map<String, OpReference> out = new LinkedHashMap<>();
-
-        for (SuggestionSlice slice : slices) {
-            if (slice.getRef() == null) continue;
-            OpReference ref = slice.getRef();
-            out.put(ref.opId() + "::" + ref.componentIndex(), ref);
-        }
-
-        return new ArrayList<>(out.values());
-    }
-
     public static InsertSuggestion copyInsertSuggestion(InsertSuggestion src) {
         if (src == null) return null;
 
@@ -825,24 +530,6 @@ public class AttributionHelpers {
                 .createdAt(src.getCreatedAt())
                 .references(cloneSuggestionSlices(src.getReferences()))
                 .build();
-    }
-
-    public static int componentTextLength(Op op) {
-        if (op == null) return 0;
-
-        if (op.isInsert() && op.getInsert() instanceof String text) {
-            return text.length();
-        }
-
-        if (op.isDelete()) {
-            return op.getDelete();
-        }
-
-        if (op.isRetain()) {
-            return (Integer) op.getRetain();
-        }
-
-        return 0;
     }
 
     public static List<SuggestionSlice> addSuggestionSlice(
@@ -867,6 +554,7 @@ public class AttributionHelpers {
 
     public static List<SuggestionSlice> addComponentLocalSlice(
             List<SuggestionSlice> slices,
+            int reviewStart,
             int componentStart,
             int length,
             String opId,
@@ -876,13 +564,78 @@ public class AttributionHelpers {
             return cloneSuggestionSlices(slices);
         }
 
-        return addComponentLocalSlice(
+        return addSuggestionSlice(
                 slices,
+                reviewStart,
                 componentStart,
                 length,
                 opId,
                 componentIndex
         );
+    }
+
+    public void shiftSuggestionSliceReviewStarts(
+            List<ReviewRun> runs,
+            int insertPos,
+            int shiftLen,
+            String insertedGroupId
+    ) {
+
+        for (ReviewRun run : runs) {
+
+            InsertSuggestion insertSuggestion = run.getInsertSuggestion();
+
+            if (insertSuggestion != null
+                    && !insertedGroupId.equals(insertSuggestion.getGroupId())) {
+
+                for (SuggestionSlice slice : insertSuggestion.getReferences()) {
+
+                    if (slice.getReviewStart() >= insertPos) {
+                        slice.setReviewStart(
+                                slice.getReviewStart() + shiftLen
+                        );
+                    }
+                }
+            }
+
+            DeleteSuggestion deleteSuggestion = run.getDeleteSuggestion();
+
+            if (deleteSuggestion != null) {
+
+                for (SuggestionSlice slice : deleteSuggestion.getReferences()) {
+
+                    if (slice.getReviewStart() >= insertPos) {
+                        slice.setReviewStart(
+                                slice.getReviewStart() + shiftLen
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    public void shiftFormatSuggestionReferences(
+            List<FormatSuggestionItem> formatSuggestions,
+            int insertPos,
+            int shiftLen,
+            Set<String> excludedGroupIds
+    ) {
+
+        for (FormatSuggestionItem fmt : formatSuggestions) {
+
+            if (excludedGroupIds.contains(fmt.getGroupId())) {
+                continue;
+            }
+
+            for (SuggestionSlice slice : fmt.getReferences()) {
+
+                if (slice.getReviewStart() >= insertPos) {
+                    slice.setReviewStart(
+                            slice.getReviewStart() + shiftLen
+                    );
+                }
+            }
+        }
     }
 
     public static class InsertGroupCollection {

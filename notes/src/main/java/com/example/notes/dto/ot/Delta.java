@@ -2,7 +2,10 @@ package com.example.notes.dto.ot;
 
 import java.util.*;
 import java.util.function.*;
+import com.example.notes.dto.ot.DiffEngine.*;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Delta {
     public interface EmbedHandler {
         Object compose(Object a, Object b, boolean keepNull);
@@ -268,6 +271,10 @@ public class Delta {
         return delta;
     }
 
+    // --- Difference ---
+
+
+
     // --- Invert ---
 
     public Delta invert(Delta base) {
@@ -432,6 +439,35 @@ public class Delta {
             copy.setAttributes(new HashMap<>(op.getAttributes()));
         }
         return copy;
+    }
+
+    public Delta diff(Delta other) {
+        String text1 = this.getString();
+        String text2 = other.getString();
+
+        List<Diff> diffs = DiffEngine.diff(text1, text2);
+
+        Delta result = new Delta();
+
+        for (Diff d : diffs) {
+            switch (d.op) {
+                case EQUAL -> result.retain(d.text.length(), null);
+                case INSERT -> result.insert(d.text, null);
+                case DELETE -> result.delete(d.text.length());
+            }
+        }
+
+        return result.chop();
+    }
+
+    public String getString() {
+        StringBuilder sb = new StringBuilder();
+        for (Op op : ops) {
+            if (op.getInsert() instanceof String str) {
+                sb.append(str);
+            }
+        }
+        return sb.toString();
     }
 
     @Override
