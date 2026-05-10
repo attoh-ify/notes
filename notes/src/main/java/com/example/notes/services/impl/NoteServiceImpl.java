@@ -120,18 +120,32 @@ public class NoteServiceImpl implements NoteService {
         );
         newNote = noteRepository.save(newNote);
 
+        Delta initialDelta = payload.initialDelta() != null ? payload.initialDelta() : new Delta();
+        boolean hasContent = initialDelta.ops != null && !initialDelta.ops.isEmpty();
+
         NoteVersion firstNoteVersion = new NoteVersion(
                 null,
                 newNote,
-                new Delta(),
+                hasContent ? initialDelta : new Delta(),
                 0,
                 "Note copy",
                 0
         );
-
         noteVersionRepository.save(firstNoteVersion);
-
         newNote.getNoteVersions().add(firstNoteVersion);
+
+        if (hasContent) {
+            NoteVersion masterVersion = new NoteVersion(
+                    null,
+                    newNote,
+                    initialDelta,
+                    0,
+                    "Imported from document",
+                    1
+            );
+            noteVersionRepository.save(masterVersion);
+            newNote.getNoteVersions().add(masterVersion);
+        }
 
         noteRepository.save(newNote);
         redisService.initializeNote(actorEmail, newNote.getId());
@@ -140,6 +154,7 @@ public class NoteServiceImpl implements NoteService {
         if (newNote.getUser() == null) {
             newNote.setUser(user);
         }
+
         return noteMapper.toDto(newNote, actorEmail);
     }
 

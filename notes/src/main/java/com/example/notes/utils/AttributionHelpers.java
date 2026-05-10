@@ -574,6 +574,70 @@ public class AttributionHelpers {
         );
     }
 
+    public void shiftSuggestionSliceReviewStarts(
+            List<ReviewRun> runs,
+            int insertPos,
+            int shiftLen,
+            String insertedGroupId
+    ) {
+
+        for (ReviewRun run : runs) {
+
+            InsertSuggestion insertSuggestion = run.getInsertSuggestion();
+
+            if (insertSuggestion != null
+                    && !insertedGroupId.equals(insertSuggestion.getGroupId())) {
+
+                for (SuggestionSlice slice : insertSuggestion.getReferences()) {
+
+                    if (slice.getReviewStart() >= insertPos) {
+                        slice.setReviewStart(
+                                slice.getReviewStart() + shiftLen
+                        );
+                    }
+                }
+            }
+
+            DeleteSuggestion deleteSuggestion = run.getDeleteSuggestion();
+
+            if (deleteSuggestion != null) {
+
+                for (SuggestionSlice slice : deleteSuggestion.getReferences()) {
+
+                    if (slice.getReviewStart() >= insertPos) {
+                        slice.setReviewStart(
+                                slice.getReviewStart() + shiftLen
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    public void shiftFormatSuggestionReferences(
+            List<FormatSuggestionItem> formatSuggestions,
+            int insertPos,
+            int shiftLen,
+            Set<String> excludedGroupIds
+    ) {
+
+        for (FormatSuggestionItem fmt : formatSuggestions) {
+
+            if (excludedGroupIds.contains(fmt.getGroupId())) {
+                continue;
+            }
+
+            for (SuggestionSlice slice : fmt.getReferences()) {
+
+                if (slice.getReviewStart() >= insertPos) {
+                    slice.setReviewStart(
+                            slice.getReviewStart() + shiftLen
+                    );
+                }
+            }
+        }
+    }
+
     public static class InsertGroupCollection {
         public final List<Integer> indices;
         public final int start;

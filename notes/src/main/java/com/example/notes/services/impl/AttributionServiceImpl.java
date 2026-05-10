@@ -533,6 +533,36 @@ public class AttributionServiceImpl implements AttributionService {
                         }
                     }
 
+                    int shiftLen = insertText.length();
+
+                    /*
+                     * SHIFT EXISTING REFERENCES FIRST
+                     * BEFORE inserting new runs
+                     */
+                    shiftSuggestionSliceReviewStarts(
+                            runs,
+                            insertAbsPos,
+                            shiftLen,
+                            currentInsertGroup.getGroupId()
+                    );
+
+                    shiftFormatSuggestionReferences(
+                            formatSuggestions,
+                            insertAbsPos,
+                            shiftLen,
+                            extendedGroupIds
+                    );
+
+                    shiftFormatSpansForInsert(
+                            formatSuggestions,
+                            insertAbsPos,
+                            shiftLen,
+                            extendedGroupIds
+                    );
+
+                    /*
+                     * NOW insert the new runs
+                     */
                     int componentLocalInsertCursor = 0;
                     String[] parts = insertText.split("\n", -1);
                     int spliceAt = insertAtIdx;
@@ -595,18 +625,14 @@ public class AttributionServiceImpl implements AttributionService {
                         }
                     }
 
-                    int shiftLen = insertText.length();
-
+                    /*
+                     * SHIFT LOGICAL STARTS OF FOLLOWING RUNS
+                     */
                     for (int i = spliceAt; i < runs.size(); i++) {
-                        runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() + shiftLen);
+                        runs.get(i).setLogicalStart(
+                                runs.get(i).getLogicalStart() + shiftLen
+                        );
                     }
-
-                    shiftFormatSpansForInsert(
-                            formatSuggestions,
-                            insertAbsPos,
-                            insertText.length(),
-                            extendedGroupIds
-                    );
 
                     localLogPos += insertText.length();
                 } else if (component.isDelete()) {
@@ -718,14 +744,12 @@ public class AttributionServiceImpl implements AttributionService {
                             int runStart = target.getLogicalStart();
                             int runEnd = runStart + target.getText().length();
 
+                            int finalCompIdx = compIdx;
                             List<SuggestionSlice> targetSlices =
                                     target.getInsertSuggestion().getReferences().stream()
-                                            .filter(slice -> {
-                                                int s = slice.getReviewStart();
-                                                int e = s + slice.getLength();
-
-                                                return s < runEnd && e > runStart;
-                                            })
+                                            .filter(slice -> slice.getRef() != null
+                                                    && slice.getRef().opId().equals(opId)
+                                                    && slice.getRef().componentIndex() == finalCompIdx)
                                             .toList();
 
                             int deleteStartPos = target.getLogicalStart();
