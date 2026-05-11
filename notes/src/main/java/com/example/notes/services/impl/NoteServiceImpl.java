@@ -161,6 +161,8 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId) {
+        notePolicyService.validateEditor(actorEmail, noteId);
+
         redisService.initializeNote(actorEmail, noteId);
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);

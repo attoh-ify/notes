@@ -1,12 +1,10 @@
 package com.example.notes.dto.attribution;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
+import lombok.*;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -20,6 +18,8 @@ public class ReviewRun {
     private Map<String, Object> baseAttributes = new HashMap<>();
     @Builder.Default
     private Map<String, Object> suggestionAttributes = new HashMap<>();
+    @Builder.Default
+    private List<SuggestionSlice> references = new ArrayList<>();
     private int logicalStart;
     private InsertSuggestion insertSuggestion;
     private DeleteSuggestion deleteSuggestion;
