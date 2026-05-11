@@ -61,7 +61,9 @@ public class CancellationAccumulator {
         return insertRanges.isEmpty() && formatRanges.isEmpty() && deleteCredits.isEmpty();
     }
 
-    public void flush(List<TextOperation> logOps) {
+    public boolean flushAndReturnChanged(List<TextOperation> logOps) {
+        boolean changed = false;
+
         Map<String, OpCancellationDelta> grouped = groupByOp();
 
         for (Map.Entry<String, OpCancellationDelta> entry : grouped.entrySet()) {
@@ -77,15 +79,20 @@ public class CancellationAccumulator {
             Delta original = textOp.getDelta();
 
             SplitDelta split = buildCommittedAndRemaining(original, data);
-            Delta committed = split.committed;
-            Delta remaining = split.remaining;
-            remaining = remaining.chop();
-            committed = committed.chop();
+            Delta committed = split.committed.chop();
+            Delta remaining = split.remaining.chop();
+
+            if (deltaEquals(original.chop(), remaining)) {
+                log.info("[FLUSH] Skipping no-op cancellation for opId={}", opId);
+                continue;
+            }
+
             System.out.println("original: " + original.toString());
             System.out.println("opId: " + opId);
             System.out.println("data: " + data.toString());
             System.out.println("Committed: " + committed.toString());
             System.out.println("Remaining: " + remaining.toString());
+
 
             boolean hasRemaining = !remaining.ops.isEmpty() &&
                     remaining.ops.stream().anyMatch(
@@ -98,6 +105,7 @@ public class CancellationAccumulator {
 
             if (!hasRemaining) {
                 textOp.setState(OpState.DEAD);
+                changed = true;
                 continue;
             }
 
@@ -112,7 +120,10 @@ public class CancellationAccumulator {
             textOp.setDelta(remaining);
 
             logOps.add(logOps.indexOf(textOp), committedOp);
+            changed = true;
         }
+
+        return changed;
     }
 
     private SplitDelta buildCommittedAndRemaining(Delta original, OpCancellationDelta data) {
@@ -200,15 +211,19 @@ public class CancellationAccumulator {
                     int segLen = cursor - start;
 
                     if (keys == null || keys.isEmpty()) {
-                        // Not cancelled — stays fully pending; committed skips with plain retain
                         committed.retain(segLen, null);
                         remaining.retain(segLen, base);
                     } else {
-                        Map<String, Object> removed = new LinkedHashMap<>(base);
-                        for (String k : keys) removed.remove(k);
+                        Map<String, Object> remainingAttrs = new LinkedHashMap<>(base);
+                        for (String k : keys) {
+                            remainingAttrs.remove(k);
+                        }
 
-                        committed.retain(segLen, removed.isEmpty() ? null : removed);
-                        remaining.retain(segLen, base);
+                        committed.retain(segLen, base);
+                        remaining.retain(
+                                segLen,
+                                remainingAttrs.isEmpty() ? null : remainingAttrs
+                        );
                     }
                 }
             } else if (op.isDelete()) {
@@ -216,19 +231,23 @@ public class CancellationAccumulator {
                 int credit = data.deleteCredits.getOrDefault(i, 0);
 
                 int commitLen = Math.min(len, credit);
+                int remainingLen = len - commitLen;
 
                 if (commitLen > 0) {
-                    // Credited chars: committed as delete (they cancelled pending inserts)
-                    // remaining skips them with plain retain — they're gone from the logical doc
                     committed.delete(commitLen);
-                    remaining.retain(commitLen, null);
                 }
 
-                if (commitLen < len) {
-                    // Leftover chars: still a real pending delete
-                    // committed skips with plain retain (positional skip)
-                    committed.retain(len - commitLen, null);
-                    remaining.delete(len - commitLen);
+                if (remainingLen > 0) {
+                    committed.retain(remainingLen, null);
+
+                    /*
+                     * Important:
+                     * Do NOT retain commitLen in remaining.
+                     *
+                     * The credited delete portion cancelled pending insert text.
+                     * It should not advance the remaining delete position.
+                     */
+                    remaining.delete(remainingLen);
                 }
             }
         }
@@ -285,6 +304,12 @@ public class CancellationAccumulator {
             }
         }
         return merged;
+    }
+
+    private static boolean deltaEquals(Delta a, Delta b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return Objects.equals(a.toString(), b.toString());
     }
 
     private static TextOperation findOp(List<TextOperation> logOps, String opId) {

@@ -133,46 +133,31 @@ public class AttributionHelpers {
 
         ReviewRun r = runs.get(idx);
 
-        InsertSuggestion leftInsert = copyInsertSuggestion(r.getInsertSuggestion());
-        InsertSuggestion rightInsert = copyInsertSuggestion(r.getInsertSuggestion());
+        int splitAbsPos = r.getLogicalStart() + offset;
 
-        if (r.getInsertSuggestion() != null) {
-            SuggestionSliceSplit split = splitSuggestionSlices(
-                    r.getInsertSuggestion().getReferences(),
-                    offset
-            );
-            leftInsert.setReferences(split.left());
-            rightInsert.setReferences(split.right());
-        }
-
-        DeleteSuggestion leftDelete = copyDeleteSuggestion(r.getDeleteSuggestion());
-        DeleteSuggestion rightDelete = copyDeleteSuggestion(r.getDeleteSuggestion());
-
-        if (r.getDeleteSuggestion() != null) {
-            SuggestionSliceSplit split = splitSuggestionSlices(
-                    r.getDeleteSuggestion().getReferences(),
-                    offset
-            );
-            leftDelete.setReferences(split.left());
-            rightDelete.setReferences(split.right());
-        }
+        SuggestionSliceSplit split = splitSuggestionSlices(
+                r.getReferences(),
+                splitAbsPos
+        );
 
         ReviewRun left = ReviewRun.builder()
                 .text(r.getText().substring(0, offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
+                .references(split.left())
                 .logicalStart(r.getLogicalStart())
-                .insertSuggestion(leftInsert)
-                .deleteSuggestion(leftDelete)
+                .insertSuggestion(copyInsertSuggestion(r.getInsertSuggestion()))
+                .deleteSuggestion(copyDeleteSuggestion(r.getDeleteSuggestion()))
                 .build();
 
         ReviewRun right = ReviewRun.builder()
                 .text(r.getText().substring(offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
-                .logicalStart(r.getLogicalStart() + offset)
-                .insertSuggestion(rightInsert)
-                .deleteSuggestion(rightDelete)
+                .references(split.right())
+                .logicalStart(splitAbsPos)
+                .insertSuggestion(copyInsertSuggestion(r.getInsertSuggestion()))
+                .deleteSuggestion(copyDeleteSuggestion(r.getDeleteSuggestion()))
                 .build();
 
         runs.set(idx, left);
@@ -430,28 +415,26 @@ public class AttributionHelpers {
         if (slices == null) return new ArrayList<>();
 
         return slices.stream()
-                .map(s -> SuggestionSlice.builder()
-                        .reviewStart(s.getReviewStart())
-                        .componentStart(s.getComponentStart())
-                        .length(s.getLength())
-                        .ref(new OpReference(s.getRef().opId(), s.getRef().componentIndex()))
-                        .build())
+                .map(AttributionHelpers::cloneSlice)
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 
     public static SuggestionSlice cloneSlice(SuggestionSlice s) {
+        if (s == null) return null;
+
         return SuggestionSlice.builder()
-                .reviewStart(s.getReviewStart()
-                )
+                .reviewStart(s.getReviewStart())
                 .componentStart(s.getComponentStart())
                 .length(s.getLength())
-                .ref(new OpReference(s.getRef().opId(), s.getRef().componentIndex()))
+                .ref(s.getRef() != null
+                        ? new OpReference(s.getRef().opId(), s.getRef().componentIndex())
+                        : null)
                 .build();
     }
 
     public static SuggestionSliceSplit splitSuggestionSlices(
             List<SuggestionSlice> slices,
-            int offset
+            int splitAbsPos
     ) {
         List<SuggestionSlice> left = new ArrayList<>();
         List<SuggestionSlice> right = new ArrayList<>();
@@ -464,15 +447,13 @@ public class AttributionHelpers {
             int start = slice.getReviewStart();
             int end = start + slice.getLength();
 
-            if (end <= offset) {
+            if (end <= splitAbsPos) {
                 left.add(cloneSlice(slice));
-            } else if (start >= offset) {
-                SuggestionSlice shifted = cloneSlice(slice);
-                shifted.setReviewStart(start - offset);
-                right.add(shifted);
+            } else if (start >= splitAbsPos) {
+                right.add(cloneSlice(slice));
             } else {
-                int leftLen = offset - start;
-                int rightLen = end - offset;
+                int leftLen = splitAbsPos - start;
+                int rightLen = end - splitAbsPos;
 
                 if (leftLen > 0) {
                     left.add(SuggestionSlice.builder()
@@ -485,7 +466,7 @@ public class AttributionHelpers {
 
                 if (rightLen > 0) {
                     right.add(SuggestionSlice.builder()
-                            .reviewStart(0)
+                            .reviewStart(splitAbsPos)
                             .componentStart(slice.getComponentStart() + leftLen)
                             .length(rightLen)
                             .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
@@ -501,10 +482,18 @@ public class AttributionHelpers {
             List<SuggestionSlice> base,
             List<SuggestionSlice> incoming
     ) {
-        List<SuggestionSlice> out = new ArrayList<>(base);
+        List<SuggestionSlice> out = new ArrayList<>();
 
-        for (SuggestionSlice s : incoming) {
-            out.add(cloneSlice(s));
+        if (base != null) {
+            for (SuggestionSlice s : base) {
+                out = appendAndCoalesceSuggestionSlice(out, s);
+            }
+        }
+
+        if (incoming != null) {
+            for (SuggestionSlice s : incoming) {
+                out = appendAndCoalesceSuggestionSlice(out, s);
+            }
         }
 
         return out;
@@ -517,7 +506,6 @@ public class AttributionHelpers {
                 .groupId(src.getGroupId())
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
-                .references(cloneSuggestionSlices(src.getReferences()))
                 .build();
     }
 
@@ -528,7 +516,6 @@ public class AttributionHelpers {
                 .groupId(src.getGroupId())
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
-                .references(cloneSuggestionSlices(src.getReferences()))
                 .build();
     }
 
@@ -542,14 +529,61 @@ public class AttributionHelpers {
     ) {
         List<SuggestionSlice> out = cloneSuggestionSlices(slices);
 
-        out.add(SuggestionSlice.builder()
+        if (length <= 0) {
+            return out;
+        }
+
+        SuggestionSlice incoming = SuggestionSlice.builder()
                 .reviewStart(reviewStart)
                 .componentStart(componentStart)
                 .length(length)
                 .ref(new OpReference(opId, componentIndex))
-                .build());
+                .build();
 
+        return appendAndCoalesceSuggestionSlice(out, incoming);
+    }
+
+    public static List<SuggestionSlice> appendAndCoalesceSuggestionSlice(
+            List<SuggestionSlice> slices,
+            SuggestionSlice incoming
+    ) {
+        List<SuggestionSlice> out = cloneSuggestionSlices(slices);
+
+        if (incoming == null || incoming.getLength() <= 0 || incoming.getRef() == null) {
+            return out;
+        }
+
+        if (!out.isEmpty()) {
+            SuggestionSlice last = out.get(out.size() - 1);
+
+            if (canCoalesceSuggestionSlices(last, incoming)) {
+                last.setLength(last.getLength() + incoming.getLength());
+                return out;
+            }
+        }
+
+        out.add(cloneSlice(incoming));
         return out;
+    }
+
+    public static boolean canCoalesceSuggestionSlices(
+            SuggestionSlice left,
+            SuggestionSlice right
+    ) {
+        if (left == null || right == null) return false;
+        if (left.getRef() == null || right.getRef() == null) return false;
+
+        boolean sameRef =
+                Objects.equals(left.getRef().opId(), right.getRef().opId())
+                        && Objects.equals(left.getRef().componentIndex(), right.getRef().componentIndex());
+
+        boolean adjacentReview =
+                left.getReviewStart() + left.getLength() == right.getReviewStart();
+
+        boolean adjacentComponent =
+                left.getComponentStart() + left.getLength() == right.getComponentStart();
+
+        return sameRef && adjacentReview && adjacentComponent;
     }
 
     public static List<SuggestionSlice> addComponentLocalSlice(
@@ -580,35 +614,21 @@ public class AttributionHelpers {
             int shiftLen,
             String insertedGroupId
     ) {
-
         for (ReviewRun run : runs) {
+            boolean belongsToInsertedGroup =
+                    run.getInsertSuggestion() != null
+                            && Objects.equals(insertedGroupId, run.getInsertSuggestion().getGroupId());
 
-            InsertSuggestion insertSuggestion = run.getInsertSuggestion();
+            boolean hasSuggestionRefs =
+                    run.getInsertSuggestion() != null || run.getDeleteSuggestion() != null;
 
-            if (insertSuggestion != null
-                    && !insertedGroupId.equals(insertSuggestion.getGroupId())) {
-
-                for (SuggestionSlice slice : insertSuggestion.getReferences()) {
-
-                    if (slice.getReviewStart() >= insertPos) {
-                        slice.setReviewStart(
-                                slice.getReviewStart() + shiftLen
-                        );
-                    }
-                }
+            if (!hasSuggestionRefs || belongsToInsertedGroup) {
+                continue;
             }
 
-            DeleteSuggestion deleteSuggestion = run.getDeleteSuggestion();
-
-            if (deleteSuggestion != null) {
-
-                for (SuggestionSlice slice : deleteSuggestion.getReferences()) {
-
-                    if (slice.getReviewStart() >= insertPos) {
-                        slice.setReviewStart(
-                                slice.getReviewStart() + shiftLen
-                        );
-                    }
+            for (SuggestionSlice slice : run.getReferences()) {
+                if (slice.getReviewStart() >= insertPos) {
+                    slice.setReviewStart(slice.getReviewStart() + shiftLen);
                 }
             }
         }
@@ -636,6 +656,24 @@ public class AttributionHelpers {
                 }
             }
         }
+    }
+
+    public static List<SuggestionSlice> collectReferencesForRunIndices(
+            List<ReviewRun> runs,
+            List<Integer> indices
+    ) {
+        List<SuggestionSlice> refs = new ArrayList<>();
+
+        if (runs == null || indices == null) return refs;
+
+        for (Integer idx : indices) {
+            if (idx == null || idx < 0 || idx >= runs.size()) continue;
+
+            ReviewRun run = runs.get(idx);
+            refs = appendSuggestionSlices(refs, run.getReferences());
+        }
+
+        return refs;
     }
 
     public static class InsertGroupCollection {
