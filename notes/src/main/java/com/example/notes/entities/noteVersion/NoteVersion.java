@@ -86,7 +86,7 @@ public class NoteVersion {
     public String toString() {
         return "NoteVersion{" +
                 "id=" + id +
-                ", note=" + note +
+                ", note=" + note.getId() +
                 ", masterDelta=" + masterDelta +
                 ", revision=" + revision +
                 ", comment=" + comment +
