@@ -5,10 +5,8 @@ import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
 import com.example.notes.dto.ot.Op;
-import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.services.AttributionService;
-import com.example.notes.services.NoteService;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,45 +18,32 @@ import static com.example.notes.utils.AttributionHelpers.*;
 
 @Service
 public class AttributionServiceImpl implements AttributionService {
-    private final NotePolicyService notePolicyService;
     private final RedisService redisService;
-    private final NoteService noteService;
+    private final NotePersistenceService notePersistenceService;
 
     private static final Logger log =
             LoggerFactory.getLogger(AttributionServiceImpl.class);
 
-    public AttributionServiceImpl(NotePolicyService notePolicyService, RedisService redisService, NoteService noteService) {
-        this.notePolicyService = notePolicyService;
+    public AttributionServiceImpl(RedisService redisService, NotePersistenceService notePersistenceService) {
         this.redisService = redisService;
-        this.noteService = noteService;
+        this.notePersistenceService = notePersistenceService;
     }
 
     @Override
     public ReviewProjection buildReviewProjection(
-            String actorEmail, UUID noteId
+            String actorEmail, UUID noteId, List<TextOperation> baseTextOps, List<TextOperation> changeTextOps
     ) {
-        notePolicyService.validateOwner(actorEmail, noteId);
-
-        NoteDto note = redisService.getNote(noteId);
-
-        List<TextOperation> committedTextOps = note.revisionLog().stream()
-                .filter(textOp -> textOp.getState().equals(OpState.COMMITTED))
-                .toList();
-        List<TextOperation> pendingTextOps = note.revisionLog().stream()
-                .filter(textOp -> textOp.getState().equals(OpState.PENDING))
-                .toList();
-
         resetGroupCounter();
 
-        Delta committedDelta = new Delta();
-        for (TextOperation textOp : committedTextOps) {
-            committedDelta = committedDelta.compose(new Delta(textOp.getDelta().ops));
+        Delta baseDelta = new Delta();
+        for (TextOperation textOp : baseTextOps) {
+            baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
 
         List<ReviewRun> runs = new ArrayList<>();
         int seedPos = 0;
 
-        for (Op op : committedDelta.ops) {
+        for (Op op : baseDelta.ops) {
             if (!(op.getInsert() instanceof String insertStr)) continue;
 
             Map<String, Object> opAttrs = op.getAttributes() != null
@@ -92,7 +77,7 @@ public class AttributionServiceImpl implements AttributionService {
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
         CancellationAccumulator accumulator = new CancellationAccumulator();
 
-        for (TextOperation textOp : pendingTextOps) {
+        for (TextOperation textOp : changeTextOps) {
             String opId = textOp.getOpId();
             String authorEmail = textOp.getActorEmail();
             String createdAt = textOp.getCreatedAt().toString();
@@ -928,19 +913,16 @@ public class AttributionServiceImpl implements AttributionService {
 
             if (changed) {
                 redisService.updateNote(freshNote, noteVersion);
-                noteService.saveNote(actorEmail, noteId);
+                notePersistenceService.saveRedisNoteToDatabase(actorEmail, noteId);
             }
-        }
-
-        Delta baseDelta = new Delta();
-        NoteDto postFlushNote = redisService.getNote(noteId);
-        for (TextOperation textOp : postFlushNote.revisionLog()) {
-            baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
 
         Delta visualDelta = buildVisualDelta(runs);
 
-        return new ReviewProjection(new Delta(), visualDelta, formatSuggestions);
+        for (TextOperation textOp : changeTextOps) {
+            baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
+        }
+        return new ReviewProjection(baseDelta, visualDelta, formatSuggestions);
     }
 
     private static FormatKeyChangeType getFormatKeyChangeType(FormatSuggestionItem fmt, Object attrValue, Object baseValue) {
@@ -1057,7 +1039,7 @@ public class AttributionServiceImpl implements AttributionService {
                 String textToInsert = isDeletedNewline ? "↵" : run.getText();
                 delta.insert(textToInsert, attrs.isEmpty() ? null : attrs);
             } else {
-                delta.insert(run.getText(), attrs.isEmpty() ? null : attrs);
+                delta.retain(run.getText().length(), attrs.isEmpty() ? null : attrs);
             }
         }
 

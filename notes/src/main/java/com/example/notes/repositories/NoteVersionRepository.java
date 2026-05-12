@@ -14,8 +14,7 @@ import java.util.UUID;
 public interface NoteVersionRepository extends JpaRepository<NoteVersion, UUID> {
     @Query("SELECT MAX(nv.versionNumber) FROM NoteVersion nv WHERE nv.note.id = :noteId")
     Integer findMaxVersionByNoteId(@Param("noteId") UUID noteId);
-    Optional<NoteVersion> findByIdAndNote_Id(UUID versionId, UUID noteId);
-
+    Optional<NoteVersion> findByNote_IdAndId(UUID noteId, UUID versionId);
     List<NoteVersion> findByNoteIdOrderByVersionNumberAsc(UUID noteId);
     Optional<NoteVersion> findTopByNote_IdOrderByVersionNumberDesc(UUID noteId);
     Optional<NoteVersion> findByNote_IdAndVersionNumber(UUID noteId, int versionNumber);

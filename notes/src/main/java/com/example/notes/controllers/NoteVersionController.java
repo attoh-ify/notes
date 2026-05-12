@@ -1,5 +1,6 @@
 package com.example.notes.controllers;
 
+import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.response.ResponseDto;
@@ -84,5 +85,11 @@ public class NoteVersionController {
     ) {
         NoteVersionDto restored = noteVersionService.restoreVersion(currentUser.getEmail(), noteId, versionId);
         return new ResponseDto("Note restored to version", restored);
+    }
+
+    @GetMapping("/{versionId}/audit")
+    public ResponseDto auditVersions(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @PathVariable UUID versionId) throws Exception {
+        ReviewProjection reviewProjection = noteVersionService.auditVersion(currentUser.getEmail(), noteId, versionId);
+        return new ResponseDto(true, "ok", reviewProjection);
     }
 }

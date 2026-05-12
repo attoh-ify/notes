@@ -82,7 +82,7 @@ public class NoteController {
 
     @GetMapping("/{noteId}/build-attribution")
     public ResponseDto buildAttribution(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
-        ReviewProjection reviewProjection = attributionService.buildReviewProjection(currentUser.getEmail(), noteId);
+        ReviewProjection reviewProjection = noteService.buildAttribution(currentUser.getEmail(), noteId);
         return new ResponseDto(true, "ok", reviewProjection);
     }
 

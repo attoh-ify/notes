@@ -1,10 +1,12 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.OpState;
+import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.exceptions.BadRequestException;
@@ -12,6 +14,7 @@ import com.example.notes.mappers.NoteVersionMapper;
 import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
+import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
@@ -21,6 +24,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,6 +37,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     private final NotePolicyService notePolicyService;
     private final NoteVersionMapper noteVersionMapper;
     private final RedisService redisService;
+    private final AttributionService attributionService;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteVersionServiceImpl.class);
@@ -39,13 +45,14 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Autowired
     private ReviewInProgressNotifier reviewInProgressNotifier;
 
-    public NoteVersionServiceImpl(NoteService noteService, NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService) {
+    public NoteVersionServiceImpl(NoteService noteService, NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService) {
         this.noteService = noteService;
         this.noteRepository = noteRepository;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
         this.noteVersionMapper = noteVersionMapper;
         this.redisService = redisService;
+        this.attributionService = attributionService;
     }
 
     @Transactional(readOnly = true)
@@ -119,5 +126,70 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         note.setCurrentNoteVersionNumber(noteVersion.getVersionNumber());
         noteRepository.save(note);
         return noteVersionMapper.toDto(noteVersionRepository.save(noteVersion));
+    }
+
+    @Override
+    public ReviewProjection auditVersion(String actorEmail, UUID noteId, UUID versionId) {
+        Note note = notePolicyService.validateSuper(actorEmail, noteId);
+
+        NoteVersion targetVersion = noteVersionRepository.findByNote_IdAndId(noteId, versionId)
+                .orElseThrow(() -> {
+                    log.warn("Note version with id={} not found", versionId);
+                    return new BadRequestException("Note version not found");
+                });
+
+        if (targetVersion.getVersionNumber() <= 0) {
+            throw new BadRequestException(
+                    "Cannot audit working copy(version 0) as a saved version"
+            );
+        }
+
+        int targetRevision = targetVersion.getRevision();
+
+        if (targetVersion.getVersionNumber() == 1) {
+            List<TextOperation> changeTextOps = note.getRevisionLog().stream()
+                    .filter(op -> !op.getState().equals(OpState.DEAD))
+                    .filter(op -> op.getRevision() <= targetRevision)
+                    .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                    .toList();
+
+            return attributionService.buildReviewProjection(
+                    actorEmail,
+                    noteId,
+                    new ArrayList<>(),
+                    changeTextOps
+            );
+        }
+
+        int baseVersionNumber = targetVersion.getVersionNumber() - 1;
+
+        NoteVersion baseVersion = noteVersionRepository
+                .findByNote_IdAndVersionNumber(noteId, baseVersionNumber)
+                .orElseThrow(() -> {
+                    log.warn("Previous note version with version number={} not found", baseVersionNumber);
+                    return new BadRequestException("Previous note version not found");
+                });
+
+        int baseRevision = baseVersion.getRevision();
+
+        List<TextOperation> baseTextOps = note.getRevisionLog().stream()
+                .filter(op -> !op.getState().equals(OpState.DEAD))
+                .filter(op -> op.getRevision() <= baseRevision)
+                .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                .toList();
+
+        List<TextOperation> changeTextOps = note.getRevisionLog().stream()
+                .filter(op -> !op.getState().equals(OpState.DEAD))
+                .filter(op -> op.getRevision() > baseRevision)
+                .filter(op -> op.getRevision() <= targetRevision)
+                .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                .toList();
+
+        return attributionService.buildReviewProjection(
+                actorEmail,
+                noteId,
+                baseTextOps,
+                changeTextOps
+        );
     }
 }

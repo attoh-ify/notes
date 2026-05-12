@@ -1,5 +1,6 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.attribution.SuggestionSlice;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
@@ -22,6 +23,7 @@ import com.example.notes.notifier.CursorNotifier;
 import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
+import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
@@ -50,17 +52,21 @@ public class NoteServiceImpl implements NoteService {
     private final NotePolicyService notePolicyService;
     private final UserPolicyService userPolicyService;
     private final RedisService redisService;
+    private final AttributionService attributionService;
+    private final NotePersistenceService notePersistenceService;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteServiceImpl.class);
 
-    public NoteServiceImpl(NoteRepository noteRepository, NoteMapper noteMapper, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, UserPolicyService userPolicyService, RedisService redisService) {
+    public NoteServiceImpl(NoteRepository noteRepository, NoteMapper noteMapper, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, UserPolicyService userPolicyService, RedisService redisService, AttributionService attributionService, NotePersistenceService notePersistenceService) {
         this.noteRepository = noteRepository;
         this.noteMapper = noteMapper;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
         this.userPolicyService = userPolicyService;
         this.redisService = redisService;
+        this.attributionService = attributionService;
+        this.notePersistenceService = notePersistenceService;
     }
 
     @Transactional(readOnly = true)
@@ -124,7 +130,7 @@ public class NoteServiceImpl implements NoteService {
         Delta initialDelta = payload.initialDelta() != null ? payload.initialDelta() : new Delta();
         boolean hasContent = initialDelta.ops != null && !initialDelta.ops.isEmpty();
 
-        NoteVersion firstNoteVersion = new NoteVersion(
+        NoteVersion noteCopyVersion  = new NoteVersion(
                 null,
                 newNote,
                 hasContent ? initialDelta : new Delta(),
@@ -132,23 +138,37 @@ public class NoteServiceImpl implements NoteService {
                 "Note copy",
                 0
         );
-        noteVersionRepository.save(firstNoteVersion);
-        newNote.getNoteVersions().add(firstNoteVersion);
+        noteCopyVersion  = noteVersionRepository.save(noteCopyVersion );
+        newNote.getNoteVersions().add(noteCopyVersion );
 
         if (hasContent) {
-            NoteVersion masterVersion = new NoteVersion(
+            NoteVersion importedVersion = new NoteVersion(
                     null,
                     newNote,
                     initialDelta,
-                    0,
+                    1,
                     "Imported from document",
                     1
             );
-            noteVersionRepository.save(masterVersion);
-            newNote.getNoteVersions().add(masterVersion);
+            importedVersion = noteVersionRepository.save(importedVersion);
+            newNote.getNoteVersions().add(importedVersion);
+
+            TextOperation textOp = new TextOperation(
+                    initialDelta,
+                    actorEmail,
+                    1,
+                    OpState.COMMITTED,
+                    importedVersion.getCreatedAt()
+            );
+            List<TextOperation> revisionLog = new ArrayList<>();
+            revisionLog.add(textOp);
+
+            newNote.setRevisionLog(revisionLog);
+            newNote.setCurrentNoteVersionNumber(1);
         }
 
-        noteRepository.save(newNote);
+        newNote = noteRepository.save(newNote);
+
         redisService.initializeNote(actorEmail, newNote.getId());
         redisService.addCollaboratorToNote(newNote.getId(), actorEmail);
 
@@ -178,6 +198,21 @@ public class NoteServiceImpl implements NoteService {
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
         return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision(), false);
+    }
+
+    @Override
+    public ReviewProjection buildAttribution(String actorEmail, UUID noteId) {
+        notePolicyService.validateOwner(actorEmail, noteId);
+        NoteDto note = redisService.getNote(noteId);
+
+        List<TextOperation> committedTextOps = note.revisionLog().stream()
+                .filter(textOp -> textOp.getState().equals(OpState.COMMITTED))
+                .toList();
+        List<TextOperation> pendingTextOps = note.revisionLog().stream()
+                .filter(textOp -> textOp.getState().equals(OpState.PENDING))
+                .toList();
+
+        return attributionService.buildReviewProjection(actorEmail, noteId, committedTextOps, pendingTextOps);
     }
 
     @Override
@@ -296,22 +331,7 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public void saveNote(String actorEmail, UUID noteId) {
-        Note note = notePolicyService.validateEditor(actorEmail, noteId);
-        NoteVersion noteVersion = noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
-                .orElseThrow(() -> {
-                    log.warn("Note version with id={} not found", note.getCurrentNoteVersionNumber());
-                    return new BadRequestException("Note version not found");
-                });
-
-        NoteDto storedNote = redisService.getNote(noteId);
-        NoteVersionDto storedNoteVersion = redisService.getNoteVersion(noteId);
-
-        noteVersion.setMasterDelta(storedNoteVersion.masterDelta());
-        noteVersion.setRevision(storedNoteVersion.revision());
-        noteVersionRepository.save(noteVersion);
-
-        note.setRevisionLog(storedNote.revisionLog());
-        noteRepository.save(note);
+        notePersistenceService.saveRedisNoteToDatabase(actorEmail, noteId);
     }
 
     @Transactional

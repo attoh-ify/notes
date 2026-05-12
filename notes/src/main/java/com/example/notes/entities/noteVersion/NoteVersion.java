@@ -44,7 +44,7 @@ public class NoteVersion {
     @Column(name = "comment", nullable = false)
     private String comment;
 
-    @Column(name = "version_number", nullable = false)
+    @Column(name = "version_number", nullable = false, unique = true)
     private Integer versionNumber;
 
     @Column(name = "created_at", nullable = false)

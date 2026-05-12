@@ -1,6 +1,7 @@
 package com.example.notes.services;
 
 
+import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 
@@ -12,4 +13,5 @@ public interface NoteVersionService {
     NoteVersionDto fetchVersion(String actorEmail, UUID noteId, int noteVersionNumber);
     NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload);
     NoteVersionDto restoreVersion(String actorEmail, UUID noteId, UUID noteVersionId);
+    ReviewProjection auditVersion(String actorEmail, UUID noteId, UUID versionId);
 }
