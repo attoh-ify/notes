@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static com.example.notes.utils.AttributionHelpers.*;
 
@@ -102,7 +103,7 @@ public class AttributionServiceImpl implements AttributionService {
                     int retainLen = (int) component.getRetain();
                     boolean newlineOnly = isOnlyNewlineRetain(runs, localLogPos, retainLen);
 
-                    if (!newlineOnly || currentFormatGroup == null) {
+                    if (!newlineOnly) {
                         currentFormatGroup = null;
                     }
 
@@ -364,6 +365,7 @@ public class AttributionServiceImpl implements AttributionService {
                     }
 
                     Map<String, Object> ownAttrs = new LinkedHashMap<>(rawAttrs);
+                    Map<String, Object> inheritedSuggestionAttrs = new LinkedHashMap<>();
                     Set<String> extendedGroupIds = new LinkedHashSet<>();
 
                     for (Iterator<Map.Entry<String, Object>> it = ownAttrs.entrySet().iterator(); it.hasNext();) {
@@ -374,18 +376,17 @@ public class AttributionServiceImpl implements AttributionService {
 
                         int finalLocalLogPos = localLogPos;
 
-                        FormatSuggestionItem existingAdj = formatSuggestions.stream()
+                        FormatSuggestionItem inheritedFormat = formatSuggestions.stream()
                                 .filter(f -> key.equals(f.getAttributeKey()))
                                 .filter(f -> Objects.equals(value, f.getAttributeValue()))
-                                .filter(f -> f.getSpans().stream()
-                                        .anyMatch(s -> s.getStart() + s.getLength() == finalLocalLogPos))
+                                .filter(f -> formatSuggestionShouldInheritInsert(f, finalLocalLogPos))
                                 .findFirst()
                                 .orElse(null);
 
-                        if (existingAdj == null) continue;
+                        if (inheritedFormat == null) continue;
 
-                        extendFormatGroupAtBoundary(
-                                existingAdj,
+                        extendFormatGroupForInheritedInsert(
+                                inheritedFormat,
                                 localLogPos,
                                 insertText.length(),
                                 opId,
@@ -393,7 +394,8 @@ public class AttributionServiceImpl implements AttributionService {
                                 currentInsertGroup.getGroupId()
                         );
 
-                        extendedGroupIds.add(existingAdj.getGroupId());
+                        inheritedSuggestionAttrs.put(key, value);
+                        extendedGroupIds.add(inheritedFormat.getGroupId());
                         it.remove();
                     }
 
@@ -569,7 +571,7 @@ public class AttributionServiceImpl implements AttributionService {
                             ReviewRun newRun = ReviewRun.builder()
                                     .text(parts[i])
                                     .baseAttributes(new LinkedHashMap<>(ownAttrs))
-                                    .suggestionAttributes(new LinkedHashMap<>())
+                                    .suggestionAttributes(new LinkedHashMap<>(inheritedSuggestionAttrs))
                                     .references(runRefs)
                                     .logicalStart(runPos)
                                     .insertSuggestion(runSuggestion)
@@ -775,32 +777,63 @@ public class AttributionServiceImpl implements AttributionService {
                                 boolean touched = false;
 
                                 for (SuggestionSlice slice : fmtRefs) {
-                                    // slice.getReviewStart() is the logical document position where
-                                    // this slice begins — same coordinate space as deleteStartPos/deleteEndPos.
-                                    // slice.getComponentStart() is the offset within the format retain
-                                    // component — a different space; never compare with doc positions.
                                     int sliceDocStart = slice.getReviewStart();
-                                    int sliceDocEnd   = sliceDocStart + slice.getLength();
+                                    int sliceDocEnd = sliceDocStart + slice.getLength();
 
                                     int overlapStart = Math.max(deleteStartPos, sliceDocStart);
-                                    int overlapEnd   = Math.min(deleteEndPos,   sliceDocEnd);
+                                    int overlapEnd = Math.min(deleteEndPos, sliceDocEnd);
 
-                                    if (overlapStart < overlapEnd) {
-                                        int offsetWithinSlice = overlapStart - sliceDocStart;
-                                        accumulator.recordFormatCancellation(
-                                                slice.getRef().opId(),
-                                                slice.getRef().componentIndex(),
-                                                fmt.getAttributeKey(),
-                                                slice.getComponentStart() + offsetWithinSlice,
-                                                overlapEnd - overlapStart
-                                        );
-
-                                        touched = true;
+                                    if (overlapStart >= overlapEnd) {
+                                        continue;
                                     }
+
+                                    touched = true;
+
+                                    /*
+                                     * Important:
+                                     * If this delete is cancelling pending inserted text, do not blindly
+                                     * cancel the original format op that the insert inherited from.
+                                     *
+                                     * The inserted text cancellation already removes the inserted characters.
+                                     * The format suggestion should be adjusted in runtime spans, but the
+                                     * original format op should not be rewritten unless the overlapped format
+                                     * reference belongs to the inserted op itself.
+                                     */
+                                    boolean formatRefBelongsToDeletedInsert =
+                                            targetSlices.stream().anyMatch(insertSlice ->
+                                                    insertSlice.getRef() != null
+                                                            && slice.getRef() != null
+                                                            && Objects.equals(
+                                                            insertSlice.getRef().opId(),
+                                                            slice.getRef().opId()
+                                                    )
+                                                            && Objects.equals(
+                                                            insertSlice.getRef().componentIndex(),
+                                                            slice.getRef().componentIndex()
+                                                    )
+                                            );
+
+                                    if (!formatRefBelongsToDeletedInsert) {
+                                        continue;
+                                    }
+
+                                    int offsetWithinSlice = overlapStart - sliceDocStart;
+
+                                    accumulator.recordFormatCancellation(
+                                            slice.getRef().opId(),
+                                            slice.getRef().componentIndex(),
+                                            fmt.getAttributeKey(),
+                                            slice.getComponentStart() + offsetWithinSlice,
+                                            overlapEnd - overlapStart
+                                    );
                                 }
 
                                 if (touched) {
-                                    removeRangeFromFormatSuggestion(fmt, deleteStartPos, deleteLen);
+                                    deleteRangeFromFormatSuggestionAndShift(
+                                            fmt,
+                                            deleteStartPos,
+                                            deleteLen
+                                    );
 
                                     if (fmt.getSpans().isEmpty()) {
                                         fmtIt.remove();
@@ -862,6 +895,16 @@ public class AttributionServiceImpl implements AttributionService {
                     }
                 }
             }
+        }
+
+        for (FormatSuggestionItem fmt : formatSuggestions) {
+            fmt.setSpans(
+                    fmt.getSpans().stream()
+                            .filter(s -> s.getLength() > 0)
+                            .collect(Collectors.toCollection(ArrayList::new))
+            );
+
+            fmt.setSpans(mergeAdjacentSpans(fmt.getSpans()));
         }
 
         for (FormatSuggestionItem fmt : formatSuggestions) {

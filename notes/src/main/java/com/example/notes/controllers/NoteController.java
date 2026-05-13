@@ -28,12 +28,10 @@ import java.util.UUID;
 public class NoteController {
     private final NoteService noteService;
     private final MessageProducer messageProducer;
-    private final AttributionService attributionService;
 
-    public NoteController(NoteService noteService, MessageProducer messageProducer, AttributionService attributionService) {
+    public NoteController(NoteService noteService, MessageProducer messageProducer) {
         this.noteService = noteService;
         this.messageProducer = messageProducer;
-        this.attributionService = attributionService;
     }
 
     @PostMapping

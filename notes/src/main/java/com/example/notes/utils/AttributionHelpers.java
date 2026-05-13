@@ -370,36 +370,87 @@ public class AttributionHelpers {
         }
     }
 
-    public static void extendFormatGroupAtBoundary(
+    public static boolean formatSuggestionShouldInheritInsert(
             FormatSuggestionItem group,
-            int boundaryPos,
+            int insertPos
+    ) {
+        if (group == null || group.getSpans() == null) {
+            return false;
+        }
+
+        for (FormatSuggestionSpan span : group.getSpans()) {
+            int spanStart = span.getStart();
+            int spanEnd = spanStart + span.getLength();
+
+            if (insertPos >= spanStart && insertPos <= spanEnd) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static void extendFormatGroupForInheritedInsert(
+            FormatSuggestionItem group,
+            int insertPos,
             int insertLength,
             String opId,
             int compIdx,
             String currentInsertGroupId
     ) {
-        int idx = -1;
-
-        for (int i = 0; i < group.getSpans().size(); i++) {
-            FormatSuggestionSpan s = group.getSpans().get(i);
-            if (s.getStart() + s.getLength() == boundaryPos) {
-                idx = i;
-                break;
-            }
-        }
-
-        if (idx == -1) {
+        if (group == null || insertLength <= 0) {
             return;
         }
 
-        FormatSuggestionSpan span = group.getSpans().get(idx);
+        group.setReferences(
+                shiftSuggestionSlicesForInsert(
+                        group.getReferences(),
+                        insertPos,
+                        insertLength
+                )
+        );
 
-        span.setLength(span.getLength() + insertLength);
-        group.setSpans(mergeAdjacentSpans(group.getSpans()));
+        List<FormatSuggestionSpan> nextSpans = new ArrayList<>();
+        boolean absorbed = false;
 
-        group.setReferences(addComponentLocalSlice(
+        for (FormatSuggestionSpan span : group.getSpans()) {
+            int spanStart = span.getStart();
+            int spanEnd = spanStart + span.getLength();
+
+            if (!absorbed && insertPos >= spanStart && insertPos <= spanEnd) {
+                nextSpans.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart)
+                                .length(span.getLength() + insertLength)
+                                .build()
+                );
+                absorbed = true;
+            } else if (spanStart >= insertPos) {
+                nextSpans.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart + insertLength)
+                                .length(span.getLength())
+                                .build()
+                );
+            } else {
+                nextSpans.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart)
+                                .length(span.getLength())
+                                .build()
+                );
+            }
+        }
+
+        if (!absorbed) {
+            return;
+        }
+
+        group.setSpans(mergeAdjacentSpans(nextSpans));
+
+        group.setReferences(addSuggestionSlice(
                 group.getReferences(),
-                0,
+                insertPos,
                 0,
                 insertLength,
                 opId,
@@ -409,6 +460,67 @@ public class AttributionHelpers {
         if (!group.getDependsOnInsertGroupIds().contains(currentInsertGroupId)) {
             group.getDependsOnInsertGroupIds().add(currentInsertGroupId);
         }
+    }
+
+    public static void deleteRangeFromFormatSuggestionAndShift(
+            FormatSuggestionItem item,
+            int deleteStart,
+            int deleteLength
+    ) {
+        if (item == null || item.getSpans() == null || deleteLength <= 0) {
+            return;
+        }
+
+        int deleteEnd = deleteStart + deleteLength;
+
+        List<FormatSuggestionSpan> next = new ArrayList<>();
+
+        for (FormatSuggestionSpan span : item.getSpans()) {
+            int spanStart = span.getStart();
+            int spanEnd = spanStart + span.getLength();
+
+            if (spanEnd <= deleteStart) {
+                next.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart)
+                                .length(span.getLength())
+                                .build()
+                );
+                continue;
+            }
+
+            if (spanStart >= deleteEnd) {
+                next.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart - deleteLength)
+                                .length(span.getLength())
+                                .build()
+                );
+                continue;
+            }
+
+            int leftLen = Math.max(0, deleteStart - spanStart);
+            if (leftLen > 0) {
+                next.add(
+                        FormatSuggestionSpan.builder()
+                                .start(spanStart)
+                                .length(leftLen)
+                                .build()
+                );
+            }
+
+            int rightLen = Math.max(0, spanEnd - deleteEnd);
+            if (rightLen > 0) {
+                next.add(
+                        FormatSuggestionSpan.builder()
+                                .start(deleteStart)
+                                .length(rightLen)
+                                .build()
+                );
+            }
+        }
+
+        item.setSpans(mergeAdjacentSpans(next));
     }
 
     public static List<SuggestionSlice> cloneSuggestionSlices(List<SuggestionSlice> slices) {
@@ -675,6 +787,81 @@ public class AttributionHelpers {
 
         return refs;
     }
+    public static List<SuggestionSlice> shiftSuggestionSlicesForInsert(
+            List<SuggestionSlice> slices,
+            int insertPos,
+            int insertLength
+    ) {
+        List<SuggestionSlice> out = new ArrayList<>();
+
+        if (slices == null || slices.isEmpty() || insertLength <= 0) {
+            return cloneSuggestionSlices(slices);
+        }
+
+        for (SuggestionSlice slice : slices) {
+            if (slice == null || slice.getRef() == null) continue;
+
+            int sliceStart = slice.getReviewStart();
+            int sliceEnd = sliceStart + slice.getLength();
+
+            if (sliceEnd <= insertPos) {
+                out = appendAndCoalesceSuggestionSlice(out, slice);
+                continue;
+            }
+
+            if (sliceStart >= insertPos) {
+                out = appendAndCoalesceSuggestionSlice(
+                        out,
+                        SuggestionSlice.builder()
+                                .reviewStart(sliceStart + insertLength)
+                                .componentStart(slice.getComponentStart())
+                                .length(slice.getLength())
+                                .ref(new OpReference(
+                                        slice.getRef().opId(),
+                                        slice.getRef().componentIndex()
+                                ))
+                                .build()
+                );
+                continue;
+            }
+
+            int leftLen = insertPos - sliceStart;
+            int rightLen = sliceEnd - insertPos;
+
+            if (leftLen > 0) {
+                out = appendAndCoalesceSuggestionSlice(
+                        out,
+                        SuggestionSlice.builder()
+                                .reviewStart(sliceStart)
+                                .componentStart(slice.getComponentStart())
+                                .length(leftLen)
+                                .ref(new OpReference(
+                                        slice.getRef().opId(),
+                                        slice.getRef().componentIndex()
+                                ))
+                                .build()
+                );
+            }
+
+            if (rightLen > 0) {
+                out = appendAndCoalesceSuggestionSlice(
+                        out,
+                        SuggestionSlice.builder()
+                                .reviewStart(insertPos + insertLength)
+                                .componentStart(slice.getComponentStart() + leftLen)
+                                .length(rightLen)
+                                .ref(new OpReference(
+                                        slice.getRef().opId(),
+                                        slice.getRef().componentIndex()
+                                ))
+                                .build()
+                );
+            }
+        }
+
+        return out;
+    }
+
 
     public static class InsertGroupCollection {
         public final List<Integer> indices;
