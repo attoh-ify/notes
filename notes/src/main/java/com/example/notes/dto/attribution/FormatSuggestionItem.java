@@ -21,9 +21,7 @@ public class FormatSuggestionItem {
     private String attributeKey;
     private Object attributeValue;
     @Builder.Default
-    private List<SuggestionSlice> references = new ArrayList<>();
-    @Builder.Default
-    private List<FormatSuggestionSpan> spans = new ArrayList<>();
+    private List<Reference> references = new ArrayList<>();
     @Builder.Default
     private String previewText = "";
     @Builder.Default

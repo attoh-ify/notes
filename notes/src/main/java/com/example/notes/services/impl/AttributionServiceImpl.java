@@ -8,39 +8,100 @@ import com.example.notes.dto.ot.Op;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.services.AttributionService;
 import com.example.notes.services.RedisService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.example.notes.utils.AttributionHelpers.*;
 
+@Slf4j
 @Service
 public class AttributionServiceImpl implements AttributionService {
     private final RedisService redisService;
     private final NotePersistenceService notePersistenceService;
 
-    private static final Logger log =
-            LoggerFactory.getLogger(AttributionServiceImpl.class);
-
-    public AttributionServiceImpl(RedisService redisService, NotePersistenceService notePersistenceService) {
+    public AttributionServiceImpl(
+            RedisService redisService,
+            NotePersistenceService notePersistenceService
+    ) {
         this.redisService = redisService;
         this.notePersistenceService = notePersistenceService;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Logging helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static void logRuns(String label, List<ReviewRun> runs) {
+        if (!log.isDebugEnabled()) return;
+        log.debug("[ATTR:RUN] {} count={}", label, runs.size());
+        for (int i = 0; i < runs.size(); i++) {
+            ReviewRun r = runs.get(i);
+            log.debug(
+                    "[ATTR:RUN] {}  [{}] text='{}' logicalStart={} ins={} del={} baseAttrs={} suggAttrs={} refs={}",
+                    label, i,
+                    r.getText().replace("\n", "\\n"),
+                    r.getLogicalStart(),
+                    r.getInsertSuggestion() != null ? r.getInsertSuggestion().getGroupId() : "null",
+                    r.getDeleteSuggestion() != null ? r.getDeleteSuggestion().getGroupId() : "null",
+                    r.getBaseAttributes(),
+                    r.getSuggestionAttributes(),
+                    r.getReferences()
+            );
+        }
+    }
+
+    private static void logFormatSuggestions(String label, List<FormatSuggestionItem> fmts) {
+        if (!log.isDebugEnabled()) return;
+        log.debug("[ATTR:FMT] {} count={}", label, fmts.size());
+        for (FormatSuggestionItem f : fmts) {
+            log.debug(
+                    "[ATTR:FMT] {}  groupId={} actor={} key={} value={} refs={} depsIns={} depsDel={}",
+                    label,
+                    f.getGroupId(), f.getActorEmail(),
+                    f.getAttributeKey(), f.getAttributeValue(),
+                    f.getReferences(), f.getDependsOnInsertGroupIds(),
+                    f.getDependsOnDeleteGroupIds()
+            );
+        }
+    }
+
+    private static void logVisualDelta(String label, Delta delta) {
+        if (!log.isDebugEnabled()) return;
+        log.debug("[ATTR:VDELTA] {} ops={}", label, delta.ops);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Main method
+    // ─────────────────────────────────────────────────────────────────────────
+
     @Override
     public ReviewProjection buildReviewProjection(
-            String actorEmail, UUID noteId, List<TextOperation> baseTextOps, List<TextOperation> changeTextOps
+            String actorEmail,
+            UUID noteId,
+            List<TextOperation> baseTextOps,
+            List<TextOperation> changeTextOps
     ) {
+        log.info("[ATTR:PHASE] buildReviewProjection START noteId={} actor={} baseOps={} changeOps={}",
+                noteId, actorEmail, baseTextOps.size(), changeTextOps.size());
+
         resetGroupCounter();
 
+        // ── PHASE 1 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-1: composing base delta from {} ops", baseTextOps.size());
         Delta baseDelta = new Delta();
+
         for (TextOperation textOp : baseTextOps) {
+            log.debug("[ATTR:PHASE1] composing opId={} delta={}", textOp.getOpId(), textOp.getDelta());
             baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
 
+        log.info("[ATTR:PHASE1] baseDelta composed: ops={}", baseDelta.ops.size());
+        log.debug("[ATTR:PHASE1] baseDelta={}", baseDelta);
+
+        // ── PHASE 2 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-2: building ReviewRun list from baseDelta");
         List<ReviewRun> runs = new ArrayList<>();
         int seedPos = 0;
 
@@ -51,29 +112,44 @@ public class AttributionServiceImpl implements AttributionService {
                     ? new LinkedHashMap<>(op.getAttributes())
                     : new LinkedHashMap<>();
 
-            String[] parts = insertStr.split("\n", -1); // -1 keeps trailing empty strings
+            String[] parts = insertStr.split("\n", -1);
+
             for (int i = 0; i < parts.length; i++) {
                 if (!parts[i].isEmpty()) {
-                    runs.add(ReviewRun.builder()
-                            .text(parts[i])
-                            .baseAttributes(new LinkedHashMap<>(opAttrs))
-                            .suggestionAttributes(new LinkedHashMap<>())
-                            .logicalStart(seedPos)
-                            .build());
+                    runs.add(
+                            ReviewRun.builder()
+                                    .text(parts[i])
+                                    .baseAttributes(new LinkedHashMap<>(opAttrs))
+                                    .suggestionAttributes(new LinkedHashMap<>())
+                                    .references(new ArrayList<>())
+                                    .logicalStart(seedPos)
+                                    .build()
+                    );
+                    log.debug("[ATTR:PHASE2] text-run text='{}' logicalStart={}", parts[i], seedPos);
                     seedPos += parts[i].length();
                 }
+
                 if (i < parts.length - 1) {
-                    runs.add(ReviewRun.builder()
-                            .text("\n")
-                            .baseAttributes(new LinkedHashMap<>())
-                            .suggestionAttributes(new LinkedHashMap<>())
-                            .logicalStart(seedPos)
-                            .build());
+                    runs.add(
+                            ReviewRun.builder()
+                                    .text("\n")
+                                    .baseAttributes(new LinkedHashMap<>())
+                                    .suggestionAttributes(new LinkedHashMap<>())
+                                    .references(new ArrayList<>())
+                                    .logicalStart(seedPos)
+                                    .build()
+                    );
+                    log.debug("[ATTR:PHASE2] newline-run logicalStart={}", seedPos);
                     seedPos += 1;
                 }
             }
         }
 
+        log.info("[ATTR:PHASE2] runs built: count={} totalLogicalLen={}", runs.size(), seedPos);
+        logRuns("AFTER_PHASE2", runs);
+
+        // ── PHASE 3 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-3: replaying {} change ops", changeTextOps.size());
 
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
         CancellationAccumulator accumulator = new CancellationAccumulator();
@@ -83,19 +159,30 @@ public class AttributionServiceImpl implements AttributionService {
             String authorEmail = textOp.getActorEmail();
             String createdAt = textOp.getCreatedAt().toString();
 
+            log.info("[ATTR:OP] processing opId={} actor={} createdAt={} components={}",
+                    opId, authorEmail, createdAt, textOp.getDelta().ops.size());
+            log.debug("[ATTR:OP] delta={}", textOp.getDelta());
+
             int localLogPos = 0;
             InsertSuggestion currentInsertGroup = null;
             DeleteSuggestion currentDeleteGroup = null;
             FormatSuggestionItem currentFormatGroup = null;
 
             List<Op> components = textOp.getDelta().ops;
+
             for (int compIdx = 0; compIdx < components.size(); compIdx++) {
                 Op component = components.get(compIdx);
+                log.debug("[ATTR:COMP] opId={} compIdx={} localLogPos={} component={}",
+                        opId, compIdx, localLogPos, component);
 
+                // ── CASE A: plain retain ──────────────────────────────────────
                 if (component.isRetain() && component.getAttributes() == null) {
-                    boolean isLastOp = (compIdx == components.size() - 1);
+                    boolean isLastOp = compIdx == components.size() - 1;
 
-                    if (isLastOp) break;
+                    if (isLastOp) {
+                        log.debug("[ATTR:RETAIN] opId={} compIdx={} LAST_OP skipping", opId, compIdx);
+                        break;
+                    }
 
                     currentInsertGroup = null;
                     currentDeleteGroup = null;
@@ -103,89 +190,133 @@ public class AttributionServiceImpl implements AttributionService {
                     int retainLen = (int) component.getRetain();
                     boolean newlineOnly = isOnlyNewlineRetain(runs, localLogPos, retainLen);
 
+                    log.debug("[ATTR:RETAIN] opId={} compIdx={} retainLen={} newlineOnly={} localLogPos={}",
+                            opId, compIdx, retainLen, newlineOnly, localLogPos);
+
                     if (!newlineOnly) {
+                        if (currentFormatGroup != null) {
+                            log.debug("[ATTR:RETAIN] breaking formatGroup groupId={} due to non-newline retain",
+                                    currentFormatGroup.getGroupId());
+                        }
                         currentFormatGroup = null;
                     }
 
                     localLogPos += retainLen;
+                    continue;
+                }
 
-                } else if (component.isRetain() && component.getAttributes() != null) {
+                // ── CASE B: retain with attributes (format suggestion) ────────
+                else if (component.isRetain() && component.getAttributes() != null) {
                     currentInsertGroup = null;
                     currentDeleteGroup = null;
 
                     int retainLen = (int) component.getRetain();
+                    log.info("[ATTR:FORMAT] opId={} compIdx={} retainLen={} attrs={} localLogPos={}",
+                            opId, compIdx, retainLen, component.getAttributes(), localLogPos);
 
                     RunPosition startPos = findRunPos(runs, localLogPos);
                     int runIdx = startPos.idx();
                     int startOffset = startPos.offset();
 
+                    log.debug("[ATTR:FORMAT] findRunPos(localLogPos={}) => idx={} offset={} absPos={}",
+                            localLogPos, runIdx, startOffset, startPos.absPos());
+
+                    if (runIdx >= runs.size() && retainLen > 0) {
+                        log.error("[ATTR:FORMAT:ERR] opId={} compIdx={} runIdx={} >= runs.size()={} — format target out of bounds, localLogPos={}",
+                                opId, compIdx, runIdx, runs.size(), localLogPos);
+                    }
+
                     if (startOffset > 0 && runIdx < runs.size()) {
+                        log.debug("[ATTR:FORMAT] splitting run at idx={} offset={}", runIdx, startOffset);
                         runIdx = splitAt(runs, runIdx, startOffset);
+                        log.debug("[ATTR:FORMAT] after split runIdx={}", runIdx);
                     }
 
                     int remaining = retainLen;
                     int cursor = runIdx;
-
                     Map<String, Object> rawIncomingAttrs = new LinkedHashMap<>(component.getAttributes());
 
                     while (remaining > 0 && cursor < runs.size()) {
                         ReviewRun run = runs.get(cursor);
 
                         if (run.getDeleteSuggestion() != null || "\n".equals(run.getText())) {
+                            log.debug("[ATTR:FORMAT] skipping cursor={} del={} isNL={}",
+                                    cursor,
+                                    run.getDeleteSuggestion() != null,
+                                    "\n".equals(run.getText()));
                             cursor++;
                             continue;
                         }
 
                         if (run.getText().length() > remaining) {
+                            log.debug("[ATTR:FORMAT] splitting run at cursor={} remaining={}", cursor, remaining);
                             splitAt(runs, cursor, remaining);
                         }
 
                         ReviewRun target = runs.get(cursor);
                         int spanStart = target.getLogicalStart();
                         int spanLen = target.getText().length();
+                        int spanEnd = spanStart + spanLen;
+
+                        log.debug("[ATTR:FORMAT] target cursor={} text='{}' spanStart={} spanLen={} spanEnd={}",
+                                cursor, target.getText().replace("\n", "\\n"), spanStart, spanLen, spanEnd);
 
                         Map<String, Object> baseAttrs = target.getBaseAttributes() != null
-                                ? target.getBaseAttributes() : Collections.emptyMap();
+                                ? target.getBaseAttributes()
+                                : Collections.emptyMap();
 
                         for (Map.Entry<String, Object> entry : rawIncomingAttrs.entrySet()) {
                             String attrKey = entry.getKey();
                             Object attrValue = entry.getValue();
                             Object baseValue = baseAttrs.get(attrKey);
 
+                            log.debug("[ATTR:FORMAT] attrKey={} attrValue={} baseValue={}", attrKey, attrValue, baseValue);
+
                             List<FormatSuggestionItem> coveringFormats = formatSuggestions.stream()
                                     .filter(f -> attrKey.equals(f.getAttributeKey()))
-                                    .filter(f -> f.getSpans().stream().anyMatch(s ->
-                                            s.getStart() <= spanStart &&
-                                            s.getStart() + s.getLength() >= spanStart + spanLen))
+                                    .filter(f -> formatSuggestionCoversRange(f, spanStart, spanLen))
                                     .toList();
+
+                            if (!coveringFormats.isEmpty()) {
+                                log.debug("[ATTR:FORMAT] coveringFormats count={} for spanStart={} spanLen={}",
+                                        coveringFormats.size(), spanStart, spanLen);
+                            }
 
                             for (FormatSuggestionItem fmt : new ArrayList<>(coveringFormats)) {
                                 FormatKeyChangeType type = getFormatKeyChangeType(fmt, attrValue, baseValue);
+                                log.debug("[ATTR:FORMAT] coveringFmt groupId={} changeType={}", fmt.getGroupId(), type);
 
                                 if (type == FormatKeyChangeType.CANCEL || type == FormatKeyChangeType.REPLACE) {
-                                    int componentStart = retainLen - remaining;
+                                    for (Reference reference : fmt.getReferences()) {
+                                        int referenceStart = reference.getReviewStart();
+                                        int referenceEnd = referenceStart + reference.getLength();
+                                        int overlapStart = Math.max(spanStart, referenceStart);
+                                        int overlapEnd = Math.min(spanEnd, referenceEnd);
 
-                                    for (SuggestionSlice slice : fmt.getReferences()) {
-                                        int sliceStart = slice.getComponentStart();
-                                        int sliceEnd = sliceStart + slice.getLength();
+                                        if (overlapStart >= overlapEnd) continue;
 
-                                        int overlapStart = Math.max(componentStart, sliceStart);
-                                        int overlapEnd = Math.min(componentStart + spanLen, sliceEnd);
+                                        int sourceStart = reference.getComponentStart() + (overlapStart - referenceStart);
+                                        int sourceLen = overlapEnd - overlapStart;
 
-                                        if (overlapStart < overlapEnd) {
-                                            accumulator.recordFormatCancellation(
-                                                    slice.getRef().opId(),
-                                                    slice.getRef().componentIndex(),
-                                                    attrKey,
-                                                    overlapStart,
-                                                    overlapEnd - overlapStart
-                                            );
-                                        }
+                                        log.info("[ATTR:FORMAT:CANCEL] opId={} compIdx={} cancelFmt groupId={} attrKey={} sourceStart={} sourceLen={}",
+                                                opId, compIdx, fmt.getGroupId(), attrKey, sourceStart, sourceLen);
+
+                                        accumulator.recordFormatCancellation(
+                                                reference.getOpId(),
+                                                reference.getComponentIndex(),
+                                                attrKey,
+                                                sourceStart,
+                                                sourceLen
+                                        );
                                     }
 
-                                    removeRangeFromFormatSuggestion(fmt, spanStart, spanLen);
+                                    fmt.setReferences(
+                                            removeRangeFromSuggestionReferencesWithoutShift(
+                                                    fmt.getReferences(), spanStart, spanLen)
+                                    );
 
-                                    if (fmt.getSpans().isEmpty()) {
+                                    if (fmt.getReferences().isEmpty()) {
+                                        log.debug("[ATTR:FORMAT] removing empty formatSuggestion groupId={}", fmt.getGroupId());
                                         formatSuggestions.remove(fmt);
                                     }
 
@@ -196,202 +327,155 @@ public class AttributionServiceImpl implements AttributionService {
                             }
 
                             if (Objects.equals(baseValue, attrValue)) {
+                                log.debug("[ATTR:FORMAT] attrKey={} already matches base — no suggestion", attrKey);
                                 continue;
                             }
 
-                            // Pending format attrs go into suggestionAttributes, never baseAttributes.
+                            Map<String, Object> incomingSuggestionAttrs = new LinkedHashMap<>();
+                            incomingSuggestionAttrs.put(attrKey, attrValue);
+
                             target.setSuggestionAttributes(
                                     overlayAttrsPreserveNull(
                                             target.getSuggestionAttributes(),
-                                            Map.of(attrKey, attrValue)
+                                            incomingSuggestionAttrs
                                     )
                             );
 
-                            if (currentFormatGroup == null) {
-                                FormatSuggestionItem prevAdj = formatSuggestions.stream()
-                                        .filter(f -> f.getActorEmail().equals(authorEmail))
-                                        .filter(f -> attrKey.equals(f.getAttributeKey()))
-                                        .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
-                                        .filter(f -> f.getSpans().stream().anyMatch(s -> s.getStart() + s.getLength() == spanStart))
-                                        .findFirst()
-                                        .orElse(null);
+                            if (currentFormatGroup == null
+                                    || !attrKey.equals(currentFormatGroup.getAttributeKey())
+                                    || !Objects.equals(attrValue, currentFormatGroup.getAttributeValue())) {
 
-                                FormatSuggestionItem nextAdj = formatSuggestions.stream()
-                                        .filter(f -> f.getActorEmail().equals(authorEmail))
-                                        .filter(f -> attrKey.equals(f.getAttributeKey()))
-                                        .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
-                                        .filter(f -> f.getSpans().stream().anyMatch(s -> s.getStart() == spanStart + spanLen))
-                                        .findFirst()
-                                        .orElse(null);
-
-                                FormatSuggestionItem existing = null;
-
-                                if (prevAdj != null) {
-                                    existing = prevAdj;
-
-                                    if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
-                                        existing.setReferences(appendSuggestionSlices(
-                                                existing.getReferences(),
-                                                nextAdj.getReferences()
-                                        ));
-
-                                        List<FormatSuggestionSpan> mergedSpans = new ArrayList<>();
-                                        mergedSpans.addAll(existing.getSpans().stream()
-                                                .map(s -> FormatSuggestionSpan.builder()
-                                                        .start(s.getStart()).length(s.getLength()).build())
-                                                .toList());
-                                        mergedSpans.addAll(nextAdj.getSpans().stream()
-                                                .map(s -> FormatSuggestionSpan.builder()
-                                                        .start(s.getStart()).length(s.getLength()).build())
-                                                .toList());
-                                        existing.setSpans(mergedSpans);
-
-                                        for (String dep : nextAdj.getDependsOnInsertGroupIds()) {
-                                            if (!existing.getDependsOnInsertGroupIds().contains(dep)) {
-                                                existing.getDependsOnInsertGroupIds().add(dep);
-                                            }
-                                        }
-
-                                        if (nextAdj.getCreatedAt().compareTo(existing.getCreatedAt()) > 0) {
-                                            existing.setCreatedAt(nextAdj.getCreatedAt());
-                                        }
-
-                                        formatSuggestions.removeIf(f -> f.getGroupId().equals(nextAdj.getGroupId()));
-                                    }
-
-                                } else if (nextAdj != null) {
-                                    existing = nextAdj;
-                                }
-
-                                if (existing == null) {
-                                    existing = FormatSuggestionItem.builder()
-                                            .groupId(nextId())
-                                            .actorEmail(authorEmail)
-                                            .createdAt(createdAt)
-                                            .attributeKey(attrKey)
-                                            .attributeValue(attrValue)
-                                            .references(new ArrayList<>())
-                                            .spans(new ArrayList<>())
-                                            .previewText("")
-                                            .dependsOnInsertGroupIds(new ArrayList<>())
-                                            .dependsOnDeleteGroupIds(new ArrayList<>())
-                                            .build();
-                                    formatSuggestions.add(existing);
-                                }
-
-                                currentFormatGroup = existing;
+                                currentFormatGroup = findOrCreateCompatibleFormatSuggestion(
+                                        formatSuggestions, authorEmail, createdAt,
+                                        attrKey, attrValue, spanStart, spanEnd
+                                );
+                                log.debug("[ATTR:FORMAT] found/created formatGroup groupId={}", currentFormatGroup.getGroupId());
                             }
 
                             if (target.getInsertSuggestion() != null
                                     && !currentFormatGroup.getDependsOnInsertGroupIds()
                                     .contains(target.getInsertSuggestion().getGroupId())) {
+                                log.debug("[ATTR:FORMAT] adding insertDep groupId={} -> insGroupId={}",
+                                        currentFormatGroup.getGroupId(),
+                                        target.getInsertSuggestion().getGroupId());
                                 currentFormatGroup.getDependsOnInsertGroupIds()
                                         .add(target.getInsertSuggestion().getGroupId());
                             }
 
                             int componentStart = retainLen - remaining;
 
-                            currentFormatGroup.setReferences(addSuggestionSlice(
-                                    currentFormatGroup.getReferences(),
-                                    spanStart,        // reviewStart
-                                    componentStart,   // componentStart
-                                    spanLen,
-                                    opId,
-                                    compIdx
-                            ));
+                            log.debug("[ATTR:FORMAT] addRef groupId={} reviewStart={} componentStart={} len={} opId={} compIdx={}",
+                                    currentFormatGroup.getGroupId(), spanStart, componentStart, spanLen, opId, compIdx);
 
-                            int adjacentIdx = findAdjacentSpanIndex(currentFormatGroup.getSpans(), spanStart);
-                            if (adjacentIdx != -1) {
-                                currentFormatGroup.getSpans().get(adjacentIdx)
-                                        .setLength(currentFormatGroup.getSpans().get(adjacentIdx).getLength() + spanLen);
-                            } else {
-                                currentFormatGroup.getSpans().add(
-                                        FormatSuggestionSpan.builder().start(spanStart).length(spanLen).build());
-                            }
+                            currentFormatGroup.setReferences(
+                                    addSuggestionReference(
+                                            currentFormatGroup.getReferences(),
+                                            spanStart, componentStart, spanLen, opId, compIdx
+                                    )
+                            );
                         }
 
                         remaining -= spanLen;
                         cursor++;
                     }
 
-                    localLogPos += retainLen;
+                    if (remaining != 0) {
+                        log.warn("[ATTR:FORMAT:WARN] opId={} compIdx={} retainLen={} — remaining={} after loop (expected 0)",
+                                opId, compIdx, retainLen, remaining);
+                    }
 
-                } else if (component.isInsert() && component.getInsert() instanceof String insertText) {
+                    localLogPos += retainLen;
+                    continue;
+                }
+
+                // ── CASE C: insert ────────────────────────────────────────────
+                else if (component.isInsert() && component.getInsert() instanceof String insertText) {
                     currentDeleteGroup = null;
                     currentFormatGroup = null;
 
-                    Map<String, Object> rawAttrs = component.getAttributes() != null
-                            ? new LinkedHashMap<>(component.getAttributes())
-                            : new LinkedHashMap<>();
+                    log.info("[ATTR:INSERT] opId={} compIdx={} insertText='{}' localLogPos={} attrs={}",
+                            opId, compIdx, insertText.replace("\n", "\\n"), localLogPos, component.getAttributes());
 
                     RunPosition insertPos = findRunPos(runs, localLogPos);
                     int runIndex = insertPos.idx();
                     int insertOffset = insertPos.offset();
                     int insertAbsPos = insertPos.absPos();
 
+                    log.debug("[ATTR:INSERT] findRunPos(localLogPos={}) => idx={} offset={} absPos={}",
+                            localLogPos, runIndex, insertOffset, insertAbsPos);
+
                     int insertAtIdx = runIndex;
+
                     if (insertOffset > 0 && runIndex < runs.size()) {
+                        log.debug("[ATTR:INSERT] splitting run at idx={} offset={}", runIndex, insertOffset);
                         insertAtIdx = splitAt(runs, runIndex, insertOffset);
+                        log.debug("[ATTR:INSERT] after split insertAtIdx={}", insertAtIdx);
                     }
 
-                    ReviewRun prevRun = (insertAtIdx > 0) ? runs.get(insertAtIdx - 1) : null;
-                    ReviewRun nextRun = (insertAtIdx < runs.size()) ? runs.get(insertAtIdx) : null;
+                    ReviewRun prevRun = insertAtIdx > 0 ? runs.get(insertAtIdx - 1) : null;
+                    ReviewRun nextRun = insertAtIdx < runs.size() ? runs.get(insertAtIdx) : null;
+
+                    log.debug("[ATTR:INSERT] prevRun={} nextRun={}",
+                            prevRun != null ? "text='" + prevRun.getText().replace("\n", "\\n") + "' ins=" + (prevRun.getInsertSuggestion() != null ? prevRun.getInsertSuggestion().getGroupId() : "null") : "null",
+                            nextRun != null ? "text='" + nextRun.getText().replace("\n", "\\n") + "' ins=" + (nextRun.getInsertSuggestion() != null ? nextRun.getInsertSuggestion().getGroupId() : "null") : "null");
 
                     if (currentInsertGroup == null) {
-                        InsertSuggestion prevAdj = (prevRun != null
-                                && prevRun.getInsertSuggestion() != null
-                                && authorEmail.equals(prevRun.getInsertSuggestion().getActorEmail()))
-                                ? prevRun.getInsertSuggestion() : null;
+                        InsertSuggestion prevAdj =
+                                prevRun != null
+                                        && prevRun.getInsertSuggestion() != null
+                                        && authorEmail.equals(prevRun.getInsertSuggestion().getActorEmail())
+                                        ? prevRun.getInsertSuggestion() : null;
 
-                        InsertSuggestion nextAdj = (nextRun != null
-                                && nextRun.getInsertSuggestion() != null
-                                && authorEmail.equals(nextRun.getInsertSuggestion().getActorEmail()))
-                                ? nextRun.getInsertSuggestion() : null;
+                        InsertSuggestion nextAdj =
+                                nextRun != null
+                                        && nextRun.getInsertSuggestion() != null
+                                        && authorEmail.equals(nextRun.getInsertSuggestion().getActorEmail())
+                                        ? nextRun.getInsertSuggestion() : null;
 
-                        InsertSuggestion adj = (prevAdj != null) ? prevAdj : nextAdj;
+                        InsertSuggestion adj = prevAdj != null ? prevAdj : nextAdj;
 
-                        if (adj != null) {
-                            currentInsertGroup = adj;
-                        } else {
-                            currentInsertGroup = InsertSuggestion.builder()
-                                    .groupId(nextId())
-                                    .actorEmail(authorEmail)
-                                    .createdAt(createdAt)
-                                    .build();
-                        }
+                        currentInsertGroup = adj != null
+                                ? adj
+                                : InsertSuggestion.builder()
+                                .groupId(nextId())
+                                .actorEmail(authorEmail)
+                                .createdAt(createdAt)
+                                .build();
+
+                        log.debug("[ATTR:INSERT] insertGroup resolved: groupId={} (adj={})",
+                                currentInsertGroup.getGroupId(), adj != null ? "reused" : "new");
 
                     } else if (createdAt.compareTo(currentInsertGroup.getCreatedAt()) > 0) {
+                        log.debug("[ATTR:INSERT] updating createdAt on insertGroup groupId={}", currentInsertGroup.getGroupId());
                         currentInsertGroup.setCreatedAt(createdAt);
                     }
 
-                    Map<String, Object> ownAttrs = new LinkedHashMap<>(rawAttrs);
+                    Map<String, Object> ownAttrs = component.getAttributes() != null
+                            ? new LinkedHashMap<>(component.getAttributes())
+                            : new LinkedHashMap<>();
                     Map<String, Object> inheritedSuggestionAttrs = new LinkedHashMap<>();
                     Set<String> extendedGroupIds = new LinkedHashSet<>();
 
-                    for (Iterator<Map.Entry<String, Object>> it = ownAttrs.entrySet().iterator(); it.hasNext();) {
-
+                    for (Iterator<Map.Entry<String, Object>> it = ownAttrs.entrySet().iterator(); it.hasNext(); ) {
                         Map.Entry<String, Object> entry = it.next();
                         String key = entry.getKey();
                         Object value = entry.getValue();
-
                         int finalLocalLogPos = localLogPos;
 
                         FormatSuggestionItem inheritedFormat = formatSuggestions.stream()
                                 .filter(f -> key.equals(f.getAttributeKey()))
                                 .filter(f -> Objects.equals(value, f.getAttributeValue()))
                                 .filter(f -> formatSuggestionShouldInheritInsert(f, finalLocalLogPos))
-                                .findFirst()
-                                .orElse(null);
+                                .findFirst().orElse(null);
 
                         if (inheritedFormat == null) continue;
 
+                        log.info("[ATTR:INSERT:INHERIT] opId={} compIdx={} key={} value={} inheritedFromGroup={}",
+                                opId, compIdx, key, value, inheritedFormat.getGroupId());
+
                         extendFormatGroupForInheritedInsert(
-                                inheritedFormat,
-                                localLogPos,
-                                insertText.length(),
-                                opId,
-                                compIdx,
-                                currentInsertGroup.getGroupId()
+                                inheritedFormat, localLogPos, insertText.length(),
+                                opId, compIdx, currentInsertGroup.getGroupId()
                         );
 
                         inheritedSuggestionAttrs.put(key, value);
@@ -411,54 +495,58 @@ public class AttributionServiceImpl implements AttributionService {
                         Map<String, Object> inherited = intersectAttrs(ownAttrs, prevEffectiveAttrs);
 
                         if (!inherited.isEmpty()) {
+                            log.info("[ATTR:INSERT:CROSS-INHERIT-PREV] opId={} compIdx={} inherited={}", opId, compIdx, inherited);
 
-                            InsertGroupCollection prevGroup =
-                                    collectInsertGroupRunsWithAttrs(
-                                            runs,
-                                            prevRun.getInsertSuggestion().getGroupId(),
-                                            inherited
-                                    );
+                            InsertGroupCollection prevGroup = collectInsertGroupRunsWithAttrs(
+                                    runs, prevRun.getInsertSuggestion().getGroupId(), inherited);
 
                             if (prevGroup != null) {
+                                log.debug("[ATTR:INSERT:CROSS-INHERIT-PREV] prevGroup indices={} start={} end={}",
+                                        prevGroup.indices(), prevGroup.start(), prevGroup.end());
 
-                                FormatSuggestionItem g = FormatSuggestionItem.builder()
-                                        .groupId(nextId())
-                                        .actorEmail(prevRun.getInsertSuggestion().getActorEmail())
-                                        .createdAt(prevRun.getInsertSuggestion().getCreatedAt())
-                                        .attributeKey(attrsToJson(inherited))
-                                        .attributeValue(inherited)
-                                        .references(new ArrayList<>())
-                                        .spans(List.of(
-                                                FormatSuggestionSpan.builder()
-                                                        .start(prevGroup.start)
-                                                        .length((localLogPos + insertText.length()) - prevGroup.start)
-                                                        .build()
-                                        ))
-                                        .dependsOnInsertGroupIds(new ArrayList<>(List.of(
-                                                prevRun.getInsertSuggestion().getGroupId(),
-                                                currentInsertGroup.getGroupId()
-                                        )))
-                                        .build();
+                                for (Map.Entry<String, Object> inheritedEntry : inherited.entrySet()) {
+                                    String inheritedKey = inheritedEntry.getKey();
+                                    Object inheritedValue = inheritedEntry.getValue();
+                                    Map<String, Object> singleInherited = new LinkedHashMap<>(Map.of(inheritedKey, inheritedValue));
 
-                                g.setReferences(appendSuggestionSlices(
-                                        g.getReferences(),
-                                        collectReferencesForRunIndices(runs, prevGroup.indices)
-                                ));
+                                    FormatSuggestionItem g = findOrCreateFormatSuggestionByIdentity(
+                                            formatSuggestions,
+                                            prevRun.getInsertSuggestion().getActorEmail(),
+                                            prevRun.getInsertSuggestion().getCreatedAt(),
+                                            inheritedKey, inheritedValue
+                                    );
 
-                                g.setReferences(addSuggestionSlice(
-                                        g.getReferences(),
-                                        localLogPos,
-                                        0,
-                                        insertText.length(),
-                                        opId,
-                                        compIdx
-                                ));
+                                    List<Reference> prevRefs = collectReferencesForRunIndices(runs, prevGroup.indices());
 
-                                formatSuggestions.add(g);
-                                extendedGroupIds.add(g.getGroupId());
+                                    for (Reference ref : prevRefs) {
+                                        boolean alreadyExists = g.getReferences().stream().anyMatch(existing ->
+                                                existing.getReviewStart() == ref.getReviewStart()
+                                                        && existing.getComponentStart() == ref.getComponentStart()
+                                                        && existing.getLength() == ref.getLength()
+                                                        && Objects.equals(existing.getOpId(), ref.getOpId())
+                                                        && Objects.equals(existing.getComponentIndex(), ref.getComponentIndex())
+                                        );
 
-                                stripAttrsFromRuns(runs, prevGroup.indices, inherited);
+                                        if (!alreadyExists) {
+                                            g.setReferences(appendAndCoalesceSuggestionReference(g.getReferences(), ref));
+                                        }
+                                    }
+
+                                    g.setReferences(addSuggestionReference(
+                                            g.getReferences(), localLogPos, 0, insertText.length(), opId, compIdx));
+
+                                    addInsertDependency(g, prevRun.getInsertSuggestion().getGroupId());
+                                    addInsertDependency(g, currentInsertGroup.getGroupId());
+                                    extendedGroupIds.add(g.getGroupId());
+
+                                    moveAttrsFromBaseToSuggestionForRuns(runs, prevGroup.indices(), singleInherited);
+                                    inheritedSuggestionAttrs.put(inheritedKey, inheritedValue);
+                                }
+
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
+                            } else {
+                                log.warn("[ATTR:INSERT:CROSS-INHERIT-PREV] prevGroup is null for groupId={}",
+                                        prevRun.getInsertSuggestion().getGroupId());
                             }
                         }
                     }
@@ -472,101 +560,85 @@ public class AttributionServiceImpl implements AttributionService {
                         Map<String, Object> inherited = intersectAttrs(ownAttrs, nextEffectiveAttrs);
 
                         if (!inherited.isEmpty()) {
+                            log.info("[ATTR:INSERT:CROSS-INHERIT-NEXT] opId={} compIdx={} inherited={}", opId, compIdx, inherited);
 
-                            InsertGroupCollection nextGroup =
-                                    collectInsertGroupRunsWithAttrs(
-                                            runs,
-                                            nextRun.getInsertSuggestion().getGroupId(),
-                                            inherited
-                                    );
+                            InsertGroupCollection nextGroup = collectInsertGroupRunsWithAttrs(
+                                    runs, nextRun.getInsertSuggestion().getGroupId(), inherited);
 
                             if (nextGroup != null) {
+                                log.debug("[ATTR:INSERT:CROSS-INHERIT-NEXT] nextGroup indices={} start={} end={}",
+                                        nextGroup.indices(), nextGroup.start(), nextGroup.end());
 
-                                FormatSuggestionItem g = FormatSuggestionItem.builder()
-                                        .groupId(nextId())
-                                        .actorEmail(nextRun.getInsertSuggestion().getActorEmail())
-                                        .createdAt(nextRun.getInsertSuggestion().getCreatedAt())
-                                        .attributeKey(attrsToJson(inherited))
-                                        .attributeValue(inherited)
-                                        .references(collectReferencesForRunIndices(runs, nextGroup.indices))
-                                        .spans(List.of(
-                                                FormatSuggestionSpan.builder()
-                                                        .start(localLogPos)
-                                                        .length(nextGroup.end - localLogPos)
-                                                        .build()
-                                        ))
-                                        .dependsOnInsertGroupIds(new ArrayList<>(List.of(
-                                                nextRun.getInsertSuggestion().getGroupId(),
-                                                currentInsertGroup.getGroupId()
-                                        )))
-                                        .build();
+                                for (Map.Entry<String, Object> inheritedEntry : inherited.entrySet()) {
+                                    String inheritedKey = inheritedEntry.getKey();
+                                    Object inheritedValue = inheritedEntry.getValue();
+                                    Map<String, Object> singleInherited = new LinkedHashMap<>(Map.of(inheritedKey, inheritedValue));
 
-                                g.setReferences(addSuggestionSlice(
-                                        g.getReferences(),
-                                        localLogPos,
-                                        0,
-                                        insertText.length(),
-                                        opId,
-                                        compIdx
-                                ));
+                                    FormatSuggestionItem g = findOrCreateFormatSuggestionByIdentity(
+                                            formatSuggestions,
+                                            nextRun.getInsertSuggestion().getActorEmail(),
+                                            nextRun.getInsertSuggestion().getCreatedAt(),
+                                            inheritedKey, inheritedValue
+                                    );
 
-                                formatSuggestions.add(g);
-                                extendedGroupIds.add(g.getGroupId());
+                                    List<Reference> nextRefs = collectReferencesForRunIndices(runs, nextGroup.indices());
 
-                                stripAttrsFromRuns(runs, nextGroup.indices, inherited);
+                                    for (Reference ref : nextRefs) {
+                                        boolean alreadyExists = g.getReferences().stream().anyMatch(existing ->
+                                                existing.getReviewStart() == ref.getReviewStart()
+                                                        && existing.getComponentStart() == ref.getComponentStart()
+                                                        && existing.getLength() == ref.getLength()
+                                                        && Objects.equals(existing.getOpId(), ref.getOpId())
+                                                        && Objects.equals(existing.getComponentIndex(), ref.getComponentIndex())
+                                        );
+
+                                        if (!alreadyExists) {
+                                            g.setReferences(appendAndCoalesceSuggestionReference(g.getReferences(), ref));
+                                        }
+                                    }
+
+                                    g.setReferences(addSuggestionReference(
+                                            g.getReferences(), localLogPos, 0, insertText.length(), opId, compIdx));
+
+                                    addInsertDependency(g, nextRun.getInsertSuggestion().getGroupId());
+                                    addInsertDependency(g, currentInsertGroup.getGroupId());
+                                    extendedGroupIds.add(g.getGroupId());
+
+                                    moveAttrsFromBaseToSuggestionForRuns(runs, nextGroup.indices(), singleInherited);
+                                    inheritedSuggestionAttrs.put(inheritedKey, inheritedValue);
+                                }
+
                                 ownAttrs = subtractAttrs(ownAttrs, inherited);
+                            } else {
+                                log.warn("[ATTR:INSERT:CROSS-INHERIT-NEXT] nextGroup is null for groupId={}",
+                                        nextRun.getInsertSuggestion().getGroupId());
                             }
                         }
                     }
 
                     int shiftLen = insertText.length();
 
-                    /*
-                     * SHIFT EXISTING REFERENCES FIRST
-                     * BEFORE inserting new runs
-                     */
-                    shiftSuggestionSliceReviewStarts(
-                            runs,
-                            insertAbsPos,
-                            shiftLen,
-                            currentInsertGroup.getGroupId()
-                    );
+                    log.debug("[ATTR:INSERT] shifting refs: insertAbsPos={} shiftLen={} excludeGroup={}",
+                            insertAbsPos, shiftLen, currentInsertGroup.getGroupId());
+
+                    shiftSuggestionReferenceReviewStarts(
+                            runs, insertAbsPos, shiftLen, currentInsertGroup.getGroupId());
 
                     shiftFormatSuggestionReferences(
-                            formatSuggestions,
-                            insertAbsPos,
-                            shiftLen,
-                            extendedGroupIds
-                    );
+                            formatSuggestions, insertAbsPos, shiftLen, extendedGroupIds);
 
-                    shiftFormatSpansForInsert(
-                            formatSuggestions,
-                            insertAbsPos,
-                            shiftLen,
-                            extendedGroupIds
-                    );
-
-                    /*
-                     * NOW insert the new runs
-                     */
-                    int componentLocalInsertCursor = 0;
                     String[] parts = insertText.split("\n", -1);
                     int spliceAt = insertAtIdx;
                     int runPos = insertAbsPos;
+                    int componentLocalInsertCursor = 0;
+
+                    log.debug("[ATTR:INSERT] building {} text-chunk(s) from split by newline", parts.length);
 
                     for (int i = 0; i < parts.length; i++) {
-
                         if (!parts[i].isEmpty()) {
                             InsertSuggestion runSuggestion = copyInsertSuggestion(currentInsertGroup);
-
-                            List<SuggestionSlice> runRefs = addSuggestionSlice(
-                                    new ArrayList<>(),
-                                    runPos,
-                                    componentLocalInsertCursor,
-                                    parts[i].length(),
-                                    opId,
-                                    compIdx
-                            );
+                            List<Reference> runRefs = addSuggestionReference(
+                                    new ArrayList<>(), runPos, componentLocalInsertCursor, parts[i].length(), opId, compIdx);
 
                             ReviewRun newRun = ReviewRun.builder()
                                     .text(parts[i])
@@ -577,23 +649,18 @@ public class AttributionServiceImpl implements AttributionService {
                                     .insertSuggestion(runSuggestion)
                                     .build();
 
-                            runs.add(spliceAt++, newRun);
+                            log.debug("[ATTR:INSERT] inserting text-run at spliceAt={} text='{}' logicalStart={} groupId={}",
+                                    spliceAt, parts[i], runPos, currentInsertGroup.getGroupId());
 
+                            runs.add(spliceAt++, newRun);
                             componentLocalInsertCursor += parts[i].length();
                             runPos += parts[i].length();
                         }
 
                         if (i < parts.length - 1) {
                             InsertSuggestion newlineSuggestion = copyInsertSuggestion(currentInsertGroup);
-
-                            List<SuggestionSlice> newlineRefs = addSuggestionSlice(
-                                    new ArrayList<>(),
-                                    runPos,
-                                    componentLocalInsertCursor,
-                                    1,
-                                    opId,
-                                    compIdx
-                            );
+                            List<Reference> newlineRefs = addSuggestionReference(
+                                    new ArrayList<>(), runPos, componentLocalInsertCursor, 1, opId, compIdx);
 
                             ReviewRun newlineRun = ReviewRun.builder()
                                     .text("\n")
@@ -604,56 +671,77 @@ public class AttributionServiceImpl implements AttributionService {
                                     .insertSuggestion(newlineSuggestion)
                                     .build();
 
-                            runs.add(spliceAt++, newlineRun);
+                            log.debug("[ATTR:INSERT] inserting newline-run at spliceAt={} logicalStart={} groupId={}",
+                                    spliceAt, runPos, currentInsertGroup.getGroupId());
 
+                            runs.add(spliceAt++, newlineRun);
                             componentLocalInsertCursor++;
                             runPos++;
                         }
                     }
 
-                    /*
-                     * SHIFT LOGICAL STARTS OF FOLLOWING RUNS
-                     */
                     for (int i = spliceAt; i < runs.size(); i++) {
-                        runs.get(i).setLogicalStart(
-                                runs.get(i).getLogicalStart() + shiftLen
-                        );
+                        runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() + shiftLen);
                     }
 
+                    log.debug("[ATTR:INSERT] shifted {} trailing runs forward by {}", runs.size() - spliceAt, shiftLen);
+                    log.debug("[ATTR:INSERT] localLogPos {} -> {}", localLogPos, localLogPos + insertText.length());
+
                     localLogPos += insertText.length();
-                } else if (component.isDelete()) {
+                    continue;
+                }
+
+                // ── CASE D: delete ────────────────────────────────────────────
+                if (component.isDelete()) {
                     currentInsertGroup = null;
                     currentFormatGroup = null;
+
+                    log.info("[ATTR:DELETE] opId={} compIdx={} deleteLen={} localLogPos={}",
+                            opId, compIdx, component.getDelete(), localLogPos);
 
                     RunPosition deletePos = findRunPos(runs, localLogPos);
                     int ri = deletePos.idx();
                     int deleteOffset = deletePos.offset();
                     int cursor = ri;
 
+                    log.debug("[ATTR:DELETE] findRunPos(localLogPos={}) => idx={} offset={} absPos={}",
+                            localLogPos, ri, deleteOffset, deletePos.absPos());
+
+                    if (ri >= runs.size() && component.getDelete() > 0) {
+                        log.error("[ATTR:DELETE:ERR] opId={} compIdx={} ri={} >= runs.size()={} — delete target out of bounds",
+                                opId, compIdx, ri, runs.size());
+                    }
+
                     if (deleteOffset > 0 && ri < runs.size()) {
+                        log.debug("[ATTR:DELETE] splitting run at idx={} offset={}", ri, deleteOffset);
                         cursor = splitAt(runs, ri, deleteOffset);
+                        log.debug("[ATTR:DELETE] after split cursor={}", cursor);
                     }
 
                     if (currentDeleteGroup == null) {
-                        ReviewRun prevRunD = (cursor > 0) ? runs.get(cursor - 1) : null;
-                        ReviewRun nextRunD = (cursor < runs.size()) ? runs.get(cursor) : null;
+                        ReviewRun prevRunD = cursor > 0 ? runs.get(cursor - 1) : null;
+                        ReviewRun nextRunD = cursor < runs.size() ? runs.get(cursor) : null;
 
-                        DeleteSuggestion prevAdj = (prevRunD != null
-                                && prevRunD.getDeleteSuggestion() != null
-                                && authorEmail.equals(prevRunD.getDeleteSuggestion().getActorEmail()))
-                                ? prevRunD.getDeleteSuggestion()
-                                : null;
+                        DeleteSuggestion prevAdj =
+                                prevRunD != null
+                                        && prevRunD.getDeleteSuggestion() != null
+                                        && authorEmail.equals(prevRunD.getDeleteSuggestion().getActorEmail())
+                                        ? prevRunD.getDeleteSuggestion() : null;
 
-                        DeleteSuggestion nextAdj = (nextRunD != null
-                                && nextRunD.getDeleteSuggestion() != null
-                                && authorEmail.equals(nextRunD.getDeleteSuggestion().getActorEmail()))
-                                ? nextRunD.getDeleteSuggestion()
-                                : null;
+                        DeleteSuggestion nextAdj =
+                                nextRunD != null
+                                        && nextRunD.getDeleteSuggestion() != null
+                                        && authorEmail.equals(nextRunD.getDeleteSuggestion().getActorEmail())
+                                        ? nextRunD.getDeleteSuggestion() : null;
 
                         if (prevAdj != null) {
                             currentDeleteGroup = copyDeleteSuggestion(prevAdj);
+                            log.debug("[ATTR:DELETE] reusing prev deleteGroup groupId={}", currentDeleteGroup.getGroupId());
 
                             if (nextAdj != null && !nextAdj.getGroupId().equals(prevAdj.getGroupId())) {
+                                log.debug("[ATTR:DELETE] merging nextAdj groupId={} into prevAdj groupId={}",
+                                        nextAdj.getGroupId(), prevAdj.getGroupId());
+
                                 if (nextAdj.getCreatedAt().compareTo(currentDeleteGroup.getCreatedAt()) > 0) {
                                     currentDeleteGroup.setCreatedAt(nextAdj.getCreatedAt());
                                 }
@@ -665,16 +753,16 @@ public class AttributionServiceImpl implements AttributionService {
                                     }
                                 }
                             }
-
                         } else if (nextAdj != null) {
                             currentDeleteGroup = copyDeleteSuggestion(nextAdj);
-
+                            log.debug("[ATTR:DELETE] reusing next deleteGroup groupId={}", currentDeleteGroup.getGroupId());
                         } else {
                             currentDeleteGroup = DeleteSuggestion.builder()
                                     .groupId(nextId())
                                     .actorEmail(authorEmail)
                                     .createdAt(createdAt)
                                     .build();
+                            log.debug("[ATTR:DELETE] new deleteGroup groupId={}", currentDeleteGroup.getGroupId());
                         }
                     } else if (createdAt.compareTo(currentDeleteGroup.getCreatedAt()) > 0) {
                         currentDeleteGroup.setCreatedAt(createdAt);
@@ -688,22 +776,17 @@ public class AttributionServiceImpl implements AttributionService {
                         int deleteComponentLocalStart = deleteComponentLength - remaining;
 
                         if (run.getDeleteSuggestion() != null) {
+                            log.debug("[ATTR:DELETE] cursor={} already deleted, skipping", cursor);
                             cursor++;
                             continue;
                         }
 
                         if ("\n".equals(run.getText()) && run.getInsertSuggestion() == null) {
+                            log.debug("[ATTR:DELETE] deleting base newline at cursor={} logicalStart={}", cursor, run.getLogicalStart());
+
                             DeleteSuggestion newlineDelete = copyDeleteSuggestion(currentDeleteGroup);
-
-                            run.setReferences(addSuggestionSlice(
-                                    new ArrayList<>(),
-                                    run.getLogicalStart(),
-                                    deleteComponentLocalStart,
-                                    1,
-                                    opId,
-                                    compIdx
-                            ));
-
+                            run.setReferences(addSuggestionReference(
+                                    new ArrayList<>(), run.getLogicalStart(), deleteComponentLocalStart, 1, opId, compIdx));
                             run.setDeleteSuggestion(newlineDelete);
 
                             remaining--;
@@ -713,6 +796,7 @@ public class AttributionServiceImpl implements AttributionService {
                         }
 
                         if (remaining < run.getText().length()) {
+                            log.debug("[ATTR:DELETE] splitting run at cursor={} remaining={}", cursor, remaining);
                             splitAt(runs, cursor, remaining);
                         }
 
@@ -720,122 +804,117 @@ public class AttributionServiceImpl implements AttributionService {
                         int len = target.getText().length();
 
                         if (target.getInsertSuggestion() != null) {
-
+                            // cancel pending insert
                             int runStart = target.getLogicalStart();
                             int runEnd = runStart + target.getText().length();
-
-                            List<SuggestionSlice> targetSlices =
-                                    target.getReferences().stream()
-                                            .filter(slice -> slice.getRef() != null)
-                                            .toList();
-
+                            List<Reference> targetReferences = target.getReferences();
                             int deleteStartPos = target.getLogicalStart();
                             int deleteLen = target.getText().length();
                             int deleteEndPos = deleteStartPos + deleteLen;
 
+                            log.info("[ATTR:DELETE:CANCEL-INSERT] opId={} compIdx={} cancelInsert groupId={} runStart={} runEnd={} deleteStartPos={} deleteLen={}",
+                                    opId, compIdx,
+                                    target.getInsertSuggestion().getGroupId(),
+                                    runStart, runEnd, deleteStartPos, deleteLen);
+
                             runs.remove(cursor);
 
                             for (int i = cursor; i < runs.size(); i++) {
-                                runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() - len);
+                                runs.get(i).setLogicalStart(runs.get(i).getLogicalStart() - deleteLen);
                             }
 
-                            for (SuggestionSlice slice : targetSlices) {
-                                if (slice.getRef() == null) continue;
+                            deleteRangeFromRunReferencesAndShift(runs, deleteStartPos, deleteLen);
+                            deleteRangeFromFormatSuggestionReferencesAndShift(formatSuggestions, deleteStartPos, deleteLen);
 
-                                int sliceStart = slice.getReviewStart();
-                                int sliceEnd = sliceStart + slice.getLength();
+                            formatSuggestions.removeIf(fmt -> {
+                                boolean empty = fmt.getReferences() == null || fmt.getReferences().isEmpty();
+                                if (empty) log.debug("[ATTR:DELETE:CANCEL-INSERT] removing empty formatSuggestion groupId={}", fmt.getGroupId());
+                                return empty;
+                            });
 
-                                int overlapStart = Math.max(runStart, sliceStart);
-                                int overlapEnd = Math.min(runEnd, sliceEnd);
+                            for (Reference reference : targetReferences) {
+                                int referenceStart = reference.getReviewStart();
+                                int referenceEnd = referenceStart + reference.getLength();
 
-                                if (overlapStart >= overlapEnd) continue;
+                                if (referenceStart < runStart || referenceEnd > runEnd) {
+                                    int overlapStart = Math.max(runStart, referenceStart);
+                                    int overlapEnd = Math.min(runEnd, referenceEnd);
+                                    if (overlapStart >= overlapEnd) continue;
 
-                                int overlapLen = overlapEnd - overlapStart;
+                                    int insertCancelCompStart = reference.getComponentStart() + (overlapStart - referenceStart);
+                                    int insertCancelLen = overlapEnd - overlapStart;
+                                    int deleteCancelCompStart = deleteComponentLocalStart + (overlapStart - runStart);
+
+                                    log.info("[ATTR:DELETE:CANCEL-INSERT] PARTIAL ref opId={} compIdx={} insertCancelCompStart={} insertCancelLen={}",
+                                            reference.getOpId(), reference.getComponentIndex(), insertCancelCompStart, insertCancelLen);
+                                    log.info("[ATTR:DELETE:CANCEL-INSERT] PARTIAL del opId={} compIdx={} deleteCancelCompStart={}",
+                                            opId, compIdx, deleteCancelCompStart);
+
+                                    accumulator.recordInsertCancellation(
+                                            reference.getOpId(), reference.getComponentIndex(),
+                                            insertCancelCompStart, insertCancelLen);
+                                    accumulator.recordDeleteCancellation(
+                                            opId, compIdx, deleteCancelCompStart, insertCancelLen);
+                                    continue;
+                                }
+
+                                log.info("[ATTR:DELETE:CANCEL-INSERT] FULL ref opId={} compIdx={} componentStart={} length={}",
+                                        reference.getOpId(), reference.getComponentIndex(),
+                                        reference.getComponentStart(), reference.getLength());
+                                log.info("[ATTR:DELETE:CANCEL-INSERT] FULL del opId={} compIdx={} deleteCancelCompStart={} length={}",
+                                        opId, compIdx,
+                                        deleteComponentLocalStart + (referenceStart - runStart),
+                                        reference.getLength());
 
                                 accumulator.recordInsertCancellation(
-                                        slice.getRef().opId(),
-                                        slice.getRef().componentIndex(),
-                                        slice.getComponentStart() + (overlapStart - sliceStart),
-                                        overlapLen
-                                );
-
+                                        reference.getOpId(), reference.getComponentIndex(),
+                                        reference.getComponentStart(), reference.getLength());
                                 accumulator.recordDeleteCancellation(
-                                        opId,
-                                        compIdx,
-                                        overlapLen
-                                );
+                                        opId, compIdx,
+                                        deleteComponentLocalStart + (referenceStart - runStart),
+                                        reference.getLength());
                             }
 
                             Iterator<FormatSuggestionItem> fmtIt = formatSuggestions.iterator();
-
                             while (fmtIt.hasNext()) {
                                 FormatSuggestionItem fmt = fmtIt.next();
-
-                                List<SuggestionSlice> fmtRefs = fmt.getReferences();
-                                if (fmtRefs == null || fmtRefs.isEmpty()) continue;
+                                if (fmt.getReferences() == null || fmt.getReferences().isEmpty()) continue;
 
                                 boolean touched = false;
 
-                                for (SuggestionSlice slice : fmtRefs) {
-                                    int sliceDocStart = slice.getReviewStart();
-                                    int sliceDocEnd = sliceDocStart + slice.getLength();
+                                for (Reference reference : fmt.getReferences()) {
+                                    int referenceDocStart = reference.getReviewStart();
+                                    int referenceDocEnd = referenceDocStart + reference.getLength();
+                                    int overlapStart = Math.max(deleteStartPos, referenceDocStart);
+                                    int overlapEnd = Math.min(deleteEndPos, referenceDocEnd);
 
-                                    int overlapStart = Math.max(deleteStartPos, sliceDocStart);
-                                    int overlapEnd = Math.min(deleteEndPos, sliceDocEnd);
-
-                                    if (overlapStart >= overlapEnd) {
-                                        continue;
-                                    }
+                                    if (overlapStart >= overlapEnd) continue;
 
                                     touched = true;
 
-                                    /*
-                                     * Important:
-                                     * If this delete is cancelling pending inserted text, do not blindly
-                                     * cancel the original format op that the insert inherited from.
-                                     *
-                                     * The inserted text cancellation already removes the inserted characters.
-                                     * The format suggestion should be adjusted in runtime spans, but the
-                                     * original format op should not be rewritten unless the overlapped format
-                                     * reference belongs to the inserted op itself.
-                                     */
-                                    boolean formatRefBelongsToDeletedInsert =
-                                            targetSlices.stream().anyMatch(insertSlice ->
-                                                    insertSlice.getRef() != null
-                                                            && slice.getRef() != null
-                                                            && Objects.equals(
-                                                            insertSlice.getRef().opId(),
-                                                            slice.getRef().opId()
-                                                    )
-                                                            && Objects.equals(
-                                                            insertSlice.getRef().componentIndex(),
-                                                            slice.getRef().componentIndex()
-                                                    )
-                                            );
+                                    boolean formatRefBelongsToDeletedInsert = targetReferences.stream().anyMatch(insertReference ->
+                                            Objects.equals(insertReference.getOpId(), reference.getOpId())
+                                                    && Objects.equals(insertReference.getComponentIndex(), reference.getComponentIndex())
+                                    );
 
-                                    if (!formatRefBelongsToDeletedInsert) {
-                                        continue;
-                                    }
+                                    if (!formatRefBelongsToDeletedInsert) continue;
 
-                                    int offsetWithinSlice = overlapStart - sliceDocStart;
+                                    int fmtCancelCompStart = reference.getComponentStart() + (overlapStart - referenceDocStart);
+                                    int fmtCancelLen = overlapEnd - overlapStart;
+
+                                    log.info("[ATTR:DELETE:CANCEL-FORMAT] groupId={} attrKey={} fmtCancelCompStart={} fmtCancelLen={}",
+                                            fmt.getGroupId(), fmt.getAttributeKey(), fmtCancelCompStart, fmtCancelLen);
 
                                     accumulator.recordFormatCancellation(
-                                            slice.getRef().opId(),
-                                            slice.getRef().componentIndex(),
-                                            fmt.getAttributeKey(),
-                                            slice.getComponentStart() + offsetWithinSlice,
-                                            overlapEnd - overlapStart
-                                    );
+                                            reference.getOpId(), reference.getComponentIndex(),
+                                            fmt.getAttributeKey(), fmtCancelCompStart, fmtCancelLen);
                                 }
 
                                 if (touched) {
-                                    deleteRangeFromFormatSuggestionAndShift(
-                                            fmt,
-                                            deleteStartPos,
-                                            deleteLen
-                                    );
-
-                                    if (fmt.getSpans().isEmpty()) {
+                                    fmt.setReferences(deleteRangeFromSuggestionReferencesAndShift(
+                                            fmt.getReferences(), deleteStartPos, deleteLen));
+                                    if (fmt.getReferences().isEmpty()) {
+                                        log.debug("[ATTR:DELETE] removing empty formatSuggestion groupId={}", fmt.getGroupId());
                                         fmtIt.remove();
                                     }
                                 }
@@ -843,46 +922,28 @@ public class AttributionServiceImpl implements AttributionService {
 
                             remaining -= len;
                             localLogPos += len;
+
                         } else {
+                            // mark stable text as delete suggestion
                             DeleteSuggestion runDelete = copyDeleteSuggestion(currentDeleteGroup);
 
-                            target.setReferences(addSuggestionSlice(
-                                    new ArrayList<>(),
-                                    target.getLogicalStart(),
-                                    deleteComponentLocalStart,
-                                    len,
-                                    opId,
-                                    compIdx
-                            ));
+                            log.debug("[ATTR:DELETE:BASE] cursor={} text='{}' logicalStart={} groupId={}",
+                                    cursor, target.getText().replace("\n", "\\n"),
+                                    target.getLogicalStart(), currentDeleteGroup.getGroupId());
 
+                            target.setReferences(addSuggestionReference(
+                                    new ArrayList<>(), target.getLogicalStart(), deleteComponentLocalStart, len, opId, compIdx));
                             target.setDeleteSuggestion(runDelete);
 
                             int deleteStartPos = target.getLogicalStart();
                             int deleteEndPos = deleteStartPos + len;
 
                             for (FormatSuggestionItem fmt : formatSuggestions) {
-                                if (fmt.getSpans() == null || fmt.getSpans().isEmpty()) continue;
-
-                                boolean overlapsCommittedFormattedText = false;
-
-                                for (FormatSuggestionSpan span : fmt.getSpans()) {
-                                    int spanStart = span.getStart();
-                                    int spanEnd = spanStart + span.getLength();
-
-                                    boolean overlap =
-                                            deleteStartPos < spanEnd &&
-                                                    deleteEndPos > spanStart;
-
-                                    if (overlap) {
-                                        overlapsCommittedFormattedText = true;
-                                        break;
-                                    }
-                                }
-
-                                if (overlapsCommittedFormattedText) {
+                                if (formatSuggestionOverlapsRange(fmt, deleteStartPos, deleteEndPos)) {
                                     String deletedGroupId = currentDeleteGroup.getGroupId();
-
                                     if (!fmt.getDependsOnDeleteGroupIds().contains(deletedGroupId)) {
+                                        log.debug("[ATTR:DELETE:BASE] formatSuggestion groupId={} now depends on deleteGroup={}",
+                                                fmt.getGroupId(), deletedGroupId);
                                         fmt.getDependsOnDeleteGroupIds().add(deletedGroupId);
                                     }
                                 }
@@ -893,39 +954,48 @@ public class AttributionServiceImpl implements AttributionService {
                             cursor++;
                         }
                     }
+
+                    if (remaining != 0) {
+                        log.warn("[ATTR:DELETE:WARN] opId={} compIdx={} deleteLen={} — remaining={} after loop (expected 0)",
+                                opId, compIdx, component.getDelete(), remaining);
+                    }
                 }
             }
+
+            log.debug("[ATTR:OP] done opId={} localLogPos={}", opId, localLogPos);
+            logRuns("AFTER_OP:" + opId, runs);
+            logFormatSuggestions("AFTER_OP:" + opId, formatSuggestions);
         }
 
+        // ── PHASE 4 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-4: removing empty format suggestions");
+        int beforeSize = formatSuggestions.size();
+        formatSuggestions.removeIf(fmt -> fmt.getReferences() == null || fmt.getReferences().isEmpty());
+        log.info("[ATTR:PHASE4] removed {} empty formatSuggestions, {} remain", beforeSize - formatSuggestions.size(), formatSuggestions.size());
+
+        // ── PHASE 5 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-5: building preview text for {} format suggestions", formatSuggestions.size());
+
         for (FormatSuggestionItem fmt : formatSuggestions) {
-            fmt.setSpans(
-                    fmt.getSpans().stream()
-                            .filter(s -> s.getLength() > 0)
-                            .collect(Collectors.toCollection(ArrayList::new))
-            );
-
-            fmt.setSpans(mergeAdjacentSpans(fmt.getSpans()));
-        }
-
-        for (FormatSuggestionItem fmt : formatSuggestions) {
-            if (fmt.getPreviewText() != null && !fmt.getPreviewText().isEmpty()) continue;
-
+            fmt.setPreviewText("");
             StringBuilder texts = new StringBuilder();
-            List<FormatSuggestionSpan> orderedSpans = fmt.getSpans().stream()
-                    .sorted(Comparator.comparingInt(FormatSuggestionSpan::getStart))
-                    .toList();
+
+            List<ReviewRange> previewRanges =
+                    deriveMergedRangesFromReferences(fmt.getReferences());
+
             Integer prevSpanEnd = null;
 
-            for (FormatSuggestionSpan span : orderedSpans) {
+            for (ReviewRange span : previewRanges) {
                 int spanStart = span.getStart();
                 int spanEnd = span.getStart() + span.getLength();
 
                 if (prevSpanEnd != null && spanStart > prevSpanEnd) {
-                    Integer finalPrevSpanEnd = prevSpanEnd;
+                    int finalPrevSpanEnd = prevSpanEnd;
                     boolean sawNewlineGap = runs.stream()
                             .filter(r -> r.getDeleteSuggestion() == null)
                             .anyMatch(r -> {
-                                int rs = r.getLogicalStart(), re = rs + r.getText().length();
+                                int rs = r.getLogicalStart();
+                                int re = rs + r.getText().length();
                                 return re > finalPrevSpanEnd && rs < spanStart && "\n".equals(r.getText());
                             });
                     texts.append(sawNewlineGap ? " ↵ " : " ... ");
@@ -933,9 +1003,11 @@ public class AttributionServiceImpl implements AttributionService {
 
                 for (ReviewRun run : runs) {
                     if (run.getDeleteSuggestion() != null) continue;
-                    int rs = run.getLogicalStart(), re = rs + run.getText().length();
-                    if (re > spanStart && rs < spanEnd)
+                    int rs = run.getLogicalStart();
+                    int re = rs + run.getText().length();
+                    if (re > spanStart && rs < spanEnd) {
                         texts.append("\n".equals(run.getText()) ? " ↵ " : run.getText());
+                    }
                 }
 
                 prevSpanEnd = spanEnd;
@@ -944,15 +1016,18 @@ public class AttributionServiceImpl implements AttributionService {
             String preview = texts.toString();
             if (preview.length() > 60) preview = preview.substring(0, 60);
             fmt.setPreviewText(preview);
+
+            log.debug("[ATTR:PHASE5] groupId={} previewText='{}'", fmt.getGroupId(), preview);
         }
 
-        if (!accumulator.isEmpty()) {
-            log.warn("[ATTRIBUTION] Flushing cancellation accumulator for noteId={}", noteId);
+        // ── PHASE 6 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-6: flushing cancellation accumulator (empty={})", accumulator.isEmpty());
 
+        if (!accumulator.isEmpty()) {
             NoteDto freshNote = redisService.getNote(noteId);
             NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-
             boolean changed = accumulator.flushAndReturnChanged(freshNote.revisionLog());
+            log.info("[ATTR:PHASE6] accumulator flush changed={}", changed);
 
             if (changed) {
                 redisService.updateNote(freshNote, noteVersion);
@@ -960,15 +1035,30 @@ public class AttributionServiceImpl implements AttributionService {
             }
         }
 
+        // ── PHASE 7 ───────────────────────────────────────────────────────────
+        log.info("[ATTR:PHASE] PHASE-7: building visual delta");
         Delta visualDelta = buildVisualDelta(runs);
+        logVisualDelta("FINAL", visualDelta);
 
         for (TextOperation textOp : changeTextOps) {
             baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
+
+        log.info("[ATTR:PHASE] buildReviewProjection DONE noteId={} finalDeltaOps={} visualDeltaOps={} formatSuggestions={}",
+                noteId, baseDelta.ops.size(), visualDelta.ops.size(), formatSuggestions.size());
+
         return new ReviewProjection(baseDelta, visualDelta, formatSuggestions);
     }
 
-    private static FormatKeyChangeType getFormatKeyChangeType(FormatSuggestionItem fmt, Object attrValue, Object baseValue) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // Private helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static FormatKeyChangeType getFormatKeyChangeType(
+            FormatSuggestionItem fmt,
+            Object attrValue,
+            Object baseValue
+    ) {
         Object currentSuggestedValue = fmt.getAttributeValue();
         FormatKeyChangeType type;
 
@@ -979,17 +1069,19 @@ public class AttributionServiceImpl implements AttributionService {
         } else {
             type = FormatKeyChangeType.REPLACE;
         }
+
         return type;
     }
 
     private Delta buildVisualDelta(List<ReviewRun> runs) {
+        log.debug("[ATTR:VDELTA] collapsing {} runs", runs.size());
+
         List<ReviewRun> collapsed = new ArrayList<>();
 
         for (ReviewRun run : runs) {
             ReviewRun last = collapsed.isEmpty() ? null : collapsed.get(collapsed.size() - 1);
 
-            Map<String, Object> lastEffective = last != null
-                    ? getEffectiveAttrs(last) : Collections.emptyMap();
+            Map<String, Object> lastEffective = last != null ? getEffectiveAttrs(last) : Collections.emptyMap();
             Map<String, Object> runEffective = getEffectiveAttrs(run);
 
             boolean canMerge = last != null
@@ -1008,18 +1100,16 @@ public class AttributionServiceImpl implements AttributionService {
                     run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
 
             if (canMerge) {
+                log.debug("[ATTR:VDELTA] merging run text='{}' into last text='{}'",
+                        run.getText().replace("\n", "\\n"), last.getText().replace("\n", "\\n"));
                 last.setText(last.getText() + run.getText());
-
-                last.setReferences(appendSuggestionSlices(
-                        last.getReferences(),
-                        run.getReferences()
-                ));
+                last.setReferences(appendSuggestionReferences(last.getReferences(), run.getReferences()));
             } else {
                 collapsed.add(ReviewRun.builder()
                         .text(run.getText())
                         .baseAttributes(new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()))
                         .suggestionAttributes(new LinkedHashMap<>(run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap()))
-                        .references(cloneSuggestionSlices(run.getReferences()))
+                        .references(cloneSuggestionReferences(run.getReferences()))
                         .logicalStart(run.getLogicalStart())
                         .insertSuggestion(run.getInsertSuggestion() != null ? copyInsertSuggestion(run.getInsertSuggestion()) : null)
                         .deleteSuggestion(run.getDeleteSuggestion() != null ? copyDeleteSuggestion(run.getDeleteSuggestion()) : null)
@@ -1027,29 +1117,21 @@ public class AttributionServiceImpl implements AttributionService {
             }
         }
 
+        log.debug("[ATTR:VDELTA] after collapse: {} runs -> {} collapsed", runs.size(), collapsed.size());
+
         Delta delta = new Delta();
 
         for (ReviewRun run : collapsed) {
-            Map<String, Object> baseAttrs = run.getBaseAttributes() != null
-                    ? run.getBaseAttributes()
-                    : Collections.emptyMap();
-            Map<String, Object> suggestionAttrs = run.getSuggestionAttributes() != null
-                    ? run.getSuggestionAttributes()
-                    : Collections.emptyMap();
+            Map<String, Object> baseAttrs = run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap();
+            Map<String, Object> suggestionAttrs = run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap();
 
             boolean isInsertedPending = run.getInsertSuggestion() != null;
             boolean isDeletedPending = run.getDeleteSuggestion() != null && !isInsertedPending;
             boolean isDeletedNewline = "\n".equals(run.getText()) && run.getDeleteSuggestion() != null;
 
             Map<String, Object> attrs = new LinkedHashMap<>();
-
-            if (!baseAttrs.isEmpty()) {
-                attrs.putAll(baseAttrs);
-            }
-
-            if (!suggestionAttrs.isEmpty()) {
-                attrs.putAll(suggestionAttrs);
-            }
+            if (!baseAttrs.isEmpty()) attrs.putAll(baseAttrs);
+            if (!suggestionAttrs.isEmpty()) attrs.putAll(suggestionAttrs);
 
             if (run.getInsertSuggestion() != null) {
                 Map<String, Object> insertPayload = new LinkedHashMap<>();
@@ -1060,6 +1142,11 @@ public class AttributionServiceImpl implements AttributionService {
                 insertPayload.put("baseAttributes", !baseAttrs.isEmpty() ? baseAttrs : null);
                 insertPayload.put("suggestionAttributes", !suggestionAttrs.isEmpty() ? suggestionAttrs : null);
                 attrs.put("suggestion-insert", insertPayload);
+
+                log.debug("[ATTR:VDELTA] RETAIN(insert) text='{}' groupId={} logicalStart={}",
+                        run.getText().replace("\n", "\\n"),
+                        run.getInsertSuggestion().getGroupId(),
+                        run.getLogicalStart());
             }
 
             if (run.getDeleteSuggestion() != null) {
@@ -1076,6 +1163,16 @@ public class AttributionServiceImpl implements AttributionService {
                 } else {
                     attrs.put("suggestion-delete", deletePayload);
                 }
+
+                log.debug("[ATTR:VDELTA] {} text='{}' groupId={} logicalStart={}",
+                        isDeletedNewline ? "INSERT(del-newline)" : "INSERT(delete)",
+                        run.getText().replace("\n", "\\n"),
+                        run.getDeleteSuggestion().getGroupId(),
+                        run.getLogicalStart());
+            }
+
+            if (!isInsertedPending && !isDeletedPending && !isDeletedNewline) {
+                log.debug("[ATTR:VDELTA] RETAIN(base) len={} logicalStart={}", run.getText().length(), run.getLogicalStart());
             }
 
             if (isDeletedPending) {
@@ -1086,6 +1183,7 @@ public class AttributionServiceImpl implements AttributionService {
             }
         }
 
+        log.debug("[ATTR:VDELTA] built delta with {} ops", delta.ops.size());
         return delta;
     }
 }

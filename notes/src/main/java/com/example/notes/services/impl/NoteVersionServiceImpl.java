@@ -101,7 +101,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         );
 
         redisService.setReviewInProgress(noteId, actorEmail, "false");
-        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
+//        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
 
         return noteVersionMapper.toDto(noteVersionRepository.save(newNoteVersion));
     }

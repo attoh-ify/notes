@@ -11,7 +11,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class FormatSuggestionSpan {
-    private int start;
-    private int length;
+public class ReviewRange {
+    int start;
+    int length;
 }

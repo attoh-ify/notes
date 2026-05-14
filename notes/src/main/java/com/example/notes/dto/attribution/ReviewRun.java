@@ -19,7 +19,7 @@ public class ReviewRun {
     @Builder.Default
     private Map<String, Object> suggestionAttributes = new HashMap<>();
     @Builder.Default
-    private List<SuggestionSlice> references = new ArrayList<>();
+    private List<Reference> references = new ArrayList<>();
     private int logicalStart;
     private InsertSuggestion insertSuggestion;
     private DeleteSuggestion deleteSuggestion;

@@ -1,7 +1,6 @@
 package com.example.notes.utils;
 
 import com.example.notes.dto.attribution.*;
-import com.example.notes.dto.note.OpReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
@@ -16,22 +15,34 @@ public class AttributionHelpers {
 
     private static int groupCtr = 0;
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Group counter
+    // ─────────────────────────────────────────────────────────────────────────
+
     public static void resetGroupCounter() {
+        log.debug("[HELPER:CTR] resetGroupCounter: was {}", groupCtr);
         groupCtr = 0;
     }
 
     public static String nextId() {
-        return "g_" + (++groupCtr);
+        String id = "g_" + (++groupCtr);
+        log.debug("[HELPER:CTR] nextId => {}", id);
+        return id;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Attribute helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
     public static boolean attrsEq(Map<String, Object> a, Map<String, Object> b) {
         Map<String, Object> aa = (a != null) ? a : Collections.emptyMap();
         Map<String, Object> bb = (b != null) ? b : Collections.emptyMap();
+
         try {
-            // Sort keys to ensure canonical representation before comparing
             return MAPPER.writeValueAsString(new TreeMap<>(aa))
                     .equals(MAPPER.writeValueAsString(new TreeMap<>(bb)));
         } catch (Exception e) {
+            log.warn("[HELPER:ATTRS] attrsEq JSON error, falling back to equals: {}", e.getMessage());
             return aa.equals(bb);
         }
     }
@@ -42,12 +53,15 @@ public class AttributionHelpers {
     ) {
         Map<String, Object> out = new LinkedHashMap<>();
         if (candidate == null || reference == null) return out;
+
         for (Map.Entry<String, Object> entry : candidate.entrySet()) {
             Object refVal = reference.get(entry.getKey());
             if (Objects.equals(refVal, entry.getValue())) {
                 out.put(entry.getKey(), entry.getValue());
             }
         }
+
+        log.debug("[HELPER:ATTRS] intersectAttrs candidate={} reference={} => {}", candidate, reference, out);
         return out;
     }
 
@@ -56,9 +70,9 @@ public class AttributionHelpers {
             Map<String, Object> remove
     ) {
         Map<String, Object> out = new LinkedHashMap<>(attrs != null ? attrs : Collections.emptyMap());
-        if (remove != null) {
-            remove.keySet().forEach(out::remove);
-        }
+        if (remove != null) remove.keySet().forEach(out::remove);
+
+        log.debug("[HELPER:ATTRS] subtractAttrs attrs={} remove={} => {}", attrs, remove, out);
         return out;
     }
 
@@ -66,12 +80,8 @@ public class AttributionHelpers {
             Map<String, Object> baseAttrs,
             Map<String, Object> deltaAttrs
     ) {
-        Map<String, Object> out = new LinkedHashMap<>(
-                baseAttrs != null ? baseAttrs : Collections.emptyMap()
-        );
-        if (deltaAttrs != null) {
-            out.putAll(deltaAttrs);
-        }
+        Map<String, Object> out = new LinkedHashMap<>(baseAttrs != null ? baseAttrs : Collections.emptyMap());
+        if (deltaAttrs != null) out.putAll(deltaAttrs);
         return out;
     }
 
@@ -79,10 +89,8 @@ public class AttributionHelpers {
         if (run == null) return Collections.emptyMap();
 
         Map<String, Object> out = new LinkedHashMap<>(
-                run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap()
-        );
+                run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
         out.putAll(run.getSuggestionAttributes());
-
         return out;
     }
 
@@ -91,30 +99,47 @@ public class AttributionHelpers {
         try {
             return MAPPER.writeValueAsString(new TreeMap<>(attrs));
         } catch (Exception e) {
-            log.warn("[ATTRS_TO_JSON] Serialisation failed — returning {}", e.getMessage());
             return "{}";
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Run position
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Locate a logical document position inside the ReviewRun list.
+     *
+     * logicalPos ignores deleted-suggestion runs because deleted runs are visible
+     * in review mode but do not count as live document text.
+     *
+     * absPos tracks the visual/runtime position, including deleted runs.
+     */
     public static RunPosition findRunPos(List<ReviewRun> runs, int logicalPos) {
         int pos = 0;
         int absPos = 0;
+
+        if (logicalPos < 0) {
+            log.error("[HELPER:POS] findRunPos called with negative logicalPos={}", logicalPos);
+        }
 
         for (int i = 0; i < runs.size(); i++) {
             ReviewRun r = runs.get(i);
 
             if (r.getDeleteSuggestion() != null) {
-                // Deleted runs occupy visual space but not logical space
                 absPos += r.getText().length();
                 continue;
             }
 
             if (pos == logicalPos) {
+                log.debug("[HELPER:POS] findRunPos(logicalPos={}) => idx={} offset=0 absPos={}", logicalPos, i, absPos);
                 return new RunPosition(i, 0, absPos);
             }
 
             if (pos + r.getText().length() > logicalPos) {
                 int off = logicalPos - pos;
+                log.debug("[HELPER:POS] findRunPos(logicalPos={}) => idx={} offset={} absPos={} (inside run '{}')",
+                        logicalPos, i, off, absPos + off, r.getText().replace("\n", "\\n"));
                 return new RunPosition(i, off, absPos + off);
             }
 
@@ -122,23 +147,46 @@ public class AttributionHelpers {
             absPos += r.getText().length();
         }
 
-        // Past the end of all runs
+        // past end of document
+        log.debug("[HELPER:POS] findRunPos(logicalPos={}) => past end idx={} absPos={} (docLen={})",
+                logicalPos, runs.size(), absPos, pos);
+
+        if (logicalPos > pos) {
+            log.warn("[HELPER:POS:WARN] findRunPos logicalPos={} > computed docLen={} — position is beyond document end",
+                    logicalPos, pos);
+        }
+
         return new RunPosition(runs.size(), 0, absPos);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Run splitting
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Split a run at a specific offset.
+     * Returns the index of the RIGHT half (the run starting at the split point).
+     */
     public static int splitAt(List<ReviewRun> runs, int idx, int offset) {
-        if (idx >= runs.size() || offset <= 0 || offset >= runs.get(idx).getText().length()) {
+        if (idx >= runs.size()) {
+            log.error("[HELPER:SPLIT] splitAt idx={} >= runs.size()={} — out of bounds, no split", idx, runs.size());
             return idx;
         }
 
         ReviewRun r = runs.get(idx);
 
+        if (offset <= 0 || offset >= r.getText().length()) {
+            log.debug("[HELPER:SPLIT] splitAt idx={} offset={} — no split needed (text.len={})",
+                    idx, offset, r.getText().length());
+            return idx;
+        }
+
         int splitAbsPos = r.getLogicalStart() + offset;
 
-        SuggestionSliceSplit split = splitSuggestionSlices(
-                r.getReferences(),
-                splitAbsPos
-        );
+        log.debug("[HELPER:SPLIT] splitAt idx={} offset={} text='{}' logicalStart={} splitAbsPos={}",
+                idx, offset, r.getText().replace("\n", "\\n"), r.getLogicalStart(), splitAbsPos);
+
+        SuggestionReferenceSplit split = splitSuggestionReferences(r.getReferences(), splitAbsPos);
 
         ReviewRun left = ReviewRun.builder()
                 .text(r.getText().substring(0, offset))
@@ -163,8 +211,16 @@ public class AttributionHelpers {
         runs.set(idx, left);
         runs.add(idx + 1, right);
 
+        log.debug("[HELPER:SPLIT] split result left='{}' logicalStart={} right='{}' logicalStart={}",
+                left.getText().replace("\n", "\\n"), left.getLogicalStart(),
+                right.getText().replace("\n", "\\n"), right.getLogicalStart());
+
         return idx + 1;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Newline-only retain check
+    // ─────────────────────────────────────────────────────────────────────────
 
     public static boolean isOnlyNewlineRetain(
             List<ReviewRun> runs,
@@ -185,138 +241,62 @@ public class AttributionHelpers {
             int lenToCheck = Math.min(run.getText().length() - offset, remaining);
 
             for (int j = offset; j < offset + lenToCheck; j++) {
-                if (run.getText().charAt(j) != '\n') return false;
+                if (run.getText().charAt(j) != '\n') {
+                    log.debug("[HELPER:NL] isOnlyNewlineRetain logicalStart={} retainLength={} => false (non-newline at run {})",
+                            logicalStart, retainLength, i);
+                    return false;
+                }
             }
 
             remaining -= lenToCheck;
             offset = 0;
         }
 
-        return sawOverlap;
+        boolean result = sawOverlap;
+        log.debug("[HELPER:NL] isOnlyNewlineRetain logicalStart={} retainLength={} => {}", logicalStart, retainLength, result);
+        return result;
     }
 
-    public static int findAdjacentSpanIndex(List<FormatSuggestionSpan> spans, int spanStart) {
-        for (int i = 0; i < spans.size(); i++) {
-            FormatSuggestionSpan s = spans.get(i);
-            if (s.getStart() + s.getLength() == spanStart) {
-                return i;
-            }
-        }
-        return -1;
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // Format range helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
-    public static List<FormatSuggestionSpan> mergeAdjacentSpans(List<FormatSuggestionSpan> spans) {
-        if (spans == null || spans.isEmpty()) return new ArrayList<>();
 
-        List<FormatSuggestionSpan> sorted = spans.stream()
-                .sorted(Comparator.comparingInt(FormatSuggestionSpan::getStart))
+    public static List<ReviewRange> mergeOverlappingRanges(List<ReviewRange> ranges) {
+        if (ranges == null || ranges.isEmpty()) return new ArrayList<>();
+
+        List<ReviewRange> sorted = ranges.stream()
+                .sorted(Comparator.comparingInt(ReviewRange::getStart))
                 .toList();
 
-        List<FormatSuggestionSpan> merged = new ArrayList<>();
-        for (FormatSuggestionSpan span : sorted) {
+        List<ReviewRange> merged = new ArrayList<>();
+
+        for (ReviewRange range : sorted) {
+            int start = range.getStart();
+            int end = start + range.getLength();
+
             if (merged.isEmpty()) {
-                merged.add(FormatSuggestionSpan.builder()
-                        .start(span.getStart()).length(span.getLength()).build());
+                merged.add(ReviewRange.builder().start(start).length(range.getLength()).build());
+                continue;
+            }
+
+            ReviewRange last = merged.get(merged.size() - 1);
+            int lastStart = last.getStart();
+            int lastEnd = lastStart + last.getLength();
+
+            if (start <= lastEnd) {
+                last.setLength(Math.max(lastEnd, end) - lastStart);
             } else {
-                FormatSuggestionSpan last = merged.get(merged.size() - 1);
-                if (last.getStart() + last.getLength() == span.getStart()) {
-                    // Contiguous — extend the last span
-                    last.setLength(last.getLength() + span.getLength());
-                } else {
-                    merged.add(FormatSuggestionSpan.builder()
-                            .start(span.getStart()).length(span.getLength()).build());
-                }
+                merged.add(ReviewRange.builder().start(start).length(range.getLength()).build());
             }
         }
+
         return merged;
     }
-
-    public static void shiftFormatSpansForInsert(
-            List<FormatSuggestionItem> formatSuggestions,
-            int insertStart,
-            int insertLength,
-            Set<String> skipGroupIds
-    ) {
-        int insertEnd = insertStart + insertLength;
-
-        for (FormatSuggestionItem fmt : formatSuggestions) {
-            if (skipGroupIds != null && skipGroupIds.contains(fmt.getGroupId())) {
-                continue;
-            }
-
-            List<FormatSuggestionSpan> nextSpans = new ArrayList<>();
-
-            for (FormatSuggestionSpan span : fmt.getSpans()) {
-                int spanStart = span.getStart();
-                int spanEnd = span.getStart() + span.getLength();
-
-                if (spanEnd <= insertStart) {
-                    // Entirely before — unchanged
-                    nextSpans.add(FormatSuggestionSpan.builder()
-                            .start(spanStart).length(span.getLength()).build());
-
-                } else if (spanStart >= insertStart) {
-                    // Entirely after — shift right
-                    nextSpans.add(FormatSuggestionSpan.builder()
-                            .start(spanStart + insertLength).length(span.getLength()).build());
-
-                } else {
-                    // Straddles — split into left and right
-                    int leftLen = insertStart - spanStart;
-                    int rightLen = spanEnd - insertStart;
-
-                    if (leftLen > 0) {
-                        nextSpans.add(FormatSuggestionSpan.builder()
-                                .start(spanStart).length(leftLen).build());
-                    }
-                    if (rightLen > 0) {
-                        nextSpans.add(FormatSuggestionSpan.builder()
-                                .start(insertEnd).length(rightLen).build());
-                    }
-                }
-            }
-
-            List<FormatSuggestionSpan> merged = mergeAdjacentSpans(nextSpans);
-            fmt.setSpans(merged);
-        }
-    }
-
-    public static void removeRangeFromFormatSuggestion(
-            FormatSuggestionItem item,
-            int start,
-            int length
-    ) {
-        int end = start + length;
-
-        List<FormatSuggestionSpan> next = new ArrayList<>();
-
-        for (FormatSuggestionSpan span : item.getSpans()) {
-            int spanStart = span.getStart();
-            int spanEnd = span.getStart() + span.getLength();
-
-            if (spanEnd <= start || spanStart >= end) {
-                // Entirely outside the removed range — keep unchanged
-                next.add(FormatSuggestionSpan.builder()
-                        .start(spanStart).length(span.getLength()).build());
-                continue;
-            }
-
-            // Overlaps the range — keep only the portions outside it
-            int leftLen = Math.max(0, start - spanStart);
-            int rightLen = Math.max(0, spanEnd - end);
-
-            if (leftLen > 0) {
-                next.add(FormatSuggestionSpan.builder()
-                        .start(spanStart).length(leftLen).build());
-            }
-            if (rightLen > 0) {
-                next.add(FormatSuggestionSpan.builder()
-                        .start(end).length(rightLen).build());
-            }
-        }
-
-        item.setSpans(next);
-    }
+    
+    // ─────────────────────────────────────────────────────────────────────────
+    // Insert group collection
+    // ─────────────────────────────────────────────────────────────────────────
 
     public static InsertGroupCollection collectInsertGroupRunsWithAttrs(
             List<ReviewRun> runs,
@@ -329,13 +309,13 @@ public class AttributionHelpers {
 
         for (int i = 0; i < runs.size(); i++) {
             ReviewRun run = runs.get(i);
+
             if (run.getInsertSuggestion() == null
-                    || !run.getInsertSuggestion().getGroupId().equals(groupId)) {
-                continue;
-            }
+                    || !run.getInsertSuggestion().getGroupId().equals(groupId)) continue;
 
             Map<String, Object> effectiveAttrs = getEffectiveAttrs(run);
             Map<String, Object> carried = intersectAttrs(effectiveAttrs, attrs);
+
             if (carried.isEmpty()) continue;
 
             indices.add(i);
@@ -344,45 +324,502 @@ public class AttributionHelpers {
         }
 
         if (indices.isEmpty()) {
+            log.debug("[HELPER:COLLECT] collectInsertGroupRunsWithAttrs groupId={} — no matching runs", groupId);
             return null;
         }
 
+        log.debug("[HELPER:COLLECT] collectInsertGroupRunsWithAttrs groupId={} indices={} start={} end={}",
+                groupId, indices, start, end);
         return new InsertGroupCollection(indices, start, end);
     }
 
-    public static void stripAttrsFromRuns(
+    public static void moveAttrsFromBaseToSuggestionForRuns(
             List<ReviewRun> runs,
             List<Integer> indices,
             Map<String, Object> attrs
     ) {
-        String attrKeys = String.join(",", attrs.keySet());
-        for (int idx : indices) {
+        if (runs == null || indices == null || attrs == null || attrs.isEmpty()) return;
+
+        for (Integer idx : indices) {
+            if (idx == null || idx < 0 || idx >= runs.size()) {
+                log.warn("[HELPER:MOVE] moveAttrsFromBaseToSuggestion: idx={} out of range (runs.size={})", idx, runs.size());
+                continue;
+            }
+
             ReviewRun run = runs.get(idx);
-            for (String key : attrs.keySet()) {
-                // Remove from suggestionAttributes first (pending layer), then base
-                if (run.getSuggestionAttributes() != null
-                        && run.getSuggestionAttributes().containsKey(key)) {
-                    run.getSuggestionAttributes().remove(key);
-                } else if (run.getBaseAttributes() != null) {
-                    run.getBaseAttributes().remove(key);
+            Map<String, Object> base = new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
+            Map<String, Object> suggestion = new LinkedHashMap<>(run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap());
+
+            for (Map.Entry<String, Object> entry : attrs.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                if (Objects.equals(base.get(key), value)) {
+                    base.remove(key);
+                    log.debug("[HELPER:MOVE] run idx={} moved key={} from base to suggestion", idx, key);
+                }
+                suggestion.put(key, value);
+            }
+
+            run.setBaseAttributes(base);
+            run.setSuggestionAttributes(suggestion);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Format suggestion find/create
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static FormatSuggestionItem findOrCreateFormatSuggestionByIdentity(
+            List<FormatSuggestionItem> formatSuggestions,
+            String actorEmail,
+            String createdAt,
+            String attrKey,
+            Object attrValue
+    ) {
+        FormatSuggestionItem existing = formatSuggestions.stream()
+                .filter(f -> actorEmail.equals(f.getActorEmail()))
+                .filter(f -> attrKey.equals(f.getAttributeKey()))
+                .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
+                .findFirst().orElse(null);
+
+        if (existing != null) {
+            log.debug("[HELPER:FMT] findOrCreateByIdentity FOUND groupId={} actor={} key={} value={}",
+                    existing.getGroupId(), actorEmail, attrKey, attrValue);
+
+            if (createdAt != null && existing.getCreatedAt() != null
+                    && createdAt.compareTo(existing.getCreatedAt()) > 0) {
+                existing.setCreatedAt(createdAt);
+            }
+            return existing;
+        }
+
+        FormatSuggestionItem created = FormatSuggestionItem.builder()
+                .groupId(nextId())
+                .actorEmail(actorEmail)
+                .createdAt(createdAt)
+                .attributeKey(attrKey)
+                .attributeValue(attrValue)
+                .references(new ArrayList<>())
+                .previewText("")
+                .dependsOnInsertGroupIds(new ArrayList<>())
+                .dependsOnDeleteGroupIds(new ArrayList<>())
+                .build();
+
+        formatSuggestions.add(created);
+        log.debug("[HELPER:FMT] findOrCreateByIdentity CREATED groupId={} actor={} key={} value={}",
+                created.getGroupId(), actorEmail, attrKey, attrValue);
+        return created;
+    }
+
+    public static void addInsertDependency(FormatSuggestionItem item, String insertGroupId) {
+        if (item == null || insertGroupId == null) return;
+        if (!item.getDependsOnInsertGroupIds().contains(insertGroupId)) {
+            item.getDependsOnInsertGroupIds().add(insertGroupId);
+            log.debug("[HELPER:FMT] addInsertDependency groupId={} -> insertGroupId={}", item.getGroupId(), insertGroupId);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Reference helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static List<Reference> cloneSuggestionReferences(List<Reference> references) {
+        if (references == null) return new ArrayList<>();
+        return references.stream().map(AttributionHelpers::cloneReference)
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    public static Reference cloneReference(Reference s) {
+        if (s == null) return null;
+        return Reference.builder()
+                .reviewStart(s.getReviewStart())
+                .componentStart(s.getComponentStart())
+                .length(s.getLength())
+                .opId(s.getOpId())
+                .componentIndex(s.getComponentIndex())
+                .build();
+    }
+
+    /**
+     * Split source references when a ReviewRun is split.
+     * Left run keeps references entirely before splitAbsPos.
+     * Right run keeps references at or after splitAbsPos.
+     * References straddling splitAbsPos are split into left and right pieces.
+     */
+    public static SuggestionReferenceSplit splitSuggestionReferences(
+            List<Reference> references,
+            int splitAbsPos
+    ) {
+        List<Reference> left = new ArrayList<>();
+        List<Reference> right = new ArrayList<>();
+
+        if (references == null || references.isEmpty()) {
+            return new SuggestionReferenceSplit(left, right);
+        }
+
+        for (Reference reference : references) {
+            int start = reference.getReviewStart();
+            int end = start + reference.getLength();
+
+            if (end <= splitAbsPos) {
+                left.add(cloneReference(reference));
+
+            } else if (start >= splitAbsPos) {
+                right.add(cloneReference(reference));
+
+            } else {
+                int leftLen = splitAbsPos - start;
+                int rightLen = end - splitAbsPos;
+
+                log.debug("[HELPER:REFS] splitSuggestionReferences at absPos={} splitting ref [{}+{}] into left[{}] right[{}]",
+                        splitAbsPos, start, reference.getLength(), leftLen, rightLen);
+
+                if (leftLen > 0) {
+                    left.add(Reference.builder()
+                            .reviewStart(start)
+                            .componentStart(reference.getComponentStart())
+                            .length(leftLen)
+                            .opId(reference.getOpId())
+                            .componentIndex(reference.getComponentIndex())
+                            .build());
+                }
+
+                if (rightLen > 0) {
+                    right.add(Reference.builder()
+                            .reviewStart(splitAbsPos)
+                            .componentStart(reference.getComponentStart() + leftLen)
+                            .length(rightLen)
+                            .opId(reference.getOpId())
+                            .componentIndex(reference.getComponentIndex())
+                            .build());
                 }
             }
         }
+
+        log.debug("[HELPER:REFS] splitSuggestionReferences splitAbsPos={} left={} right={}", splitAbsPos, left, right);
+        return new SuggestionReferenceSplit(left, right);
     }
+
+    public static List<Reference> appendSuggestionReferences(
+            List<Reference> base,
+            List<Reference> incoming
+    ) {
+        List<Reference> out = new ArrayList<>();
+        if (base != null) for (Reference s : base) out = appendAndCoalesceSuggestionReference(out, s);
+        if (incoming != null) for (Reference s : incoming) out = appendAndCoalesceSuggestionReference(out, s);
+        return out;
+    }
+
+    public static InsertSuggestion copyInsertSuggestion(InsertSuggestion src) {
+        if (src == null) return null;
+        return InsertSuggestion.builder()
+                .groupId(src.getGroupId())
+                .actorEmail(src.getActorEmail())
+                .createdAt(src.getCreatedAt())
+                .build();
+    }
+
+    public static DeleteSuggestion copyDeleteSuggestion(DeleteSuggestion src) {
+        if (src == null) return null;
+        return DeleteSuggestion.builder()
+                .groupId(src.getGroupId())
+                .actorEmail(src.getActorEmail())
+                .createdAt(src.getCreatedAt())
+                .build();
+    }
+
+    /**
+     * Add a provenance reference for a suggestion.
+     *
+     * reviewStart    = where this slice appears in the runtime review document.
+     * componentStart = where this slice starts inside the original op component text.
+     */
+    public static List<Reference> addSuggestionReference(
+            List<Reference> references,
+            int reviewStart,
+            int componentStart,
+            int length,
+            String opId,
+            int componentIndex
+    ) {
+        List<Reference> out = cloneSuggestionReferences(references);
+
+        if (length <= 0) {
+            log.warn("[HELPER:REFS] addSuggestionReference: length={} <= 0 — skipping (opId={} compIdx={} reviewStart={} componentStart={})",
+                    length, opId, componentIndex, reviewStart, componentStart);
+            return out;
+        }
+
+        if (reviewStart < 0) {
+            log.error("[HELPER:REFS:ERR] addSuggestionReference: reviewStart={} < 0 — opId={} compIdx={} componentStart={} length={}",
+                    reviewStart, opId, componentIndex, componentStart, length);
+        }
+
+        if (componentStart < 0) {
+            log.error("[HELPER:REFS:ERR] addSuggestionReference: componentStart={} < 0 — opId={} compIdx={} reviewStart={} length={}",
+                    componentStart, opId, componentIndex, reviewStart, length);
+        }
+
+        Reference incoming = Reference.builder()
+                .reviewStart(reviewStart)
+                .componentStart(componentStart)
+                .length(length)
+                .opId(opId)
+                .componentIndex(componentIndex)
+                .build();
+
+        List<Reference> result = appendAndCoalesceSuggestionReference(out, incoming);
+
+        log.debug("[HELPER:REFS] addSuggestionReference opId={} compIdx={} reviewStart={} componentStart={} length={} => refs={}",
+                opId, componentIndex, reviewStart, componentStart, length, result);
+
+        return result;
+    }
+
+    public static List<Reference> appendAndCoalesceSuggestionReference(
+            List<Reference> references,
+            Reference incoming
+    ) {
+        List<Reference> out = cloneSuggestionReferences(references);
+
+        if (incoming == null || incoming.getLength() <= 0) return out;
+
+        if (!out.isEmpty()) {
+            Reference last = out.get(out.size() - 1);
+            if (canCoalesceSuggestionReferences(last, incoming)) {
+                log.debug("[HELPER:REFS] coalescing refs: last=[{}+{}] + incoming=[{}+{}]",
+                        last.getReviewStart(), last.getLength(),
+                        incoming.getReviewStart(), incoming.getLength());
+                last.setLength(last.getLength() + incoming.getLength());
+                return out;
+            }
+        }
+
+        out.add(cloneReference(incoming));
+        return out;
+    }
+
+    /**
+     * References can be coalesced only when they are adjacent in both:
+     *   - runtime review space (reviewStart)
+     *   - original component space (componentStart)
+     * And come from the same op and component.
+     */
+    public static boolean canCoalesceSuggestionReferences(Reference left, Reference right) {
+        if (left == null || right == null) return false;
+
+        boolean sameRef = Objects.equals(left.getOpId(), right.getOpId())
+                && Objects.equals(left.getComponentIndex(), right.getComponentIndex());
+        boolean adjacentReview = left.getReviewStart() + left.getLength() == right.getReviewStart();
+        boolean adjacentComponent = left.getComponentStart() + left.getLength() == right.getComponentStart();
+
+        return sameRef && adjacentReview && adjacentComponent;
+    }
+
+    /**
+     * When new text is inserted, existing suggestion references after the insert
+     * point must move forward.
+     * References belonging to the newly inserted group are skipped.
+     */
+    public void shiftSuggestionReferenceReviewStarts(
+            List<ReviewRun> runs,
+            int insertPos,
+            int shiftLen,
+            String insertedGroupId
+    ) {
+        if (shiftLen <= 0) {
+            log.warn("[HELPER:SHIFT] shiftSuggestionReferenceReviewStarts: shiftLen={} — no-op", shiftLen);
+            return;
+        }
+
+        int shiftedCount = 0;
+
+        for (ReviewRun run : runs) {
+            boolean belongsToInsertedGroup = run.getInsertSuggestion() != null
+                    && Objects.equals(insertedGroupId, run.getInsertSuggestion().getGroupId());
+
+            boolean hasSuggestionRefs = run.getInsertSuggestion() != null || run.getDeleteSuggestion() != null;
+
+            if (!hasSuggestionRefs || belongsToInsertedGroup) continue;
+
+            for (Reference reference : run.getReferences()) {
+                if (reference.getReviewStart() >= insertPos) {
+                    log.debug("[HELPER:SHIFT] shifting ref reviewStart {} -> {} for run text='{}'",
+                            reference.getReviewStart(), reference.getReviewStart() + shiftLen,
+                            run.getText().replace("\n", "\\n"));
+                    reference.setReviewStart(reference.getReviewStart() + shiftLen);
+                    shiftedCount++;
+                }
+            }
+        }
+
+        log.debug("[HELPER:SHIFT] shiftSuggestionReferenceReviewStarts insertPos={} shiftLen={} shiftedCount={}",
+                insertPos, shiftLen, shiftedCount);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Range derivation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static List<ReviewRange> deriveMergedRangesFromReferences(
+            List<Reference> references
+    ) {
+        if (references == null || references.isEmpty()) return new ArrayList<>();
+
+        List<ReviewRange> raw = new ArrayList<>();
+        for (Reference ref : references) {
+            if (ref == null || ref.getLength() <= 0) continue;
+            raw.add(ReviewRange.builder().start(ref.getReviewStart()).length(ref.getLength()).build());
+        }
+
+        List<ReviewRange> merged = mergeOverlappingRanges(raw);
+        log.debug("[HELPER:range] deriveMergedRangesFromReferences refs={} => ranges={}", references, merged);
+        return merged;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Format suggestion range checks
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static boolean formatSuggestionCoversRange(
+            FormatSuggestionItem item,
+            int targetStart,
+            int targetLength
+    ) {
+        if (item == null || targetLength <= 0) return false;
+        int targetEnd = targetStart + targetLength;
+
+        for (ReviewRange range : deriveMergedRangesFromReferences(item.getReferences())) {
+            int refStart = range.getStart();
+            int refEnd = refStart + range.getLength();
+
+            if (refStart <= targetStart && refEnd >= targetEnd) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean formatSuggestionOverlapsRange(
+            FormatSuggestionItem item,
+            int targetStart,
+            int targetEnd
+    ) {
+        if (item == null || targetEnd <= targetStart) return false;
+
+        for (ReviewRange range : deriveMergedRangesFromReferences(item.getReferences())) {
+            int refStart = range.getStart();
+            int refEnd = refStart + range.getLength();
+
+            if (targetStart < refEnd && targetEnd > refStart) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean formatSuggestionTouchesOrOverlapsRange(
+            FormatSuggestionItem item,
+            int targetStart,
+            int targetEnd
+    ) {
+        if (item == null || targetEnd <= targetStart) return false;
+
+        for (ReviewRange range : deriveMergedRangesFromReferences(item.getReferences())) {
+            int refStart = range.getStart();
+            int refEnd = refStart + range.getLength();
+
+            if (targetStart <= refEnd && targetEnd >= refStart) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Format suggestion find/create (compatibility)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static FormatSuggestionItem findOrCreateCompatibleFormatSuggestion(
+            List<FormatSuggestionItem> formatSuggestions,
+            String actorEmail,
+            String createdAt,
+            String attrKey,
+            Object attrValue,
+            int rangeStart,
+            int rangeEnd
+    ) {
+        List<FormatSuggestionItem> matches = formatSuggestions.stream()
+                .filter(f -> actorEmail.equals(f.getActorEmail()))
+                .filter(f -> attrKey.equals(f.getAttributeKey()))
+                .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
+                .filter(f -> formatSuggestionTouchesOrOverlapsRange(f, rangeStart, rangeEnd))
+                .toList();
+
+        if (matches.isEmpty()) {
+            FormatSuggestionItem created = FormatSuggestionItem.builder()
+                    .groupId(nextId())
+                    .actorEmail(actorEmail)
+                    .createdAt(createdAt)
+                    .attributeKey(attrKey)
+                    .attributeValue(attrValue)
+                    .references(new ArrayList<>())
+                    .previewText("")
+                    .dependsOnInsertGroupIds(new ArrayList<>())
+                    .dependsOnDeleteGroupIds(new ArrayList<>())
+                    .build();
+
+            formatSuggestions.add(created);
+            log.debug("[HELPER:FMT] findOrCreateCompatible CREATED groupId={} actor={} key={} value={} range=[{},{}]",
+                    created.getGroupId(), actorEmail, attrKey, attrValue, rangeStart, rangeEnd);
+            return created;
+        }
+
+        FormatSuggestionItem primary = matches.get(0);
+        log.debug("[HELPER:FMT] findOrCreateCompatible FOUND primary groupId={} matches={}",
+                primary.getGroupId(), matches.size());
+
+        for (int i = 1; i < matches.size(); i++) {
+            FormatSuggestionItem other = matches.get(i);
+            log.debug("[HELPER:FMT] findOrCreateCompatible merging groupId={} into primary groupId={}",
+                    other.getGroupId(), primary.getGroupId());
+
+            primary.setReferences(appendSuggestionReferences(primary.getReferences(), other.getReferences()));
+
+            for (String dep : other.getDependsOnInsertGroupIds()) {
+                if (!primary.getDependsOnInsertGroupIds().contains(dep)) primary.getDependsOnInsertGroupIds().add(dep);
+            }
+
+            for (String dep : other.getDependsOnDeleteGroupIds()) {
+                if (!primary.getDependsOnDeleteGroupIds().contains(dep)) primary.getDependsOnDeleteGroupIds().add(dep);
+            }
+
+            if (other.getCreatedAt().compareTo(primary.getCreatedAt()) > 0) primary.setCreatedAt(other.getCreatedAt());
+
+            formatSuggestions.removeIf(f -> f.getGroupId().equals(other.getGroupId()));
+        }
+        return primary;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Format suggestion inherit insert
+    // ─────────────────────────────────────────────────────────────────────────
 
     public static boolean formatSuggestionShouldInheritInsert(
             FormatSuggestionItem group,
             int insertPos
     ) {
-        if (group == null || group.getSpans() == null) {
-            return false;
-        }
+        if (group == null) return false;
 
-        for (FormatSuggestionSpan span : group.getSpans()) {
-            int spanStart = span.getStart();
-            int spanEnd = spanStart + span.getLength();
-
-            if (insertPos >= spanStart && insertPos <= spanEnd) {
+        for (ReviewRange range : deriveMergedRangesFromReferences(group.getReferences())) {
+            int rangeStart = range.getStart();
+            int rangeEnd = rangeStart + range.getLength();
+            if (insertPos >= rangeStart && insertPos <= rangeEnd) {
+                log.debug("[HELPER:FMT] formatSuggestionShouldInheritInsert groupId={} insertPos={} => true (range [{},{}])",
+                        group.getGroupId(), insertPos, rangeStart, rangeEnd);
                 return true;
             }
         }
@@ -398,352 +835,156 @@ public class AttributionHelpers {
             int compIdx,
             String currentInsertGroupId
     ) {
-        if (group == null || insertLength <= 0) {
-            return;
-        }
+        if (group == null || insertLength <= 0) return;
 
-        group.setReferences(
-                shiftSuggestionSlicesForInsert(
-                        group.getReferences(),
-                        insertPos,
-                        insertLength
-                )
-        );
+        log.info("[HELPER:FMT] extendFormatGroupForInheritedInsert groupId={} insertPos={} insertLength={} opId={} compIdx={} insertGroupId={}",
+                group.getGroupId(), insertPos, insertLength, opId, compIdx, currentInsertGroupId);
 
-        List<FormatSuggestionSpan> nextSpans = new ArrayList<>();
-        boolean absorbed = false;
+        List<Reference> before = cloneSuggestionReferences(group.getReferences());
 
-        for (FormatSuggestionSpan span : group.getSpans()) {
-            int spanStart = span.getStart();
-            int spanEnd = spanStart + span.getLength();
+        group.setReferences(shiftSuggestionReferencesForInsert(group.getReferences(), insertPos, insertLength));
 
-            if (!absorbed && insertPos >= spanStart && insertPos <= spanEnd) {
-                nextSpans.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart)
-                                .length(span.getLength() + insertLength)
-                                .build()
-                );
-                absorbed = true;
-            } else if (spanStart >= insertPos) {
-                nextSpans.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart + insertLength)
-                                .length(span.getLength())
-                                .build()
-                );
-            } else {
-                nextSpans.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart)
-                                .length(span.getLength())
-                                .build()
-                );
-            }
-        }
+        log.debug("[HELPER:FMT] extendFormat: refs before shift={} after shift={}",
+                before, group.getReferences());
 
-        if (!absorbed) {
-            return;
-        }
-
-        group.setSpans(mergeAdjacentSpans(nextSpans));
-
-        group.setReferences(addSuggestionSlice(
-                group.getReferences(),
-                insertPos,
-                0,
-                insertLength,
-                opId,
-                compIdx
-        ));
+        group.setReferences(addSuggestionReference(
+                group.getReferences(), insertPos, 0, insertLength, opId, compIdx));
 
         if (!group.getDependsOnInsertGroupIds().contains(currentInsertGroupId)) {
             group.getDependsOnInsertGroupIds().add(currentInsertGroupId);
         }
     }
 
-    public static void deleteRangeFromFormatSuggestionAndShift(
-            FormatSuggestionItem item,
+    // ─────────────────────────────────────────────────────────────────────────
+    // Reference range manipulation
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static List<Reference> removeRangeFromSuggestionReferencesWithoutShift(
+            List<Reference> references,
+            int removeStart,
+            int removeLength
+    ) {
+        List<Reference> out = new ArrayList<>();
+
+        if (references == null || references.isEmpty() || removeLength <= 0) {
+            return cloneSuggestionReferences(references);
+        }
+
+        int removeEnd = removeStart + removeLength;
+
+        for (Reference reference : references) {
+            if (reference == null) continue;
+
+            int referenceStart = reference.getReviewStart();
+            int referenceEnd = referenceStart + reference.getLength();
+
+            if (referenceEnd <= removeStart || referenceStart >= removeEnd) {
+                out = appendAndCoalesceSuggestionReference(out, reference);
+                continue;
+            }
+
+            int leftLen = Math.max(0, removeStart - referenceStart);
+            int rightLen = Math.max(0, referenceEnd - removeEnd);
+
+            log.debug("[HELPER:REFS] removeRangeWithoutShift ref=[{}+{}] removeRange=[{},{}] leftLen={} rightLen={}",
+                    referenceStart, reference.getLength(), removeStart, removeEnd, leftLen, rightLen);
+
+            if (leftLen > 0) {
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(referenceStart)
+                                .componentStart(reference.getComponentStart())
+                                .length(leftLen)
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
+            }
+
+            if (rightLen > 0) {
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(removeEnd)
+                                .componentStart(reference.getComponentStart() + Math.max(0, removeEnd - referenceStart))
+                                .length(rightLen)
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
+            }
+        }
+
+        log.debug("[HELPER:REFS] removeRangeWithoutShift removeStart={} removeLength={} in={} out={}",
+                removeStart, removeLength, references, out);
+        return out;
+    }
+
+    public static List<Reference> deleteRangeFromSuggestionReferencesAndShift(
+            List<Reference> references,
             int deleteStart,
             int deleteLength
     ) {
-        if (item == null || item.getSpans() == null || deleteLength <= 0) {
-            return;
+        List<Reference> out = new ArrayList<>();
+
+        if (references == null || references.isEmpty() || deleteLength <= 0) {
+            return cloneSuggestionReferences(references);
         }
 
         int deleteEnd = deleteStart + deleteLength;
 
-        List<FormatSuggestionSpan> next = new ArrayList<>();
+        for (Reference reference : references) {
+            if (reference == null) continue;
 
-        for (FormatSuggestionSpan span : item.getSpans()) {
-            int spanStart = span.getStart();
-            int spanEnd = spanStart + span.getLength();
+            int referenceStart = reference.getReviewStart();
+            int referenceEnd = referenceStart + reference.getLength();
 
-            if (spanEnd <= deleteStart) {
-                next.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart)
-                                .length(span.getLength())
-                                .build()
-                );
+            if (referenceEnd <= deleteStart) {
+                out = appendAndCoalesceSuggestionReference(out, reference);
                 continue;
             }
 
-            if (spanStart >= deleteEnd) {
-                next.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart - deleteLength)
-                                .length(span.getLength())
-                                .build()
-                );
+            if (referenceStart >= deleteEnd) {
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(referenceStart - deleteLength)
+                                .componentStart(reference.getComponentStart())
+                                .length(reference.getLength())
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
+                log.debug("[HELPER:REFS] deleteRangeAndShift shifting ref [{}+{}] -> [{}+{}]",
+                        referenceStart, reference.getLength(), referenceStart - deleteLength, reference.getLength());
                 continue;
             }
 
-            int leftLen = Math.max(0, deleteStart - spanStart);
+            int leftLen = Math.max(0, deleteStart - referenceStart);
+            int rightLen = Math.max(0, referenceEnd - deleteEnd);
+
+            log.debug("[HELPER:REFS] deleteRangeAndShift ref=[{}+{}] deleteRange=[{},{}] leftLen={} rightLen={}",
+                    referenceStart, reference.getLength(), deleteStart, deleteEnd, leftLen, rightLen);
+
             if (leftLen > 0) {
-                next.add(
-                        FormatSuggestionSpan.builder()
-                                .start(spanStart)
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(referenceStart)
+                                .componentStart(reference.getComponentStart())
                                 .length(leftLen)
-                                .build()
-                );
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
             }
 
-            int rightLen = Math.max(0, spanEnd - deleteEnd);
             if (rightLen > 0) {
-                next.add(
-                        FormatSuggestionSpan.builder()
-                                .start(deleteStart)
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(deleteStart)
+                                .componentStart(reference.getComponentStart() + Math.max(0, deleteEnd - referenceStart))
                                 .length(rightLen)
-                                .build()
-                );
-            }
-        }
-
-        item.setSpans(mergeAdjacentSpans(next));
-    }
-
-    public static List<SuggestionSlice> cloneSuggestionSlices(List<SuggestionSlice> slices) {
-        if (slices == null) return new ArrayList<>();
-
-        return slices.stream()
-                .map(AttributionHelpers::cloneSlice)
-                .collect(Collectors.toCollection(ArrayList::new));
-    }
-
-    public static SuggestionSlice cloneSlice(SuggestionSlice s) {
-        if (s == null) return null;
-
-        return SuggestionSlice.builder()
-                .reviewStart(s.getReviewStart())
-                .componentStart(s.getComponentStart())
-                .length(s.getLength())
-                .ref(s.getRef() != null
-                        ? new OpReference(s.getRef().opId(), s.getRef().componentIndex())
-                        : null)
-                .build();
-    }
-
-    public static SuggestionSliceSplit splitSuggestionSlices(
-            List<SuggestionSlice> slices,
-            int splitAbsPos
-    ) {
-        List<SuggestionSlice> left = new ArrayList<>();
-        List<SuggestionSlice> right = new ArrayList<>();
-
-        if (slices == null || slices.isEmpty()) {
-            return new SuggestionSliceSplit(left, right);
-        }
-
-        for (SuggestionSlice slice : slices) {
-            int start = slice.getReviewStart();
-            int end = start + slice.getLength();
-
-            if (end <= splitAbsPos) {
-                left.add(cloneSlice(slice));
-            } else if (start >= splitAbsPos) {
-                right.add(cloneSlice(slice));
-            } else {
-                int leftLen = splitAbsPos - start;
-                int rightLen = end - splitAbsPos;
-
-                if (leftLen > 0) {
-                    left.add(SuggestionSlice.builder()
-                            .reviewStart(start)
-                            .componentStart(slice.getComponentStart())
-                            .length(leftLen)
-                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                            .build());
-                }
-
-                if (rightLen > 0) {
-                    right.add(SuggestionSlice.builder()
-                            .reviewStart(splitAbsPos)
-                            .componentStart(slice.getComponentStart() + leftLen)
-                            .length(rightLen)
-                            .ref(new OpReference(slice.getRef().opId(), slice.getRef().componentIndex()))
-                            .build());
-                }
-            }
-        }
-
-        return new SuggestionSliceSplit(left, right);
-    }
-
-    public static List<SuggestionSlice> appendSuggestionSlices(
-            List<SuggestionSlice> base,
-            List<SuggestionSlice> incoming
-    ) {
-        List<SuggestionSlice> out = new ArrayList<>();
-
-        if (base != null) {
-            for (SuggestionSlice s : base) {
-                out = appendAndCoalesceSuggestionSlice(out, s);
-            }
-        }
-
-        if (incoming != null) {
-            for (SuggestionSlice s : incoming) {
-                out = appendAndCoalesceSuggestionSlice(out, s);
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
             }
         }
 
         return out;
-    }
-
-    public static InsertSuggestion copyInsertSuggestion(InsertSuggestion src) {
-        if (src == null) return null;
-
-        return InsertSuggestion.builder()
-                .groupId(src.getGroupId())
-                .actorEmail(src.getActorEmail())
-                .createdAt(src.getCreatedAt())
-                .build();
-    }
-
-    public static DeleteSuggestion copyDeleteSuggestion(DeleteSuggestion src) {
-        if (src == null) return null;
-
-        return DeleteSuggestion.builder()
-                .groupId(src.getGroupId())
-                .actorEmail(src.getActorEmail())
-                .createdAt(src.getCreatedAt())
-                .build();
-    }
-
-    public static List<SuggestionSlice> addSuggestionSlice(
-            List<SuggestionSlice> slices,
-            int reviewStart,
-            int componentStart,
-            int length,
-            String opId,
-            int componentIndex
-    ) {
-        List<SuggestionSlice> out = cloneSuggestionSlices(slices);
-
-        if (length <= 0) {
-            return out;
-        }
-
-        SuggestionSlice incoming = SuggestionSlice.builder()
-                .reviewStart(reviewStart)
-                .componentStart(componentStart)
-                .length(length)
-                .ref(new OpReference(opId, componentIndex))
-                .build();
-
-        return appendAndCoalesceSuggestionSlice(out, incoming);
-    }
-
-    public static List<SuggestionSlice> appendAndCoalesceSuggestionSlice(
-            List<SuggestionSlice> slices,
-            SuggestionSlice incoming
-    ) {
-        List<SuggestionSlice> out = cloneSuggestionSlices(slices);
-
-        if (incoming == null || incoming.getLength() <= 0 || incoming.getRef() == null) {
-            return out;
-        }
-
-        if (!out.isEmpty()) {
-            SuggestionSlice last = out.get(out.size() - 1);
-
-            if (canCoalesceSuggestionSlices(last, incoming)) {
-                last.setLength(last.getLength() + incoming.getLength());
-                return out;
-            }
-        }
-
-        out.add(cloneSlice(incoming));
-        return out;
-    }
-
-    public static boolean canCoalesceSuggestionSlices(
-            SuggestionSlice left,
-            SuggestionSlice right
-    ) {
-        if (left == null || right == null) return false;
-        if (left.getRef() == null || right.getRef() == null) return false;
-
-        boolean sameRef =
-                Objects.equals(left.getRef().opId(), right.getRef().opId())
-                        && Objects.equals(left.getRef().componentIndex(), right.getRef().componentIndex());
-
-        boolean adjacentReview =
-                left.getReviewStart() + left.getLength() == right.getReviewStart();
-
-        boolean adjacentComponent =
-                left.getComponentStart() + left.getLength() == right.getComponentStart();
-
-        return sameRef && adjacentReview && adjacentComponent;
-    }
-
-    public static List<SuggestionSlice> addComponentLocalSlice(
-            List<SuggestionSlice> slices,
-            int reviewStart,
-            int componentStart,
-            int length,
-            String opId,
-            int componentIndex
-    ) {
-        if (length <= 0) {
-            return cloneSuggestionSlices(slices);
-        }
-
-        return addSuggestionSlice(
-                slices,
-                reviewStart,
-                componentStart,
-                length,
-                opId,
-                componentIndex
-        );
-    }
-
-    public void shiftSuggestionSliceReviewStarts(
-            List<ReviewRun> runs,
-            int insertPos,
-            int shiftLen,
-            String insertedGroupId
-    ) {
-        for (ReviewRun run : runs) {
-            boolean belongsToInsertedGroup =
-                    run.getInsertSuggestion() != null
-                            && Objects.equals(insertedGroupId, run.getInsertSuggestion().getGroupId());
-
-            boolean hasSuggestionRefs =
-                    run.getInsertSuggestion() != null || run.getDeleteSuggestion() != null;
-
-            if (!hasSuggestionRefs || belongsToInsertedGroup) {
-                continue;
-            }
-
-            for (SuggestionSlice slice : run.getReferences()) {
-                if (slice.getReviewStart() >= insertPos) {
-                    slice.setReviewStart(slice.getReviewStart() + shiftLen);
-                }
-            }
-        }
     }
 
     public void shiftFormatSuggestionReferences(
@@ -752,131 +993,161 @@ public class AttributionHelpers {
             int shiftLen,
             Set<String> excludedGroupIds
     ) {
+        if (formatSuggestions == null || shiftLen <= 0) {
+            if (shiftLen <= 0) log.warn("[HELPER:SHIFT] shiftFormatSuggestionReferences: shiftLen={} — no-op", shiftLen);
+            return;
+        }
+
+        Set<String> excluded = excludedGroupIds != null ? excludedGroupIds : Collections.emptySet();
 
         for (FormatSuggestionItem fmt : formatSuggestions) {
-
-            if (excludedGroupIds.contains(fmt.getGroupId())) {
+            if (fmt == null || excluded.contains(fmt.getGroupId())) {
+                log.debug("[HELPER:SHIFT] skipping groupId={} (excluded)", fmt != null ? fmt.getGroupId() : "null");
                 continue;
             }
 
-            for (SuggestionSlice slice : fmt.getReferences()) {
+            List<Reference> before = cloneSuggestionReferences(fmt.getReferences());
 
-                if (slice.getReviewStart() >= insertPos) {
-                    slice.setReviewStart(
-                            slice.getReviewStart() + shiftLen
-                    );
-                }
-            }
+            fmt.setReferences(shiftSuggestionReferencesForInsert(fmt.getReferences(), insertPos, shiftLen));
+
+            log.debug("[HELPER:SHIFT] shiftFormatSuggestionReferences groupId={} insertPos={} shiftLen={} before={} after={}",
+                    fmt.getGroupId(), insertPos, shiftLen, before, fmt.getReferences());
         }
     }
 
-    public static List<SuggestionSlice> collectReferencesForRunIndices(
+    public static List<Reference> collectReferencesForRunIndices(
             List<ReviewRun> runs,
             List<Integer> indices
     ) {
-        List<SuggestionSlice> refs = new ArrayList<>();
-
+        List<Reference> refs = new ArrayList<>();
         if (runs == null || indices == null) return refs;
 
         for (Integer idx : indices) {
-            if (idx == null || idx < 0 || idx >= runs.size()) continue;
-
+            if (idx == null || idx < 0 || idx >= runs.size()) {
+                log.warn("[HELPER:REFS] collectReferencesForRunIndices: idx={} out of range (runs.size={})", idx, runs.size());
+                continue;
+            }
             ReviewRun run = runs.get(idx);
-            refs = appendSuggestionSlices(refs, run.getReferences());
+            refs = appendSuggestionReferences(refs, run.getReferences());
         }
 
+        log.debug("[HELPER:REFS] collectReferencesForRunIndices indices={} => refs={}", indices, refs);
         return refs;
     }
-    public static List<SuggestionSlice> shiftSuggestionSlicesForInsert(
-            List<SuggestionSlice> slices,
+
+    public static void deleteRangeFromRunReferencesAndShift(
+            List<ReviewRun> runs,
+            int deleteStart,
+            int deleteLength
+    ) {
+        if (runs == null || runs.isEmpty() || deleteLength <= 0) return;
+
+        int count = 0;
+        for (ReviewRun run : runs) {
+            if (run.getReferences() == null || run.getReferences().isEmpty()) continue;
+            List<Reference> before = cloneSuggestionReferences(run.getReferences());
+            run.setReferences(deleteRangeFromSuggestionReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
+            if (!run.getReferences().equals(before)) {
+                log.debug("[HELPER:REFS] deleteRangeFromRunReferences run text='{}' before={} after={}",
+                        run.getText().replace("\n", "\\n"), before, run.getReferences());
+                count++;
+            }
+        }
+        log.debug("[HELPER:REFS] deleteRangeFromRunReferencesAndShift deleteStart={} deleteLength={} modifiedRuns={}",
+                deleteStart, deleteLength, count);
+    }
+
+    public static void deleteRangeFromFormatSuggestionReferencesAndShift(
+            Collection<FormatSuggestionItem> formatSuggestions,
+            int deleteStart,
+            int deleteLength
+    ) {
+        if (formatSuggestions == null || formatSuggestions.isEmpty() || deleteLength <= 0) return;
+
+        for (FormatSuggestionItem fmt : formatSuggestions) {
+            if (fmt.getReferences() == null || fmt.getReferences().isEmpty()) continue;
+
+            List<Reference> before = cloneSuggestionReferences(fmt.getReferences());
+            fmt.setReferences(deleteRangeFromSuggestionReferencesAndShift(fmt.getReferences(), deleteStart, deleteLength));
+
+            log.debug("[HELPER:REFS] deleteRangeFromFormatSuggestionReferences groupId={} deleteStart={} deleteLength={} before={} after={}",
+                    fmt.getGroupId(), deleteStart, deleteLength, before, fmt.getReferences());
+        }
+    }
+
+    public static List<Reference> shiftSuggestionReferencesForInsert(
+            List<Reference> references,
             int insertPos,
             int insertLength
     ) {
-        List<SuggestionSlice> out = new ArrayList<>();
+        List<Reference> out = new ArrayList<>();
 
-        if (slices == null || slices.isEmpty() || insertLength <= 0) {
-            return cloneSuggestionSlices(slices);
+        if (references == null || references.isEmpty() || insertLength <= 0) {
+            return cloneSuggestionReferences(references);
         }
 
-        for (SuggestionSlice slice : slices) {
-            if (slice == null || slice.getRef() == null) continue;
+        for (Reference reference : references) {
+            if (reference == null) continue;
 
-            int sliceStart = slice.getReviewStart();
-            int sliceEnd = sliceStart + slice.getLength();
+            int referenceStart = reference.getReviewStart();
+            int referenceEnd = referenceStart + reference.getLength();
 
-            if (sliceEnd <= insertPos) {
-                out = appendAndCoalesceSuggestionSlice(out, slice);
+            if (referenceEnd <= insertPos) {
+                out = appendAndCoalesceSuggestionReference(out, reference);
                 continue;
             }
 
-            if (sliceStart >= insertPos) {
-                out = appendAndCoalesceSuggestionSlice(
-                        out,
-                        SuggestionSlice.builder()
-                                .reviewStart(sliceStart + insertLength)
-                                .componentStart(slice.getComponentStart())
-                                .length(slice.getLength())
-                                .ref(new OpReference(
-                                        slice.getRef().opId(),
-                                        slice.getRef().componentIndex()
-                                ))
-                                .build()
-                );
+            if (referenceStart >= insertPos) {
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(referenceStart + insertLength)
+                                .componentStart(reference.getComponentStart())
+                                .length(reference.getLength())
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
+                log.debug("[HELPER:REFS] shiftForInsert ref [{}+{}] shifted -> [{}+{}]",
+                        referenceStart, reference.getLength(), referenceStart + insertLength, reference.getLength());
                 continue;
             }
 
-            int leftLen = insertPos - sliceStart;
-            int rightLen = sliceEnd - insertPos;
+            int leftLen = insertPos - referenceStart;
+            int rightLen = referenceEnd - insertPos;
+
+            log.debug("[HELPER:REFS] shiftForInsert ref [{}+{}] straddles insertPos={} — splitting leftLen={} rightLen={}",
+                    referenceStart, reference.getLength(), insertPos, leftLen, rightLen);
 
             if (leftLen > 0) {
-                out = appendAndCoalesceSuggestionSlice(
-                        out,
-                        SuggestionSlice.builder()
-                                .reviewStart(sliceStart)
-                                .componentStart(slice.getComponentStart())
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
+                                .reviewStart(referenceStart)
+                                .componentStart(reference.getComponentStart())
                                 .length(leftLen)
-                                .ref(new OpReference(
-                                        slice.getRef().opId(),
-                                        slice.getRef().componentIndex()
-                                ))
-                                .build()
-                );
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
             }
 
             if (rightLen > 0) {
-                out = appendAndCoalesceSuggestionSlice(
-                        out,
-                        SuggestionSlice.builder()
+                out = appendAndCoalesceSuggestionReference(out,
+                        Reference.builder()
                                 .reviewStart(insertPos + insertLength)
-                                .componentStart(slice.getComponentStart() + leftLen)
+                                .componentStart(reference.getComponentStart() + leftLen)
                                 .length(rightLen)
-                                .ref(new OpReference(
-                                        slice.getRef().opId(),
-                                        slice.getRef().componentIndex()
-                                ))
-                                .build()
-                );
+                                .opId(reference.getOpId())
+                                .componentIndex(reference.getComponentIndex())
+                                .build());
             }
         }
 
         return out;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Records
+    // ─────────────────────────────────────────────────────────────────────────
 
-    public static class InsertGroupCollection {
-        public final List<Integer> indices;
-        public final int start;
-        public final int end;
+    public record InsertGroupCollection(List<Integer> indices, int start, int end) {}
 
-        public InsertGroupCollection(List<Integer> indices, int start, int end) {
-            this.indices = indices;
-            this.start = start;
-            this.end = end;
-        }
-    }
-
-    public record SuggestionSliceSplit(
-            List<SuggestionSlice> left,
-            List<SuggestionSlice> right
-    ) {}
+    public record SuggestionReferenceSplit(List<Reference> left, List<Reference> right) {}
 }

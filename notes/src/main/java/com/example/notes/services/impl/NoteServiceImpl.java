@@ -1,7 +1,7 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.ReviewProjection;
-import com.example.notes.dto.attribution.SuggestionSlice;
+import com.example.notes.dto.attribution.Reference;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
@@ -187,17 +187,16 @@ public class NoteServiceImpl implements NoteService {
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
-        if (redisService.isReviewInProgress(noteId, note.ownerEmail())) {
-            reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
-            return new JoinNoteResponse(null, null, 0, true);
-        }
+        boolean isReviewing = redisService.isReviewInProgress(noteId, note.ownerEmail());
+
+//        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
 
         redisService.addCollaboratorToNote(noteId, actorEmail);
 
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
-        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision(), false);
+        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision(), isReviewing);
     }
 
     @Override
@@ -260,19 +259,18 @@ public class NoteServiceImpl implements NoteService {
             );
         }
 
-        Map<String, List<SuggestionSlice>> acceptedByOpId =
+        Map<String, List<Reference>> acceptedByOpId =
                 payload.acceptedReferences() == null
                         ? new LinkedHashMap<>()
                         : payload.acceptedReferences().stream()
-                        .filter(s -> s.getRef() != null)
                         .collect(Collectors.groupingBy(
-                                s -> s.getRef().opId(),
+                                Reference::getOpId,
                                 LinkedHashMap::new,
                                 Collectors.toList()
                         ));
 
         for (TextOperation textOp : new ArrayList<>(note.revisionLog())) {
-            List<SuggestionSlice> slicesForOp = acceptedByOpId.get(textOp.getOpId());
+            List<Reference> slicesForOp = acceptedByOpId.get(textOp.getOpId());
             if (slicesForOp == null || slicesForOp.isEmpty()) continue;
 
             Delta committedDelta = new Delta();
@@ -282,9 +280,9 @@ public class NoteServiceImpl implements NoteService {
                 Op op = textOp.getDelta().ops.get(i);
 
                 int finalI = i;
-                List<SuggestionSlice> acceptedSlicesForComponent = slicesForOp.stream()
-                        .filter(s -> Objects.equals(s.getRef().componentIndex(), finalI))
-                        .sorted(Comparator.comparingInt(SuggestionSlice::getComponentStart))
+                List<Reference> acceptedSlicesForComponent = slicesForOp.stream()
+                        .filter(s -> Objects.equals(s.getComponentIndex(), finalI))
+                        .sorted(Comparator.comparingInt(Reference::getComponentStart))
                         .toList();
 
                 if (acceptedSlicesForComponent.isEmpty()) {
@@ -371,14 +369,14 @@ public class NoteServiceImpl implements NoteService {
 
     private void applyAcceptedSlicesForComponent(
             Op op,
-            List<SuggestionSlice> acceptedSlices,
+            List<Reference> acceptedSlices,
             Delta committedDelta,
             Delta remainingDelta
     ) {
         int cursor = 0;
         int componentLength = op.length();
 
-        for (SuggestionSlice slice : acceptedSlices) {
+        for (Reference slice : acceptedSlices) {
             int start = Math.max(0, Math.min(slice.getComponentStart(), componentLength));
             int end = Math.max(start, Math.min(slice.getComponentStart() + slice.getLength(), componentLength));
 
