@@ -152,7 +152,7 @@ public class AttributionServiceImpl implements AttributionService {
         log.info("[ATTR:PHASE] PHASE-3: replaying {} change ops", changeTextOps.size());
 
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
-        CancellationAccumulator accumulator = new CancellationAccumulator();
+        ReviewOperationAccumulator accumulator = new ReviewOperationAccumulator();
 
         for (TextOperation textOp : changeTextOps) {
             String opId = textOp.getOpId();
@@ -692,7 +692,7 @@ public class AttributionServiceImpl implements AttributionService {
                 }
 
                 // ── CASE D: delete ────────────────────────────────────────────
-                if (component.isDelete()) {
+                else if (component.isDelete()) {
                     currentInsertGroup = null;
                     currentFormatGroup = null;
 
@@ -784,7 +784,14 @@ public class AttributionServiceImpl implements AttributionService {
                         if ("\n".equals(run.getText()) && run.getInsertSuggestion() == null) {
                             log.debug("[ATTR:DELETE] deleting base newline at cursor={} logicalStart={}", cursor, run.getLogicalStart());
 
+                            DeleteSuggestion.DeleteSuggestionType nextType =
+                                    promotedDeleteType(currentDeleteGroup.getType(), true);
+
+                            currentDeleteGroup.setType(nextType);
+                            applyDeleteTypeToGroupRuns(runs, currentDeleteGroup.getGroupId(), nextType);
+
                             DeleteSuggestion newlineDelete = copyDeleteSuggestion(currentDeleteGroup);
+
                             run.setReferences(addSuggestionReference(
                                     new ArrayList<>(), run.getLogicalStart(), deleteComponentLocalStart, 1, opId, compIdx));
                             run.setDeleteSuggestion(newlineDelete);
@@ -804,7 +811,6 @@ public class AttributionServiceImpl implements AttributionService {
                         int len = target.getText().length();
 
                         if (target.getInsertSuggestion() != null) {
-                            // cancel pending insert
                             int runStart = target.getLogicalStart();
                             int runEnd = runStart + target.getText().length();
                             List<Reference> targetReferences = target.getReferences();
@@ -845,11 +851,6 @@ public class AttributionServiceImpl implements AttributionService {
                                     int insertCancelLen = overlapEnd - overlapStart;
                                     int deleteCancelCompStart = deleteComponentLocalStart + (overlapStart - runStart);
 
-                                    log.info("[ATTR:DELETE:CANCEL-INSERT] PARTIAL ref opId={} compIdx={} insertCancelCompStart={} insertCancelLen={}",
-                                            reference.getOpId(), reference.getComponentIndex(), insertCancelCompStart, insertCancelLen);
-                                    log.info("[ATTR:DELETE:CANCEL-INSERT] PARTIAL del opId={} compIdx={} deleteCancelCompStart={}",
-                                            opId, compIdx, deleteCancelCompStart);
-
                                     accumulator.recordInsertCancellation(
                                             reference.getOpId(), reference.getComponentIndex(),
                                             insertCancelCompStart, insertCancelLen);
@@ -857,14 +858,6 @@ public class AttributionServiceImpl implements AttributionService {
                                             opId, compIdx, deleteCancelCompStart, insertCancelLen);
                                     continue;
                                 }
-
-                                log.info("[ATTR:DELETE:CANCEL-INSERT] FULL ref opId={} compIdx={} componentStart={} length={}",
-                                        reference.getOpId(), reference.getComponentIndex(),
-                                        reference.getComponentStart(), reference.getLength());
-                                log.info("[ATTR:DELETE:CANCEL-INSERT] FULL del opId={} compIdx={} deleteCancelCompStart={} length={}",
-                                        opId, compIdx,
-                                        deleteComponentLocalStart + (referenceStart - runStart),
-                                        reference.getLength());
 
                                 accumulator.recordInsertCancellation(
                                         reference.getOpId(), reference.getComponentIndex(),
@@ -902,9 +895,6 @@ public class AttributionServiceImpl implements AttributionService {
                                     int fmtCancelCompStart = reference.getComponentStart() + (overlapStart - referenceDocStart);
                                     int fmtCancelLen = overlapEnd - overlapStart;
 
-                                    log.info("[ATTR:DELETE:CANCEL-FORMAT] groupId={} attrKey={} fmtCancelCompStart={} fmtCancelLen={}",
-                                            fmt.getGroupId(), fmt.getAttributeKey(), fmtCancelCompStart, fmtCancelLen);
-
                                     accumulator.recordFormatCancellation(
                                             reference.getOpId(), reference.getComponentIndex(),
                                             fmt.getAttributeKey(), fmtCancelCompStart, fmtCancelLen);
@@ -914,7 +904,6 @@ public class AttributionServiceImpl implements AttributionService {
                                     fmt.setReferences(deleteRangeFromSuggestionReferencesAndShift(
                                             fmt.getReferences(), deleteStartPos, deleteLen));
                                     if (fmt.getReferences().isEmpty()) {
-                                        log.debug("[ATTR:DELETE] removing empty formatSuggestion groupId={}", fmt.getGroupId());
                                         fmtIt.remove();
                                     }
                                 }
@@ -924,12 +913,13 @@ public class AttributionServiceImpl implements AttributionService {
                             localLogPos += len;
 
                         } else {
-                            // mark stable text as delete suggestion
-                            DeleteSuggestion runDelete = copyDeleteSuggestion(currentDeleteGroup);
+                            DeleteSuggestion.DeleteSuggestionType nextType =
+                                    promotedDeleteType(currentDeleteGroup.getType(), false);
 
-                            log.debug("[ATTR:DELETE:BASE] cursor={} text='{}' logicalStart={} groupId={}",
-                                    cursor, target.getText().replace("\n", "\\n"),
-                                    target.getLogicalStart(), currentDeleteGroup.getGroupId());
+                            currentDeleteGroup.setType(nextType);
+                            applyDeleteTypeToGroupRuns(runs, currentDeleteGroup.getGroupId(), nextType);
+
+                            DeleteSuggestion runDelete = copyDeleteSuggestion(currentDeleteGroup);
 
                             target.setReferences(addSuggestionReference(
                                     new ArrayList<>(), target.getLogicalStart(), deleteComponentLocalStart, len, opId, compIdx));
@@ -942,8 +932,6 @@ public class AttributionServiceImpl implements AttributionService {
                                 if (formatSuggestionOverlapsRange(fmt, deleteStartPos, deleteEndPos)) {
                                     String deletedGroupId = currentDeleteGroup.getGroupId();
                                     if (!fmt.getDependsOnDeleteGroupIds().contains(deletedGroupId)) {
-                                        log.debug("[ATTR:DELETE:BASE] formatSuggestion groupId={} now depends on deleteGroup={}",
-                                                fmt.getGroupId(), deletedGroupId);
                                         fmt.getDependsOnDeleteGroupIds().add(deletedGroupId);
                                     }
                                 }
@@ -1026,7 +1014,9 @@ public class AttributionServiceImpl implements AttributionService {
         if (!accumulator.isEmpty()) {
             NoteDto freshNote = redisService.getNote(noteId);
             NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-            boolean changed = accumulator.flushAndReturnChanged(freshNote.revisionLog());
+            boolean changed = accumulator.flushCancellationsAndReturnChanged(
+                    freshNote.revisionLog()
+            );
             log.info("[ATTR:PHASE6] accumulator flush changed={}", changed);
 
             if (changed) {
@@ -1157,9 +1147,17 @@ public class AttributionServiceImpl implements AttributionService {
                 deletePayload.put("references", run.getReferences());
                 deletePayload.put("baseAttributes", !baseAttrs.isEmpty() ? baseAttrs : null);
                 deletePayload.put("suggestionAttributes", !suggestionAttrs.isEmpty() ? suggestionAttrs : null);
+                deletePayload.put("type", run.getDeleteSuggestion().getType());
 
-                if (isDeletedNewline) {
-                    attrs.put("suggestion-delete-newline", deletePayload);
+                DeleteSuggestion.DeleteSuggestionType type =
+                        run.getDeleteSuggestion().getType() != null
+                                ? run.getDeleteSuggestion().getType()
+                                : DeleteSuggestion.DeleteSuggestionType.TEXT;
+
+                if (type == DeleteSuggestion.DeleteSuggestionType.SINGLE_LINE) {
+                    attrs.put("suggestion-delete-singleline", deletePayload);
+                } else if (type == DeleteSuggestion.DeleteSuggestionType.MULTI_LINE) {
+                    attrs.put("suggestion-delete-multiline", deletePayload);
                 } else {
                     attrs.put("suggestion-delete", deletePayload);
                 }
@@ -1176,7 +1174,19 @@ public class AttributionServiceImpl implements AttributionService {
             }
 
             if (isDeletedPending) {
-                String textToInsert = isDeletedNewline ? "↵" : run.getText();
+                String textToInsert;
+
+                DeleteSuggestion.DeleteSuggestionType type =
+                        run.getDeleteSuggestion().getType() != null
+                                ? run.getDeleteSuggestion().getType()
+                                : DeleteSuggestion.DeleteSuggestionType.TEXT;
+
+                if (isDeletedNewline && type == DeleteSuggestion.DeleteSuggestionType.SINGLE_LINE) {
+                    textToInsert = " ↵ ";
+                } else {
+                    textToInsert = run.getText();
+                }
+
                 delta.insert(textToInsert, attrs.isEmpty() ? null : attrs);
             } else {
                 delta.retain(run.getText().length(), attrs.isEmpty() ? null : attrs);

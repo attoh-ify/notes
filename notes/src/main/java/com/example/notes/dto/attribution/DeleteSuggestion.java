@@ -12,4 +12,12 @@ public class DeleteSuggestion {
     private String groupId;
     private String actorEmail;
     private String createdAt;
+    @Builder.Default
+    private DeleteSuggestionType type = DeleteSuggestionType.TEXT;
+
+    public enum DeleteSuggestionType {
+        TEXT,
+        SINGLE_LINE,
+        MULTI_LINE
+    }
 }

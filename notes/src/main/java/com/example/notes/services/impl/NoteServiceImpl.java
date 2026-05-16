@@ -1,5 +1,7 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.attribution.ReviewDecisionReference;
+import com.example.notes.dto.attribution.ReviewOperationAccumulator;
 import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.attribution.Reference;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
@@ -232,88 +234,43 @@ public class NoteServiceImpl implements NoteService {
 
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-        Delta masterDelta = noteVersion.masterDelta();
+
+        ReviewOperationAccumulator accumulator = new ReviewOperationAccumulator();
+
+        if (payload.acceptedReferences() != null) {
+            for (ReviewDecisionReference ref : payload.acceptedReferences()) {
+                accumulator.recordAcceptedReference(ref);
+            }
+        }
+
+        if (payload.rejectedReferences() != null) {
+            for (ReviewDecisionReference ref : payload.rejectedReferences()) {
+                accumulator.recordRejectedReference(ref);
+            }
+        }
+
+        ReviewOperationAccumulator.ReviewApplyResult result =
+                accumulator.applyReviewDecisionsToRevisionLog(note.revisionLog());
+
         NoteVersionDto newNoteVersion = noteVersion;
 
-        if (payload.rejectedChange() != null
-                && payload.rejectedChange().getDelta() != null
-                && !payload.rejectedChange().getDelta().ops.isEmpty()) {
-
-            TextOperation newTextOp = new TextOperation(
-                    payload.rejectedChange().getDelta(),
-                    actorEmail,
-                    noteVersion.revision() + 1,
-                    OpState.COMMITTED,
-                    payload.rejectedChange().getCreatedAt()
-            );
-
-            note.revisionLog().add(newTextOp);
+        if (
+                result.changed()
+                        && result.committedMasterDelta() != null
+                        && result.committedMasterDelta().ops != null
+                        && !result.committedMasterDelta().ops.isEmpty()
+        ) {
+            Delta newMasterDelta =
+                    noteVersion.masterDelta().compose(result.committedMasterDelta());
 
             newNoteVersion = new NoteVersionDto(
                     noteVersion.id(),
-                    masterDelta.compose(payload.rejectedChange().getDelta()),
+                    newMasterDelta,
                     noteVersion.revision() + 1,
                     noteVersion.comment(),
                     noteVersion.versionNumber(),
                     noteVersion.createdAt()
             );
-        }
-
-        Map<String, List<Reference>> acceptedByOpId =
-                payload.acceptedReferences() == null
-                        ? new LinkedHashMap<>()
-                        : payload.acceptedReferences().stream()
-                        .collect(Collectors.groupingBy(
-                                Reference::getOpId,
-                                LinkedHashMap::new,
-                                Collectors.toList()
-                        ));
-
-        for (TextOperation textOp : new ArrayList<>(note.revisionLog())) {
-            List<Reference> slicesForOp = acceptedByOpId.get(textOp.getOpId());
-            if (slicesForOp == null || slicesForOp.isEmpty()) continue;
-
-            Delta committedDelta = new Delta();
-            Delta remainingDelta = new Delta();
-
-            for (int i = 0; i < textOp.getDelta().ops.size(); i++) {
-                Op op = textOp.getDelta().ops.get(i);
-
-                int finalI = i;
-                List<Reference> acceptedSlicesForComponent = slicesForOp.stream()
-                        .filter(s -> Objects.equals(s.getComponentIndex(), finalI))
-                        .sorted(Comparator.comparingInt(Reference::getComponentStart))
-                        .toList();
-
-                if (acceptedSlicesForComponent.isEmpty()) {
-                    appendOpToRemainingAndRetainInCommitted(op, remainingDelta, committedDelta);
-                    continue;
-                }
-
-                applyAcceptedSlicesForComponent(
-                        op,
-                        acceptedSlicesForComponent,
-                        committedDelta,
-                        remainingDelta
-                );
-            }
-
-            if (remainingDelta.ops.isEmpty()) {
-                textOp.setState(OpState.COMMITTED);
-            } else {
-                TextOperation committedOp = new TextOperation(
-                        committedDelta,
-                        textOp.getActorEmail(),
-                        textOp.getRevision(),
-                        OpState.COMMITTED,
-                        textOp.getCreatedAt()
-                );
-
-                textOp.setDelta(remainingDelta);
-
-                int textOpIndex = note.revisionLog().indexOf(textOp);
-                note.revisionLog().add(textOpIndex, committedOp);
-            }
         }
 
         redisService.updateNote(note, newNoteVersion);
@@ -344,120 +301,5 @@ public class NoteServiceImpl implements NoteService {
         Note note = notePolicyService.validateSuper(userEmail, noteId);
         note.setVisibility(visibility);
         noteRepository.save(note);
-    }
-
-    private void appendOpToRemainingAndRetainInCommitted(
-            Op op,
-            Delta remainingDelta,
-            Delta committedDelta
-    ) {
-        if (op.isDelete()) {
-            remainingDelta.delete(op.getDelete());
-        } else if (op.isInsert()) {
-            remainingDelta.insert(op.getInsert(), op.getAttributes());
-            committedDelta.retain(op.length(), null);
-        } else if (op.isRetain()) {
-            if (op.getAttributes() != null && !op.getAttributes().isEmpty()) {
-                remainingDelta.retain(op.getRetain(), op.getAttributes());
-                committedDelta.retain(op.getRetain(), null);
-            } else {
-                remainingDelta.retain(op.getRetain(), null);
-                committedDelta.retain(op.getRetain(), null);
-            }
-        }
-    }
-
-    private void applyAcceptedSlicesForComponent(
-            Op op,
-            List<Reference> acceptedSlices,
-            Delta committedDelta,
-            Delta remainingDelta
-    ) {
-        int cursor = 0;
-        int componentLength = op.length();
-
-        for (Reference slice : acceptedSlices) {
-            int start = Math.max(0, Math.min(slice.getComponentStart(), componentLength));
-            int end = Math.max(start, Math.min(slice.getComponentStart() + slice.getLength(), componentLength));
-
-            if (start > cursor) {
-                appendUnacceptedPart(op, cursor, start - cursor, committedDelta, remainingDelta);
-            }
-
-            if (end > start) {
-                appendAcceptedPart(op, start, end - start, committedDelta, remainingDelta);
-            }
-
-            cursor = Math.max(cursor, end);
-        }
-
-        if (cursor < componentLength) {
-            appendUnacceptedPart(op, cursor, componentLength - cursor, committedDelta, remainingDelta);
-        }
-    }
-
-    private String safeSubstring(String text, int start, int length) {
-        int safeStart = Math.max(0, Math.min(start, text.length()));
-        int safeEnd = Math.max(safeStart, Math.min(start + length, text.length()));
-        return text.substring(safeStart, safeEnd);
-    }
-
-    private void appendAcceptedPart(
-            Op op,
-            int start,
-            int length,
-            Delta committedDelta,
-            Delta remainingDelta
-    ) {
-        if (length <= 0) return;
-
-        if (op.isInsert()) {
-            String text = String.valueOf(op.getInsert());
-
-            String safe = safeSubstring(text, start, length);
-
-            if (!safe.isEmpty()) {
-                committedDelta.insert(safe, op.getAttributes());
-                remainingDelta.retain(safe.length(), null);
-            }
-
-        } else if (op.isDelete()) {
-            committedDelta.delete(Math.min(length, op.getDelete()));
-        } else if (op.isRetain()) {
-            committedDelta.retain(length, op.getAttributes());
-            remainingDelta.retain(length, null);
-        }
-    }
-
-    private void appendUnacceptedPart(
-            Op op,
-            int start,
-            int length,
-            Delta committedDelta,
-            Delta remainingDelta
-    ) {
-        if (length <= 0) return;
-
-        if (op.isInsert()) {
-            String text = String.valueOf(op.getInsert());
-
-            String safe = safeSubstring(text, start, length);
-
-            if (!safe.isEmpty()) {
-                remainingDelta.insert(safe, op.getAttributes());
-                committedDelta.retain(safe.length(), null);
-            }
-
-        } else if (op.isDelete()) {
-            remainingDelta.delete(Math.min(length, op.getDelete()));
-        } else if (op.isRetain()) {
-            if (op.getAttributes() != null && !op.getAttributes().isEmpty()) {
-                remainingDelta.retain(length, op.getAttributes());
-                committedDelta.retain(length, null);
-            } else {
-                remainingDelta.retain(length, null);
-                committedDelta.retain(length, null);
-            }
-        }
     }
 }

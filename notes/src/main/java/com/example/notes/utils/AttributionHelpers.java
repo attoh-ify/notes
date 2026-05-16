@@ -525,12 +525,14 @@ public class AttributionHelpers {
                 .groupId(src.getGroupId())
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
+                .type(src.getType() != null
+                        ? src.getType()
+                        : DeleteSuggestion.DeleteSuggestionType.TEXT)
                 .build();
     }
 
     /**
      * Add a provenance reference for a suggestion.
-     *
      * reviewStart    = where this slice appears in the runtime review document.
      * componentStart = where this slice starts inside the original op component text.
      */
@@ -1141,6 +1143,37 @@ public class AttributionHelpers {
         }
 
         return out;
+    }
+
+    public static DeleteSuggestion.DeleteSuggestionType promotedDeleteType(
+            DeleteSuggestion.DeleteSuggestionType current,
+            boolean deletingNewline
+    ) {
+        DeleteSuggestion.DeleteSuggestionType safeCurrent =
+                current != null ? current : DeleteSuggestion.DeleteSuggestionType.TEXT;
+
+        if (!deletingNewline) {
+            return safeCurrent;
+        }
+
+        if (safeCurrent == DeleteSuggestion.DeleteSuggestionType.TEXT) {
+            return DeleteSuggestion.DeleteSuggestionType.SINGLE_LINE;
+        }
+
+        return DeleteSuggestion.DeleteSuggestionType.MULTI_LINE;
+    }
+
+    public static void applyDeleteTypeToGroupRuns(
+            List<ReviewRun> runs,
+            String groupId,
+            DeleteSuggestion.DeleteSuggestionType type
+    ) {
+        for (ReviewRun run : runs) {
+            if (run.getDeleteSuggestion() == null) continue;
+            if (!groupId.equals(run.getDeleteSuggestion().getGroupId())) continue;
+
+            run.getDeleteSuggestion().setType(type);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
