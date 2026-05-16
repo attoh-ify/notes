@@ -126,8 +126,10 @@ public class AttributionHelpers {
         for (int i = 0; i < runs.size(); i++) {
             ReviewRun r = runs.get(i);
 
+            int runLen = r.length();
+
             if (r.getDeleteSuggestion() != null) {
-                absPos += r.getText().length();
+                absPos += runLen;
                 continue;
             }
 
@@ -136,15 +138,13 @@ public class AttributionHelpers {
                 return new RunPosition(i, 0, absPos);
             }
 
-            if (pos + r.getText().length() > logicalPos) {
+            if (pos + runLen > logicalPos) {
                 int off = logicalPos - pos;
-                log.debug("[HELPER:POS] findRunPos(logicalPos={}) => idx={} offset={} absPos={} (inside run '{}')",
-                        logicalPos, i, off, absPos + off, r.getText().replace("\n", "\\n"));
                 return new RunPosition(i, off, absPos + off);
             }
 
-            pos += r.getText().length();
-            absPos += r.getText().length();
+            pos += runLen;
+            absPos += runLen;
         }
 
         // past end of document
@@ -175,16 +175,20 @@ public class AttributionHelpers {
 
         ReviewRun r = runs.get(idx);
 
-        if (offset <= 0 || offset >= r.getText().length()) {
+        if (r.isEmbed()) {
+            return idx;
+        }
+
+        if (offset <= 0 || offset >= r.length()) {
             log.debug("[HELPER:SPLIT] splitAt idx={} offset={} — no split needed (text.len={})",
-                    idx, offset, r.getText().length());
+                    idx, offset, r.length());
             return idx;
         }
 
         int splitAbsPos = r.getLogicalStart() + offset;
 
         log.debug("[HELPER:SPLIT] splitAt idx={} offset={} text='{}' logicalStart={} splitAbsPos={}",
-                idx, offset, r.getText().replace("\n", "\\n"), r.getLogicalStart(), splitAbsPos);
+                idx, offset, runTextForLog(r), r.getLogicalStart(), splitAbsPos);
 
         SuggestionReferenceSplit split = splitSuggestionReferences(r.getReferences(), splitAbsPos);
 
@@ -212,8 +216,8 @@ public class AttributionHelpers {
         runs.add(idx + 1, right);
 
         log.debug("[HELPER:SPLIT] split result left='{}' logicalStart={} right='{}' logicalStart={}",
-                left.getText().replace("\n", "\\n"), left.getLogicalStart(),
-                right.getText().replace("\n", "\\n"), right.getLogicalStart());
+                runTextForLog(left), left.getLogicalStart(),
+                runTextForLog(right), right.getLogicalStart());
 
         return idx + 1;
     }
@@ -238,8 +242,9 @@ public class AttributionHelpers {
             if (run.getDeleteSuggestion() != null) continue;
 
             sawOverlap = true;
-            int lenToCheck = Math.min(run.getText().length() - offset, remaining);
+            int lenToCheck = Math.min(run.length() - offset, remaining);
 
+            if (run.isEmbed()) return false;
             for (int j = offset; j < offset + lenToCheck; j++) {
                 if (run.getText().charAt(j) != '\n') {
                     log.debug("[HELPER:NL] isOnlyNewlineRetain logicalStart={} retainLength={} => false (non-newline at run {})",
@@ -320,7 +325,7 @@ public class AttributionHelpers {
 
             indices.add(i);
             start = Math.min(start, run.getLogicalStart());
-            end = Math.max(end, run.getLogicalStart() + run.getText().length());
+            end = Math.max(end, run.getLogicalStart() + run.length());
         }
 
         if (indices.isEmpty()) {
@@ -648,7 +653,7 @@ public class AttributionHelpers {
                 if (reference.getReviewStart() >= insertPos) {
                     log.debug("[HELPER:SHIFT] shifting ref reviewStart {} -> {} for run text='{}'",
                             reference.getReviewStart(), reference.getReviewStart() + shiftLen,
-                            run.getText().replace("\n", "\\n"));
+                            runTextForLog(run));
                     reference.setReviewStart(reference.getReviewStart() + shiftLen);
                     shiftedCount++;
                 }
@@ -1051,7 +1056,7 @@ public class AttributionHelpers {
             run.setReferences(deleteRangeFromSuggestionReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
             if (!run.getReferences().equals(before)) {
                 log.debug("[HELPER:REFS] deleteRangeFromRunReferences run text='{}' before={} after={}",
-                        run.getText().replace("\n", "\\n"), before, run.getReferences());
+                        runTextForLog(run));
                 count++;
             }
         }
@@ -1173,6 +1178,92 @@ public class AttributionHelpers {
             if (!groupId.equals(run.getDeleteSuggestion().getGroupId())) continue;
 
             run.getDeleteSuggestion().setType(type);
+        }
+    }
+
+    public static Map<String, Object> cloneEmbed(Object embed) {
+        if (embed instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return out;
+        }
+
+        return new LinkedHashMap<>();
+    }
+
+    public static String runTextForLog(ReviewRun run) {
+        if (run == null) return "null";
+        if (run.isEmbed()) return "[embed]";
+        if (run.getText() == null) return "[empty-run]";
+        return run.getText().replace("\n", "\\n");
+    }
+
+    public static List<InsertFragment> buildInsertFragments(Object insertValue) {
+        List<InsertFragment> fragments = new ArrayList<>();
+
+        if (insertValue instanceof String text) {
+            int componentCursor = 0;
+            String[] parts = text.split("\n", -1);
+
+            for (int i = 0; i < parts.length; i++) {
+                if (!parts[i].isEmpty()) {
+                    fragments.add(
+                            new InsertFragment(
+                                    parts[i],
+                                    null,
+                                    parts[i].length(),
+                                    componentCursor,
+                                    false
+                            )
+                    );
+
+                    componentCursor += parts[i].length();
+                }
+
+                if (i < parts.length - 1) {
+                    fragments.add(
+                            new InsertFragment(
+                                    "\n",
+                                    null,
+                                    1,
+                                    componentCursor,
+                                    true
+                            )
+                    );
+
+                    componentCursor += 1;
+                }
+            }
+
+            return fragments;
+        }
+
+        if (insertValue instanceof Map<?, ?> embed) {
+            fragments.add(
+                    new InsertFragment(
+                            null,
+                            cloneEmbed(embed),
+                            1,
+                            0,
+                            false
+                    )
+            );
+        }
+
+        return fragments;
+    }
+
+    public record InsertFragment(
+            String text,
+            Object embed,
+            int length,
+            int componentStart,
+            boolean newline
+    ) {
+        public boolean isEmbed() {
+            return embed != null;
         }
     }
 

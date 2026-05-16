@@ -337,6 +337,26 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
+            if (op.isInsert() && !(op.getInsert() instanceof String)) {
+                List<CharRange> acceptedRanges =
+                        clampRanges(decision.acceptedInsertRanges.get(i), 1);
+
+                List<CharRange> rejectedRanges =
+                        clampRanges(decision.rejectedInsertRanges.get(i), 1);
+
+                splitEmbedInsert(
+                        op.getInsert(),
+                        op.getAttributes(),
+                        acceptedRanges,
+                        rejectedRanges,
+                        accepted,
+                        rejected,
+                        pending
+                );
+
+                continue;
+            }
+
             if (op.isDelete()) {
                 int len = op.getDelete();
 
@@ -364,6 +384,37 @@ public class ReviewOperationAccumulator {
         }
 
         return new SplitResult(accepted.chop(), rejected.chop(), pending.chop());
+    }
+
+    private void splitEmbedInsert(
+            Object embed,
+            Map<String, Object> attrs,
+            List<CharRange> acceptedRanges,
+            List<CharRange> rejectedRanges,
+            Delta accepted,
+            Delta rejected,
+            Delta pending
+    ) {
+        List<SliceDecision> decisions =
+                buildSliceDecisions(1, acceptedRanges, rejectedRanges);
+
+        if (decisions.isEmpty()) {
+            accepted.retain(1, null);
+            rejected.retain(1, null);
+            pending.insert(embed, attrs);
+            return;
+        }
+
+        SliceDecision decision = decisions.get(0);
+
+        if (decision.type() == DecisionType.ACCEPTED) {
+            accepted.insert(embed, attrs);
+            rejected.retain(1, null);
+            pending.retain(1, null);
+        } else {
+            accepted.retain(1, null);
+            rejected.insert(embed, attrs);
+        }
     }
 
     private void splitInsert(
