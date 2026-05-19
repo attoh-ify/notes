@@ -42,4 +42,8 @@ public class ReviewRun {
         if (isText()) return text.length();
         return 0;
     }
+
+    public Object insertValue() {
+        return isEmbed() ? embed : text;
+    }
 }

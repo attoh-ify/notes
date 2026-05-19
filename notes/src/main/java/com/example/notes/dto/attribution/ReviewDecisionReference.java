@@ -14,7 +14,5 @@ public class ReviewDecisionReference {
     private int componentIndex;
     private int componentStart;
     private int length;
-    // Only needed for format retain components.
-    // Null means insert/delete/plain component slice.
     private String attributeKey;
 }

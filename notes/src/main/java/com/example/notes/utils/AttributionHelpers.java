@@ -257,9 +257,8 @@ public class AttributionHelpers {
             offset = 0;
         }
 
-        boolean result = sawOverlap;
-        log.debug("[HELPER:NL] isOnlyNewlineRetain logicalStart={} retainLength={} => {}", logicalStart, retainLength, result);
-        return result;
+        log.debug("[HELPER:NL] isOnlyNewlineRetain logicalStart={} retainLength={} => {}", logicalStart, retainLength, sawOverlap);
+        return sawOverlap;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1265,6 +1264,409 @@ public class AttributionHelpers {
         public boolean isEmbed() {
             return embed != null;
         }
+    }
+
+    public record BlockGroupKey(String attributeKey, Object attributeValue) {}
+
+    private static final Set<String> BLOCK_ATTR_KEYS = Set.of(
+            "header",
+            "list",
+            "indent",
+            "align",
+            "blockquote",
+            "code-block",
+            "direction"
+    );
+
+    private static final Set<String> EXCLUSIVE_BLOCK_KEYS = Set.of(
+            "header",
+            "list",
+            "blockquote",
+            "code-block"
+    );
+
+    private static boolean isBlockAttribute(String key) {
+        return key != null && BLOCK_ATTR_KEYS.contains(key);
+    }
+
+    public static Map<String, Object> onlyInlineAttrs(Map<String, Object> attrs) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (attrs == null) return out;
+
+        for (Map.Entry<String, Object> entry : attrs.entrySet()) {
+            if (!isBlockAttribute(entry.getKey())) {
+                out.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return out;
+    }
+
+    public static Map<String, Object> onlyBlockAttrs(Map<String, Object> attrs) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (attrs == null) return out;
+
+        for (Map.Entry<String, Object> entry : attrs.entrySet()) {
+            if (isBlockAttribute(entry.getKey())) {
+                out.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return out;
+    }
+
+    public static boolean isBlockTargetRun(ReviewRun run) {
+        return run != null && run.isText() && "\n".equals(run.getText());
+    }
+
+    private static BlockFormatBehavior blockBehaviorFor(String key) {
+        if ("list".equals(key) || "blockquote".equals(key) || "code-block".equals(key)) {
+            return BlockFormatBehavior.CONTINUING;
+        }
+
+        if ("header".equals(key)) {
+            return BlockFormatBehavior.NON_CONTINUING;
+        }
+
+        return BlockFormatBehavior.COEXISTING;
+    }
+
+    private static BlockFormatConflictGroup blockConflictGroupFor(String key) {
+        if ("align".equals(key)) return BlockFormatConflictGroup.ALIGNMENT;
+        if ("indent".equals(key)) return BlockFormatConflictGroup.INDENT;
+        if ("direction".equals(key)) return BlockFormatConflictGroup.DIRECTION;
+        return BlockFormatConflictGroup.EXCLUSIVE_BLOCK_STYLE;
+    }
+
+    public static boolean blockSuggestionOverlapsRange(
+            BlockFormatSuggestionItem item,
+            int targetStart,
+            int targetEnd
+    ) {
+        if (item == null || targetEnd <= targetStart) return false;
+
+        for (ReviewRange range : deriveMergedRangesFromReferences(item.getReferences())) {
+            int refStart = range.getStart();
+            int refEnd = refStart + range.getLength();
+
+            if (targetStart < refEnd && targetEnd > refStart) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean shouldCancelBlockSuggestion(
+            BlockFormatSuggestionItem existing,
+            String incomingKey,
+            Object incomingValue
+    ) {
+        if (existing == null) return false;
+
+        String existingKey = existing.getAttributeKey();
+
+        if (Objects.equals(existingKey, incomingKey)) {
+            return true;
+        }
+
+        if (incomingValue == null) {
+            return false;
+        }
+
+        return existing.getConflictGroup() == BlockFormatConflictGroup.EXCLUSIVE_BLOCK_STYLE
+                && blockConflictGroupFor(incomingKey) == BlockFormatConflictGroup.EXCLUSIVE_BLOCK_STYLE;
+    }
+
+    private BlockFormatSuggestionItem findOrCreateCurrentBlockGroup(
+            List<BlockFormatSuggestionItem> blockFormatSuggestions,
+            Map<BlockGroupKey, BlockFormatSuggestionItem> currentBlockGroups,
+            String actorEmail,
+            String createdAt,
+            String attrKey,
+            Object attrValue
+    ) {
+        BlockGroupKey key = new BlockGroupKey(attrKey, attrValue);
+
+        BlockFormatSuggestionItem existingInOp = currentBlockGroups.get(key);
+        if (existingInOp != null) return existingInOp;
+
+        BlockFormatSuggestionItem created = BlockFormatSuggestionItem.builder()
+                .groupId(nextId())
+                .actorEmail(actorEmail)
+                .createdAt(createdAt)
+                .attributeKey(attrKey)
+                .attributeValue(attrValue)
+                .behavior(blockBehaviorFor(attrKey))
+                .conflictGroup(blockConflictGroupFor(attrKey))
+                .references(new ArrayList<>())
+                .previewText("")
+                .dependsOnInsertGroupIds(new ArrayList<>())
+                .dependsOnDeleteGroupIds(new ArrayList<>())
+                .build();
+
+        blockFormatSuggestions.add(created);
+        currentBlockGroups.put(key, created);
+
+        return created;
+    }
+
+    private void addBlockInsertDependency(BlockFormatSuggestionItem item, String insertGroupId) {
+        if (item == null || insertGroupId == null) return;
+
+        if (!item.getDependsOnInsertGroupIds().contains(insertGroupId)) {
+            item.getDependsOnInsertGroupIds().add(insertGroupId);
+        }
+    }
+
+    public void addBlockDeleteDependency(
+            BlockFormatSuggestionItem item,
+            String deleteGroupId
+    ) {
+        if (item == null || deleteGroupId == null) return;
+
+        if (!item.getDependsOnDeleteGroupIds().contains(deleteGroupId)) {
+            item.getDependsOnDeleteGroupIds().add(deleteGroupId);
+        }
+    }
+
+    public void applyBlockAttributeToNewlineRun(
+            List<BlockFormatSuggestionItem> blockFormatSuggestions,
+            ReviewOperationAccumulator accumulator,
+            ReviewRun target,
+            String attrKey,
+            Object attrValue,
+            String authorEmail,
+            String createdAt,
+            String opId,
+            int compIdx,
+            int componentStart,
+            Map<BlockGroupKey, BlockFormatSuggestionItem> currentBlockGroups
+    ) {
+        if (!isBlockTargetRun(target)) return;
+
+        int spanStart = target.getLogicalStart();
+        int spanLen = 1;
+        int spanEnd = spanStart + spanLen;
+
+        Object baseValue = target.getBaseAttributes() != null
+                ? target.getBaseAttributes().get(attrKey)
+                : null;
+
+        List<BlockFormatSuggestionItem> overlappingBlockSuggestions =
+                blockFormatSuggestions.stream()
+                        .filter(f -> blockSuggestionOverlapsRange(f, spanStart, spanEnd))
+                        .toList();
+
+        for (BlockFormatSuggestionItem existing : new ArrayList<>(overlappingBlockSuggestions)) {
+            if (!shouldCancelBlockSuggestion(existing, attrKey, attrValue)) {
+                continue;
+            }
+
+            for (Reference reference : existing.getReferences()) {
+                int referenceStart = reference.getReviewStart();
+                int referenceEnd = referenceStart + reference.getLength();
+
+                int overlapStart = Math.max(spanStart, referenceStart);
+                int overlapEnd = Math.min(spanEnd, referenceEnd);
+
+                if (overlapStart >= overlapEnd) continue;
+
+                int sourceStart = reference.getComponentStart() + (overlapStart - referenceStart);
+                int sourceLen = overlapEnd - overlapStart;
+
+                accumulator.recordFormatCancellation(
+                        reference.getOpId(),
+                        reference.getComponentIndex(),
+                        sourceStart,
+                        sourceLen,
+                        existing.getAttributeKey()
+                );
+            }
+
+            existing.setReferences(
+                    removeRangeFromSuggestionReferencesWithoutShift(
+                            existing.getReferences(),
+                            spanStart,
+                            spanLen
+                    )
+            );
+
+            if (existing.getReferences().isEmpty()) {
+                blockFormatSuggestions.remove(existing);
+            }
+
+            if (target.getSuggestionAttributes() != null) {
+                target.getSuggestionAttributes().remove(existing.getAttributeKey());
+            }
+        }
+
+        if (attrValue == null) {
+            if (target.getSuggestionAttributes() != null) {
+                target.getSuggestionAttributes().remove(attrKey);
+            }
+            return;
+        }
+
+        if (Objects.equals(baseValue, attrValue)) {
+            return;
+        }
+
+        target.setSuggestionAttributes(
+                overlayAttrsPreserveNull(
+                        target.getSuggestionAttributes(),
+                        Map.of(attrKey, attrValue)
+                )
+        );
+
+        BlockFormatSuggestionItem blockGroup = findOrCreateCurrentBlockGroup(
+                blockFormatSuggestions,
+                currentBlockGroups,
+                authorEmail,
+                createdAt,
+                attrKey,
+                attrValue
+        );
+
+        if (target.getInsertSuggestion() != null) {
+            addBlockInsertDependency(blockGroup, target.getInsertSuggestion().getGroupId());
+        }
+
+        blockGroup.setReferences(
+                addSuggestionReference(
+                        blockGroup.getReferences(),
+                        spanStart,
+                        componentStart,
+                        spanLen,
+                        opId,
+                        compIdx
+                )
+        );
+    }
+
+    public void cancelBlockSuggestionsForDeletedNewline(
+            List<BlockFormatSuggestionItem> blockFormatSuggestions,
+            ReviewOperationAccumulator accumulator,
+            ReviewRun deletedRun
+    ) {
+        if (!isBlockTargetRun(deletedRun)) return;
+
+        int deleteStart = deletedRun.getLogicalStart();
+        int deleteEnd = deleteStart + 1;
+
+        for (BlockFormatSuggestionItem item : new ArrayList<>(blockFormatSuggestions)) {
+            if (!blockSuggestionOverlapsRange(item, deleteStart, deleteEnd)) continue;
+
+            for (Reference reference : item.getReferences()) {
+                int refStart = reference.getReviewStart();
+                int refEnd = refStart + reference.getLength();
+
+                int overlapStart = Math.max(deleteStart, refStart);
+                int overlapEnd = Math.min(deleteEnd, refEnd);
+
+                if (overlapStart >= overlapEnd) continue;
+
+                accumulator.recordFormatCancellation(
+                        reference.getOpId(),
+                        reference.getComponentIndex(),
+                        reference.getComponentStart() + (overlapStart - refStart),
+                        overlapEnd - overlapStart,
+                        item.getAttributeKey()
+                );
+            }
+
+            item.setReferences(
+                    removeRangeFromSuggestionReferencesWithoutShift(
+                            item.getReferences(),
+                            deleteStart,
+                            1
+                    )
+            );
+
+            if (item.getReferences().isEmpty()) {
+                blockFormatSuggestions.remove(item);
+            }
+        }
+    }
+
+    public void shiftBlockFormatSuggestionReferences(
+            List<BlockFormatSuggestionItem> items,
+            int insertPos,
+            int shiftLen,
+            Set<String> excludedGroupIds
+    ) {
+        if (items == null || shiftLen <= 0) return;
+
+        Set<String> excluded = excludedGroupIds != null
+                ? excludedGroupIds
+                : Collections.emptySet();
+
+        for (BlockFormatSuggestionItem item : items) {
+            if (excluded.contains(item.getGroupId())) continue;
+
+            for (Reference ref : item.getReferences()) {
+                if (ref.getReviewStart() >= insertPos) {
+                    ref.setReviewStart(ref.getReviewStart() + shiftLen);
+                }
+            }
+        }
+    }
+
+    public void deleteRangeFromBlockFormatSuggestionReferencesAndShift(
+            List<BlockFormatSuggestionItem> items,
+            int deleteStart,
+            int deleteLen
+    ) {
+        if (items == null || deleteLen <= 0) return;
+
+        for (BlockFormatSuggestionItem item : items) {
+            item.setReferences(
+                    deleteRangeFromSuggestionReferencesAndShift(
+                            item.getReferences(),
+                            deleteStart,
+                            deleteLen
+                    )
+            );
+        }
+
+        items.removeIf(item -> item.getReferences() == null || item.getReferences().isEmpty());
+    }
+
+    public String getLinePreviewForNewline(List<ReviewRun> runs, int newlinePos) {
+        StringBuilder line = new StringBuilder();
+
+        for (ReviewRun run : runs) {
+            if (run.getDeleteSuggestion() != null) continue;
+
+            int start = run.getLogicalStart();
+            int end = start + run.length();
+
+            if (end <= newlinePos) {
+                if (run.isText() && "\n".equals(run.getText())) {
+                    line.setLength(0);
+                } else if (run.isEmbed()) {
+                    line.append("[image]");
+                } else if (run.isText()) {
+                    line.append(run.getText());
+                }
+
+                continue;
+            }
+
+            if (start <= newlinePos && newlinePos < end) {
+                if (run.isEmbed()) {
+                    line.append("[image]");
+                } else if (run.isText()) {
+                    int offset = newlinePos - start;
+                    line.append(run.getText(), 0, Math.max(0, offset));
+                }
+
+                break;
+            }
+        }
+
+        String out = line.toString().trim();
+        return out.isBlank() ? "[empty line]" : out;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

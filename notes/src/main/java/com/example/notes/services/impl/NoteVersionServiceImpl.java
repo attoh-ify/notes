@@ -1,26 +1,25 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.ReviewProjection;
-import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
+import com.example.notes.dto.ot.Delta;
 import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
 import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteVersionMapper;
-import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
+import com.example.notes.utils.QuillDeltaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,9 +40,6 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteVersionServiceImpl.class);
-
-    @Autowired
-    private ReviewInProgressNotifier reviewInProgressNotifier;
 
     public NoteVersionServiceImpl(NoteService noteService, NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService) {
         this.noteService = noteService;
@@ -74,36 +70,69 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     }
 
     @Override
-    public NoteVersionDto createVersion(String actorEmail, UUID noteId, CreateNoteVersionPayload payload) {
+    public NoteVersionDto createVersion(
+            String actorEmail,
+            UUID noteId,
+            CreateNoteVersionPayload payload
+    ) {
         notePolicyService.validateSuper(actorEmail, noteId);
 
         NoteDto note = redisService.getNote(noteId);
+        NoteVersionDto oldNoteVersion = redisService.getNoteVersion(noteId);
 
-        note.revisionLog().stream().peek(op -> {
+        for (TextOperation op : note.revisionLog()) {
             if (op.getState().equals(OpState.PENDING)) {
                 op.setState(OpState.COMMITTED);
             }
-        }).toList();
+        }
+
+        Delta newMasterDelta = QuillDeltaUtils.emptyDocument();
+
+        List<TextOperation> committedOps = note.revisionLog().stream()
+                .filter(op -> op.getState().equals(OpState.COMMITTED))
+                .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                .toList();
+
+        for (TextOperation textOp : committedOps) {
+            newMasterDelta = newMasterDelta.compose(
+                    new Delta(textOp.getDelta().ops)
+            );
+        }
+        newMasterDelta = QuillDeltaUtils.ensureTerminalNewline(newMasterDelta);
+
+        int newRevision = committedOps.stream()
+                .mapToInt(TextOperation::getRevision)
+                .max()
+                .orElse(oldNoteVersion.revision());
+
+        NoteVersionDto newWorkingNoteVersion = new NoteVersionDto(
+                oldNoteVersion.id(),
+                newMasterDelta,
+                newRevision,
+                oldNoteVersion.comment(),
+                oldNoteVersion.versionNumber(),
+                oldNoteVersion.createdAt()
+        );
+
+        redisService.updateNote(note, newWorkingNoteVersion);
+        noteService.saveNote(actorEmail, noteId);
 
         Note updatedNote = notePolicyService.validateSuper(actorEmail, noteId);
 
-        NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-
-        redisService.updateNote(note, noteVersion);
-        noteService.saveNote(actorEmail, noteId);
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
                 updatedNote,
-                noteVersion.masterDelta(),
-                noteVersion.revision(),
+                newMasterDelta,
+                newRevision,
                 payload.comment(),
                 noteVersionRepository.findMaxVersionByNoteId(noteId) + 1
         );
 
         redisService.setReviewInProgress(noteId, actorEmail, "false");
-//        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
 
-        return noteVersionMapper.toDto(noteVersionRepository.save(newNoteVersion));
+        return noteVersionMapper.toDto(
+                noteVersionRepository.save(newNoteVersion)
+        );
     }
 
     @Transactional

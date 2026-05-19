@@ -40,9 +40,9 @@ public class ReviewOperationAccumulator {
     public void recordFormatCancellation(
             String opId,
             int componentIndex,
-            String attributeKey,
             int componentStart,
-            int length
+            int length,
+            String attributeKey
     ) {
         recordCancellation(opId, componentIndex, componentStart, length, attributeKey);
     }
@@ -125,7 +125,7 @@ public class ReviewOperationAccumulator {
         }
 
         boolean changed = false;
-        Map<String, OpReviewDecision> grouped = groupByOp();
+        Map<String, OpReviewDecision> grouped = groupByOp(logOps);
 
         for (Map.Entry<String, OpReviewDecision> entry : grouped.entrySet()) {
             String opId = entry.getKey();
@@ -136,8 +136,6 @@ public class ReviewOperationAccumulator {
             if (textOp == null || textOp.getDelta() == null || textOp.getDelta().ops == null) {
                 continue;
             }
-
-            routeTextRangesByActualOpType(textOp.getDelta(), decision, opId);
 
             SplitResult split = splitOperation(textOp.getDelta(), decision, opId);
 
@@ -186,7 +184,7 @@ public class ReviewOperationAccumulator {
         boolean changed = false;
         Delta committedMasterDelta = new Delta();
 
-        Map<String, OpReviewDecision> grouped = groupByOp();
+        Map<String, OpReviewDecision> grouped = groupByOp(logOps);
 
         for (Map.Entry<String, OpReviewDecision> entry : grouped.entrySet()) {
             String opId = entry.getKey();
@@ -197,7 +195,6 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
-            routeTextRangesByActualOpType(textOp.getDelta(), decision, opId);
             SplitResult split = splitOperation(textOp.getDelta(), decision, opId);
 
             Delta accepted = split.accepted().chop();
@@ -254,61 +251,6 @@ public class ReviewOperationAccumulator {
         return new ReviewApplyResult(changed, committedMasterDelta.chop());
     }
 
-    private void routeTextRangesByActualOpType(
-            Delta delta,
-            OpReviewDecision decision,
-            String opId
-    ) {
-        List<CompKey> keys = new ArrayList<>();
-
-        keys.addAll(acceptedTextRanges.keySet());
-        keys.addAll(rejectedTextRanges.keySet());
-
-        for (CompKey key : keys) {
-            if (!Objects.equals(key.opId(), opId)) continue;
-            if (key.componentIndex() < 0 || key.componentIndex() >= delta.ops.size()) continue;
-
-            Op op = delta.ops.get(key.componentIndex());
-
-            List<CharRange> accepted = acceptedTextRanges.get(key);
-            List<CharRange> rejected = rejectedTextRanges.get(key);
-
-            if (op.isInsert()) {
-                if (accepted != null) {
-                    decision.acceptedInsertRanges.put(
-                            key.componentIndex(),
-                            mergeRanges(accepted)
-                    );
-                }
-
-                if (rejected != null) {
-                    decision.rejectedInsertRanges.put(
-                            key.componentIndex(),
-                            mergeRanges(rejected)
-                    );
-                }
-
-                continue;
-            }
-
-            if (op.isDelete()) {
-                if (accepted != null) {
-                    decision.acceptedDeleteRanges.put(
-                            key.componentIndex(),
-                            mergeRanges(accepted)
-                    );
-                }
-
-                if (rejected != null) {
-                    decision.rejectedDeleteRanges.put(
-                            key.componentIndex(),
-                            mergeRanges(rejected)
-                    );
-                }
-            }
-        }
-    }
-
     private SplitResult splitOperation(
             Delta original,
             OpReviewDecision decision,
@@ -329,7 +271,7 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
-            if (op.isInsert() && op.getInsert() instanceof String text) {
+            else if (op.isInsert() && op.getInsert() instanceof String text) {
                 List<CharRange> acceptedRanges = clampRanges(decision.acceptedInsertRanges.get(i), text.length());
                 List<CharRange> rejectedRanges = clampRanges(decision.rejectedInsertRanges.get(i), text.length());
 
@@ -337,7 +279,7 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
-            if (op.isInsert() && !(op.getInsert() instanceof String)) {
+            else if (op.isInsert() && op.getInsert() != null && !(op.getInsert() instanceof String)) {
                 List<CharRange> acceptedRanges =
                         clampRanges(decision.acceptedInsertRanges.get(i), 1);
 
@@ -357,7 +299,7 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
-            if (op.isDelete()) {
+            else if (op.isDelete()) {
                 int len = op.getDelete();
 
                 List<CharRange> acceptedRanges = clampRanges(decision.acceptedDeleteRanges.get(i), len);
@@ -367,7 +309,7 @@ public class ReviewOperationAccumulator {
                 continue;
             }
 
-            if (op.isRetain() && op.getAttributes() != null) {
+            else if (op.isRetain() && op.getAttributes() != null) {
                 int len = (Integer) op.getRetain();
 
                 Map<String, List<CharRange>> acceptedFormats =
@@ -599,6 +541,10 @@ public class ReviewOperationAccumulator {
 
         raw.sort(Comparator.comparingInt(SliceDecision::start));
 
+        return getSliceDecisions(componentLength, raw);
+    }
+
+    private static List<SliceDecision> getSliceDecisions(int componentLength, List<SliceDecision> raw) {
         List<SliceDecision> out = new ArrayList<>();
 
         for (SliceDecision next : raw) {
@@ -616,19 +562,18 @@ public class ReviewOperationAccumulator {
 
             out.add(new SliceDecision(start, end, next.type()));
         }
-
         return out;
     }
 
-    private Map<String, OpReviewDecision> groupByOp() {
+    private Map<String, OpReviewDecision> groupByOp(List<TextOperation> logOps) {
         Map<String, OpReviewDecision> grouped = new LinkedHashMap<>();
 
-        acceptedTextRanges.keySet().forEach(key ->
-                grouped.computeIfAbsent(key.opId(), k -> new OpReviewDecision())
+        acceptedTextRanges.forEach((key, ranges) ->
+                addTextRangesToGroupedDecision(grouped, logOps, key, ranges, true)
         );
 
-        rejectedTextRanges.keySet().forEach(key ->
-                grouped.computeIfAbsent(key.opId(), k -> new OpReviewDecision())
+        rejectedTextRanges.forEach((key, ranges) ->
+                addTextRangesToGroupedDecision(grouped, logOps, key, ranges, false)
         );
 
         acceptedFormatRanges.forEach((key, ranges) ->
@@ -642,6 +587,57 @@ public class ReviewOperationAccumulator {
         );
 
         return grouped;
+    }
+
+    private void addTextRangesToGroupedDecision(
+            Map<String, OpReviewDecision> grouped,
+            List<TextOperation> logOps,
+            CompKey key,
+            List<CharRange> ranges,
+            boolean accepted
+    ) {
+        if (key == null || ranges == null || ranges.isEmpty()) {
+            return;
+        }
+
+        TextOperation textOp = findOp(logOps, key.opId());
+
+        if (
+                textOp == null
+                        || textOp.getDelta() == null
+                        || textOp.getDelta().ops == null
+                        || key.componentIndex() < 0
+                        || key.componentIndex() >= textOp.getDelta().ops.size()
+        ) {
+            return;
+        }
+
+        Op op = textOp.getDelta().ops.get(key.componentIndex());
+        List<CharRange> mergedRanges = mergeRanges(ranges);
+
+        if (mergedRanges.isEmpty()) {
+            return;
+        }
+
+        OpReviewDecision decision = grouped.computeIfAbsent(key.opId(), k -> new OpReviewDecision());
+
+        if (op.isInsert()) {
+            if (accepted) {
+                decision.acceptedInsertRanges.put(key.componentIndex(), mergedRanges);
+            } else {
+                decision.rejectedInsertRanges.put(key.componentIndex(), mergedRanges);
+            }
+
+            return;
+        }
+
+        if (op.isDelete()) {
+            if (accepted) {
+                decision.acceptedDeleteRanges.put(key.componentIndex(), mergedRanges);
+            } else {
+                decision.rejectedDeleteRanges.put(key.componentIndex(), mergedRanges);
+            }
+        }
     }
 
     private Map<String, List<CharRange>> mergeFormatRanges(Map<String, List<CharRange>> input) {

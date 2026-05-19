@@ -3,14 +3,12 @@ package com.example.notes.services.impl;
 import com.example.notes.dto.attribution.ReviewDecisionReference;
 import com.example.notes.dto.attribution.ReviewOperationAccumulator;
 import com.example.notes.dto.attribution.ReviewProjection;
-import com.example.notes.dto.attribution.Reference;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
-import com.example.notes.dto.ot.Op;
 import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.entities.note.Note;
@@ -28,6 +26,7 @@ import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
 import com.example.notes.services.RedisService;
+import com.example.notes.utils.QuillDeltaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +34,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class NoteServiceImpl implements NoteService {
@@ -129,13 +127,21 @@ public class NoteServiceImpl implements NoteService {
         );
         newNote = noteRepository.save(newNote);
 
-        Delta initialDelta = payload.initialDelta() != null ? payload.initialDelta() : new Delta();
-        boolean hasContent = initialDelta.ops != null && !initialDelta.ops.isEmpty();
+        Delta rawInitialDelta =
+                payload.initialDelta() != null ? payload.initialDelta() : new Delta();
+
+        boolean hasContent =
+                rawInitialDelta.ops != null && !rawInitialDelta.ops.isEmpty();
+
+        Delta initialDelta =
+                hasContent
+                        ? QuillDeltaUtils.ensureTerminalNewline(rawInitialDelta)
+                        : QuillDeltaUtils.emptyDocument();
 
         NoteVersion noteCopyVersion  = new NoteVersion(
                 null,
                 newNote,
-                hasContent ? initialDelta : new Delta(),
+                initialDelta,
                 0,
                 "Note copy",
                 0
@@ -191,14 +197,31 @@ public class NoteServiceImpl implements NoteService {
 
         boolean isReviewing = redisService.isReviewInProgress(noteId, note.ownerEmail());
 
-//        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
-
         redisService.addCollaboratorToNote(noteId, actorEmail);
 
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
         collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
-        return new JoinNoteResponse(collaborators, noteVersion.masterDelta(), noteVersion.revision(), isReviewing);
+        Delta normalizedMasterDelta =
+                QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+
+        NoteVersionDto normalizedNoteVersion = new NoteVersionDto(
+                noteVersion.id(),
+                normalizedMasterDelta,
+                noteVersion.revision(),
+                noteVersion.comment(),
+                noteVersion.versionNumber(),
+                noteVersion.createdAt()
+        );
+
+        redisService.updateNote(note, normalizedNoteVersion);
+
+        return new JoinNoteResponse(
+                collaborators,
+                normalizedMasterDelta,
+                noteVersion.revision(),
+                isReviewing
+        );
     }
 
     @Override
@@ -261,7 +284,11 @@ public class NoteServiceImpl implements NoteService {
                         && !result.committedMasterDelta().ops.isEmpty()
         ) {
             Delta newMasterDelta =
-                    noteVersion.masterDelta().compose(result.committedMasterDelta());
+                    QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+            newMasterDelta =
+                    QuillDeltaUtils.ensureTerminalNewline(
+                            newMasterDelta.compose(result.committedMasterDelta())
+                    );
 
             newNoteVersion = new NoteVersionDto(
                     noteVersion.id(),

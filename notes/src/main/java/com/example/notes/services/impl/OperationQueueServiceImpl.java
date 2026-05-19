@@ -9,6 +9,7 @@ import com.example.notes.notifier.OperationRelayer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.services.OperationQueueService;
 import com.example.notes.services.RedisService;
+import com.example.notes.utils.QuillDeltaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,9 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+
+        Delta currentMasterDelta =
+                QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
 
         int serverRevision = noteVersion.revision();
         int clientRevision = message.getRevision();
@@ -87,9 +91,14 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 note.updatedAt()
         );
 
+        Delta newMasterDelta =
+                QuillDeltaUtils.ensureTerminalNewline(
+                        currentMasterDelta.compose(transformedDelta)
+                );
+
         NoteVersionDto newRedisNoteVersion = new NoteVersionDto(
                 noteVersion.id(),
-                noteVersion.masterDelta().compose(transformedDelta),
+                newMasterDelta,
                 serverRevision + 1,
                 noteVersion.comment(),
                 noteVersion.versionNumber(),
