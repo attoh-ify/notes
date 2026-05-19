@@ -275,30 +275,23 @@ public class NoteServiceImpl implements NoteService {
         ReviewOperationAccumulator.ReviewApplyResult result =
                 accumulator.applyReviewDecisionsToRevisionLog(note.revisionLog());
 
-        NoteVersionDto newNoteVersion = noteVersion;
-
-        if (
-                result.changed()
-                        && result.committedMasterDelta() != null
-                        && result.committedMasterDelta().ops != null
-                        && !result.committedMasterDelta().ops.isEmpty()
-        ) {
-            Delta newMasterDelta =
-                    QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
-            newMasterDelta =
-                    QuillDeltaUtils.ensureTerminalNewline(
-                            newMasterDelta.compose(result.committedMasterDelta())
-                    );
-
-            newNoteVersion = new NoteVersionDto(
-                    noteVersion.id(),
-                    newMasterDelta,
-                    noteVersion.revision() + 1,
-                    noteVersion.comment(),
-                    noteVersion.versionNumber(),
-                    noteVersion.createdAt()
-            );
+        if (!result.changed()) {
+            redisService.updateNote(note, noteVersion);
+            saveNote(actorEmail, noteId);
+            return;
         }
+
+        Delta newMasterDelta =
+                rebuildLiveMasterDeltaFromRevisionLog(note.revisionLog());
+
+        NoteVersionDto newNoteVersion = new NoteVersionDto(
+                noteVersion.id(),
+                newMasterDelta,
+                noteVersion.revision() + 1,
+                noteVersion.comment(),
+                noteVersion.versionNumber(),
+                noteVersion.createdAt()
+        );
 
         redisService.updateNote(note, newNoteVersion);
         saveNote(actorEmail, noteId);
@@ -328,5 +321,25 @@ public class NoteServiceImpl implements NoteService {
         Note note = notePolicyService.validateSuper(userEmail, noteId);
         note.setVisibility(visibility);
         noteRepository.save(note);
+    }
+
+    private Delta rebuildLiveMasterDeltaFromRevisionLog(List<TextOperation> revisionLog) {
+        Delta delta = QuillDeltaUtils.emptyDocument();
+
+        List<TextOperation> liveOps = revisionLog.stream()
+                .filter(this::shouldIncludeInLiveMaster)
+                .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                .toList();
+
+        for (TextOperation op : liveOps) {
+            delta = delta.compose(new Delta(op.getDelta().ops));
+        }
+
+        return QuillDeltaUtils.ensureTerminalNewline(delta);
+    }
+
+    private boolean shouldIncludeInLiveMaster(TextOperation op) {
+        return op.getState().equals(OpState.COMMITTED)
+                || op.getState().equals(OpState.PENDING);
     }
 }
