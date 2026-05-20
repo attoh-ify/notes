@@ -773,6 +773,13 @@ public class AttributionServiceImpl implements AttributionService {
                             currentInsertGroup.getGroupId()
                     );
 
+                    shiftFormatSuggestionReferences(
+                            formatSuggestions,
+                            insertAbsPos,
+                            shiftLen,
+                            extendedGroupIds
+                    );
+
                     shiftBlockFormatSuggestionReferences(
                             blockFormatSuggestions,
                             insertAbsPos,
@@ -860,7 +867,6 @@ public class AttributionServiceImpl implements AttributionService {
                             localLogPos, localLogPos + shiftLen);
 
                     localLogPos += shiftLen;
-                    continue;
                 }
 
                 // ── CASE D: delete ────────────────────────────────────────────
@@ -961,6 +967,14 @@ public class AttributionServiceImpl implements AttributionService {
                             int deleteStartPos = target.getLogicalStart();
                             int deleteLen = target.length();
                             int deleteEndPos = deleteStartPos + deleteLen;
+
+                            if (isBlockTargetRun(target)) {
+                                cancelBlockSuggestionsForDeletedNewline(
+                                        blockFormatSuggestions,
+                                        accumulator,
+                                        target
+                                );
+                            }
 
                             runs.remove(cursor);
 
