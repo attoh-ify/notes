@@ -109,10 +109,8 @@ public class AttributionHelpers {
 
     /**
      * Locate a logical document position inside the ReviewRun list.
-     *
      * logicalPos ignores deleted-suggestion runs because deleted runs are visible
      * in review mode but do not count as live document text.
-     *
      * absPos tracks the visual/runtime position, including deleted runs.
      */
     public static RunPosition findRunPos(List<ReviewRun> runs, int logicalPos) {
@@ -1054,8 +1052,7 @@ public class AttributionHelpers {
             List<Reference> before = cloneSuggestionReferences(run.getReferences());
             run.setReferences(deleteRangeFromSuggestionReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
             if (!run.getReferences().equals(before)) {
-                log.debug("[HELPER:REFS] deleteRangeFromRunReferences run text='{}' before={} after={}",
-                        runTextForLog(run));
+                log.debug("[HELPER:REFS] deleteRangeFromRunReferences run text='{}'", runTextForLog(run));
                 count++;
             }
         }
@@ -1384,20 +1381,44 @@ public class AttributionHelpers {
             String actorEmail,
             String createdAt,
             String attrKey,
-            Object attrValue
+            Object attrValue,
+            int spanStart  // <-- new param: the newline's logicalStart
     ) {
         BlockGroupKey key = new BlockGroupKey(attrKey, attrValue);
 
+        // 1. Same op already started a group for this key+value → reuse it
         BlockFormatSuggestionItem existingInOp = currentBlockGroups.get(key);
         if (existingInOp != null) return existingInOp;
 
+        BlockFormatBehavior behavior = blockBehaviorFor(attrKey);
+
+        // 2. For CONTINUING behaviors, scan for an adjacent existing group across ops
+        if (behavior == BlockFormatBehavior.CONTINUING) {
+            BlockFormatSuggestionItem adjacent = blockFormatSuggestions.stream()
+                    .filter(f -> actorEmail.equals(f.getActorEmail()))
+                    .filter(f -> attrKey.equals(f.getAttributeKey()))
+                    .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
+                    .filter(f -> f.getBehavior() == BlockFormatBehavior.CONTINUING)
+                    .filter(f -> isContinuingBlockSuggestionAdjacent(f, spanStart))
+                    .findFirst()
+                    .orElse(null);
+
+            if (adjacent != null) {
+                log.debug("[HELPER:BLOCK] findOrCreateCurrentBlockGroup REUSING groupId={} for attrKey={} spanStart={}",
+                        adjacent.getGroupId(), attrKey, spanStart);
+                currentBlockGroups.put(key, adjacent);
+                return adjacent;
+            }
+        }
+
+        // 3. Create new group
         BlockFormatSuggestionItem created = BlockFormatSuggestionItem.builder()
                 .groupId(nextId())
                 .actorEmail(actorEmail)
                 .createdAt(createdAt)
                 .attributeKey(attrKey)
                 .attributeValue(attrValue)
-                .behavior(blockBehaviorFor(attrKey))
+                .behavior(behavior)
                 .conflictGroup(blockConflictGroupFor(attrKey))
                 .references(new ArrayList<>())
                 .previewText("")
@@ -1408,7 +1429,37 @@ public class AttributionHelpers {
         blockFormatSuggestions.add(created);
         currentBlockGroups.put(key, created);
 
+        log.debug("[HELPER:BLOCK] findOrCreateCurrentBlockGroup CREATED groupId={} attrKey={} spanStart={}",
+                created.getGroupId(), attrKey, spanStart);
         return created;
+    }
+
+    /**
+     * A CONTINUING block suggestion is "adjacent" to a new newline at spanStart if
+     * any of its references ends exactly at spanStart (i.e. the previous newline
+     * was at spanStart-1 and its reference covers [spanStart-1, 1]).
+     * We also allow a gap of exactly one character to handle the case where the
+     * incoming retain component straddles a non-newline run between two newlines
+     * (e.g. list items with content between them).
+     * More precisely: the merged reference range ends at or reaches spanStart.
+     */
+    private static boolean isContinuingBlockSuggestionAdjacent(
+            BlockFormatSuggestionItem item,
+            int spanStart
+    ) {
+        List<ReviewRange> ranges = deriveMergedRangesFromReferences(item.getReferences());
+
+        for (ReviewRange range : ranges) {
+            int rangeEnd = range.getStart() + range.getLength();
+            // The previous newline run ended at rangeEnd.
+            // The next newline we're processing is at spanStart.
+            // They are part of the same logical list if rangeEnd <= spanStart
+            // (content runs sit between them but don't break the list group).
+            if (rangeEnd <= spanStart) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void addBlockInsertDependency(BlockFormatSuggestionItem item, String insertGroupId) {
@@ -1525,7 +1576,8 @@ public class AttributionHelpers {
                 authorEmail,
                 createdAt,
                 attrKey,
-                attrValue
+                attrValue,
+                spanStart
         );
 
         if (target.getInsertSuggestion() != null) {
