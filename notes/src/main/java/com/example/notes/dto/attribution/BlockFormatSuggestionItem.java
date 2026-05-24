@@ -22,16 +22,12 @@ public class BlockFormatSuggestionItem {
     private Object attributeValue;
     private BlockFormatBehavior behavior;
     private BlockFormatConflictGroup conflictGroup;
-
     @Builder.Default
     private List<Reference> references = new ArrayList<>();
-
     @Builder.Default
     private String previewText = "";
-
     @Builder.Default
     private List<String> dependsOnInsertGroupIds = new ArrayList<>();
-
     @Builder.Default
     private List<String> dependsOnDeleteGroupIds = new ArrayList<>();
 }

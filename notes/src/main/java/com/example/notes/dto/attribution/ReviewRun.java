@@ -13,6 +13,7 @@ import java.util.Map;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReviewRun {
+    private String id;
     private String text;
     private Object embed;
 
@@ -27,6 +28,7 @@ public class ReviewRun {
 
     private int logicalStart;
     private InsertSuggestion insertSuggestion;
+    private NewlineSuggestion newlineSuggestion;
     private DeleteSuggestion deleteSuggestion;
 
     public boolean isEmbed() {
@@ -35,6 +37,14 @@ public class ReviewRun {
 
     public boolean isText() {
         return text != null;
+    }
+
+    public boolean isNewline() {
+        return isText() && "\n".equals(text);
+    }
+
+    public boolean hasInsertLikeSuggestion() {
+        return insertSuggestion != null || newlineSuggestion != null;
     }
 
     public int length() {
