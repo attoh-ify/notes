@@ -15,17 +15,30 @@ import java.util.Map;
 public class HandshakeInterceptorImpl implements HandshakeInterceptor {
     private static final Logger log = LoggerFactory.getLogger(HandshakeInterceptorImpl.class);
 
-    @Override
-    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
-        if (request instanceof ServletServerHttpRequest servletRequest) {
-            var httpServletRequest = servletRequest.getServletRequest();
+    private static final String ACCESS_TOKEN_COOKIE = "access_token";
 
-            if (httpServletRequest.getCookies() != null) {
-                for (var cookie : httpServletRequest.getCookies()) {
-                    attributes.put(cookie.getName(), cookie.getValue());
-                }
+    @Override
+    public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) {
+        if (!(request instanceof ServletServerHttpRequest servletRequest)) {
+            return true;
+        }
+
+        var httpServletRequest = servletRequest.getServletRequest();
+        var cookies = httpServletRequest.getCookies();
+
+        if (cookies == null) {
+            return true;
+        }
+
+        for (var cookie : cookies) {
+            if (ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
+                attributes.put(ACCESS_TOKEN_COOKIE, cookie.getValue());
+                return true;
             }
         }
+
+        log.debug("No access_token cookie found during websocket handshake");
+
         return true;
     }
 

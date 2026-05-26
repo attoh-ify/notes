@@ -23,4 +23,7 @@ public interface RedisService {
 
     void setReviewInProgress(UUID noteId, String ownerEmail, String value);
     boolean isReviewInProgress(UUID noteId, String ownerEmail);
+
+    void addCollaboratorSession(UUID noteId, String actorEmail, String sessionId);
+    boolean removeCollaboratorSession(UUID noteId, String sessionId);
 }

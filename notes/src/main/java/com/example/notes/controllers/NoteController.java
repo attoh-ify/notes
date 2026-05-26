@@ -66,12 +66,12 @@ public class NoteController {
     }
 
     @PostMapping("/{noteId}/enqueue")
-    public ResponseDto enqueue(@PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
+    public ResponseDto enqueue(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
         OperationQueueInPayload payload = new OperationQueueInPayload(
                 noteId,
                 operation.getOpId(),
                 operation.getRevision(),
-                operation.getActorEmail(),
+                currentUser.getEmail(),
                 operation.getDelta()
         );
         messageProducer.sendMessage(payload, noteId);

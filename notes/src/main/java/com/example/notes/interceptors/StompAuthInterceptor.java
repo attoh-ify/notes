@@ -1,6 +1,8 @@
 package com.example.notes.interceptors;
 
+import com.example.notes.dto.message_payload.CollaboratorsPayload;
 import com.example.notes.services.JwtService;
+import com.example.notes.services.RedisService;
 import com.example.notes.services.impl.MyUserDetailsService;
 import com.example.notes.services.impl.NotePolicyService;
 import org.slf4j.Logger;
@@ -22,13 +24,15 @@ public class StompAuthInterceptor implements ChannelInterceptor {
     private final NotePolicyService notePolicyService;
     private final JwtService jwtService;
     private final ApplicationContext context;
+    private final RedisService redisService;
 
     private static final Logger log = LoggerFactory.getLogger(StompAuthInterceptor.class);
 
-    public StompAuthInterceptor(NotePolicyService notePolicyService, JwtService jwtService, ApplicationContext context) {
+    public StompAuthInterceptor(NotePolicyService notePolicyService, JwtService jwtService, ApplicationContext context, RedisService redisService) {
         this.notePolicyService = notePolicyService;
         this.jwtService = jwtService;
         this.context = context;
+        this.redisService = redisService;
     }
 
     @Override
@@ -96,6 +100,21 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 log.debug("Authorizing SUBSCRIBE user={} noteId={}", userEmail, noteId);
 
                 notePolicyService.validateEditor(userEmail, noteId);
+
+                String sessionId = accessor.getSessionId();
+
+                redisService.addCollaboratorSession(noteId, userEmail, sessionId);
+
+                return message;
+            }
+
+            if (destination.startsWith("/topic/")) {
+                log.warn("Unauthorized topic subscription attempt. user={} destination={}",
+                        principal.getName(),
+                        destination
+                );
+
+                throw new IllegalStateException("Unauthorized topic subscription");
             }
         }
 

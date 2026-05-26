@@ -78,12 +78,12 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
                 TextOperation historyOp = note.revisionLog().get(logIndex);
 
-                if (historyOp.getActorEmail().equals(message.getFrom())) {
-                    log.info("Same actor, skipping");
+                if (opId.equals(historyOp.getOpId())) {
+                    log.info("Same opId in history, skipping transform. opId={}", opId);
                     continue;
                 }
 
-                boolean serverHasOpPriority = message.getFrom().compareTo(historyOp.getActorEmail()) > 0;
+                boolean serverHasOpPriority = serverHasPriority(message, historyOp);
 
                 transformedDelta = historyOp.getDelta().transform(transformedDelta, serverHasOpPriority);
             }
@@ -143,5 +143,15 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         }
 
         return null;
+    }
+
+    private boolean serverHasPriority(OperationQueueInPayload incoming, TextOperation historyOp) {
+        int actorCompare = incoming.getFrom().compareTo(historyOp.getActorEmail());
+
+        if (actorCompare != 0) {
+            return actorCompare > 0;
+        }
+
+        return incoming.getOpId().compareTo(historyOp.getOpId()) > 0;
     }
 }

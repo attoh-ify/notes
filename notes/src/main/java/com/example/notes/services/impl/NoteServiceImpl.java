@@ -197,10 +197,7 @@ public class NoteServiceImpl implements NoteService {
 
         boolean isReviewing = redisService.isReviewInProgress(noteId, note.ownerEmail());
 
-        redisService.addCollaboratorToNote(noteId, actorEmail);
-
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
-        collaboratorCountNotifier.notifyCount(noteId, new CollaboratorsPayload(collaborators));
 
         Delta normalizedMasterDelta =
                 QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());

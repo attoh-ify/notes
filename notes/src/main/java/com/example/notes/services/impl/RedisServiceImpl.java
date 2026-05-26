@@ -168,9 +168,16 @@ public class RedisServiceImpl implements RedisService {
         String noteKey = getNoteKey(noteId);
         String noteVersionKey = getNoteVersionKey(noteId);
         String noteCollaboratorKey = getNoteCollaboratorsKey(noteId);
+        String noteCollaboratorSessionsKey = getNoteCollaboratorSessionsKey(noteId);
         String noteInitialRevisionKey = getInitialRevisionKey(noteId);
 
-        redisTemplate.delete(List.of(noteKey, noteVersionKey, noteCollaboratorKey, noteInitialRevisionKey));
+        redisTemplate.delete(List.of(
+                noteKey,
+                noteVersionKey,
+                noteCollaboratorKey,
+                noteCollaboratorSessionsKey,
+                noteInitialRevisionKey
+        ));
     }
 
     @Override
@@ -189,20 +196,64 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void addCollaboratorToNote(UUID noteId, String actorEmail) {
-        String key = getNoteCollaboratorsKey(noteId);
+        String collaboratorsKey = getNoteCollaboratorsKey(noteId);
 
-        Object existingColor = redisTemplate.opsForHash().get(key, actorEmail);
+        Object existingColor = redisTemplate.opsForHash().get(collaboratorsKey, actorEmail);
         if (existingColor != null) return;
 
-        String assignColor = COLLABORATOR_COLORS[Math.abs(actorEmail.hashCode() % COLLABORATOR_COLORS.length)];
+        String assignedColor = COLLABORATOR_COLORS[Math.abs(actorEmail.hashCode() % COLLABORATOR_COLORS.length)];
 
-        redisTemplate.opsForHash().put(key, actorEmail, assignColor);
+        redisTemplate.opsForHash().put(collaboratorsKey, actorEmail, assignedColor);
+    }
+
+    @Override
+    public void addCollaboratorSession(UUID noteId, String actorEmail, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("WebSocket sessionId is required");
+        }
+
+        addCollaboratorToNote(noteId, actorEmail);
+
+        String sessionsKey = getNoteCollaboratorSessionsKey(noteId);
+        redisTemplate.opsForHash().put(sessionsKey, sessionId, actorEmail);
     }
 
     @Override
     public void removeCollaboratorFromNote(UUID noteId, String actorEmail) {
-        String key = getNoteCollaboratorsKey(noteId);
-        redisTemplate.opsForHash().delete(key, actorEmail);
+        String collaboratorsKey = getNoteCollaboratorsKey(noteId);
+        redisTemplate.opsForHash().delete(collaboratorsKey, actorEmail);
+    }
+
+    @Override
+    public boolean removeCollaboratorSession(UUID noteId, String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+
+        String sessionsKey = getNoteCollaboratorSessionsKey(noteId);
+        Object actorEmailObj = redisTemplate.opsForHash().get(sessionsKey, sessionId);
+
+        if (actorEmailObj == null) {
+            return false;
+        }
+
+        String actorEmail = actorEmailObj.toString();
+
+        redisTemplate.opsForHash().delete(sessionsKey, sessionId);
+
+        Map<Object, Object> remainingSessions = redisTemplate.opsForHash().entries(sessionsKey);
+
+        boolean stillConnected = remainingSessions
+                .values()
+                .stream()
+                .anyMatch(email -> actorEmail.equals(String.valueOf(email)));
+
+        if (!stillConnected) {
+            removeCollaboratorFromNote(noteId, actorEmail);
+            return true;
+        }
+
+        return false;
     }
 
     @Override
@@ -250,5 +301,9 @@ public class RedisServiceImpl implements RedisService {
 
     private String getReviewInProgressKey(UUID noteId) {
         return "note-review-in-progress:" + noteId;
+    }
+
+    private String getNoteCollaboratorSessionsKey(UUID noteId) {
+        return "note-collaborator-sessions:" + noteId;
     }
 }

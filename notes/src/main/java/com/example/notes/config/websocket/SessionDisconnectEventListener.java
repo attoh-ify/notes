@@ -35,39 +35,51 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
 
     @Override
     public void onApplicationEvent(SessionDisconnectEvent event) {
-
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
+
         Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
+        if (sessionAttributes == null) return;
 
-        if (sessionAttributes != null && sessionAttributes.containsKey("userId")) {
-            Principal principal = accessor.getUser();
+        if (!sessionAttributes.containsKey("userId")) return;
+        if (!sessionAttributes.containsKey("noteId")) return;
 
-            if (principal == null) {
-                log.warn("Unauthenticated principal");
-                throw new IllegalStateException("Unauthenticated principal");
-            }
+        Principal principal = accessor.getUser();
 
-            String userEmail = principal.getName();
-            UUID noteId = UUID.fromString((String) sessionAttributes.get("noteId"));
+        if (principal == null) {
+            log.warn("Disconnect event had no authenticated principal. sessionId={}", accessor.getSessionId());
+            return;
+        }
 
-            redisService.removeCollaboratorFromNote(noteId, userEmail);
-            NoteDto note = redisService.getNote(noteId);
-            Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
+        String userEmail = principal.getName();
+        UUID noteId = UUID.fromString((String) sessionAttributes.get("noteId"));
+        String sessionId = accessor.getSessionId();
 
-            if (redisService.isReviewInProgress(noteId, userEmail)) {
-                redisService.setReviewInProgress(noteId, userEmail, "false");
-                reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
-            }
+        boolean removedFinalUserSession =
+                redisService.removeCollaboratorSession(noteId, sessionId);
 
-            if (note != null) {
-                if (!collaborators.isEmpty()) {
-                    collaboratorCountNotifier.notifyCount(
-                            noteId,
-                            new CollaboratorsPayload(collaborators)
-                    );
-                } else {
-                    redisService.deleteNote(noteId);
-                }
+        NoteDto note = redisService.getNote(noteId);
+        Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
+
+        /*
+         * Only clear review-in-progress if this was the user's final active
+         * websocket session for this note.
+         */
+        if (removedFinalUserSession && redisService.isReviewInProgress(noteId, userEmail)) {
+            redisService.setReviewInProgress(noteId, userEmail, "false");
+            reviewInProgressNotifier.notifyReviewInProgress(
+                    noteId,
+                    new ReviewInProgressResponsePayload(noteId, false)
+            );
+        }
+
+        if (note != null) {
+            if (!collaborators.isEmpty()) {
+                collaboratorCountNotifier.notifyCount(
+                        noteId,
+                        new CollaboratorsPayload(collaborators)
+                );
+            } else {
+                redisService.deleteNote(noteId);
             }
         }
     }

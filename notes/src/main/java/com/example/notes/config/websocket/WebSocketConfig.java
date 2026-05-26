@@ -2,6 +2,7 @@ package com.example.notes.config.websocket;
 
 import com.example.notes.interceptors.StompAuthInterceptor;
 import com.example.notes.services.JwtService;
+import com.example.notes.services.RedisService;
 import com.example.notes.services.impl.NotePolicyService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
@@ -18,11 +19,18 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final NotePolicyService notePolicyService;
     private final JwtService jwtService;
     private final ApplicationContext context;
+    private final RedisService redisService;
 
-    public WebSocketConfig(NotePolicyService notePolicyService, JwtService jwtService, ApplicationContext context) {
+    public WebSocketConfig(
+            NotePolicyService notePolicyService,
+            JwtService jwtService,
+            ApplicationContext context,
+            RedisService redisService
+    ) {
         this.notePolicyService = notePolicyService;
         this.jwtService = jwtService;
         this.context = context;
+        this.redisService = redisService;
     }
 
     @Value("${app.frontend.url}")
@@ -45,6 +53,6 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(new StompAuthInterceptor(notePolicyService, jwtService, context));
+        registration.interceptors(new StompAuthInterceptor(notePolicyService, jwtService, context, redisService));
     }
 }
