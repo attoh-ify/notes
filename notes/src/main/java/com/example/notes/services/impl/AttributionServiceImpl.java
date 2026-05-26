@@ -1323,28 +1323,10 @@ public class AttributionServiceImpl implements AttributionService {
             }
 
             if (run.getNewlineSuggestion() != null) {
-                Map<String, Object> newlinePayload = new LinkedHashMap<>();
-                newlinePayload.put("groupId", run.getNewlineSuggestion().getGroupId());
-                newlinePayload.put("actorEmail", run.getNewlineSuggestion().getActorEmail());
-                newlinePayload.put("createdAt", run.getNewlineSuggestion().getCreatedAt());
-                newlinePayload.put("references", run.getReferences());
-                newlinePayload.put(
-                        "dependsOnReviewRunIds",
-                        run.getNewlineSuggestion().getDependsOnReviewRunIds()
+                attrs.put(
+                        "suggestion-newline",
+                        buildNewlineSuggestionPayload(run, false)
                 );
-                newlinePayload.put(
-                        "type",
-                        run.getNewlineSuggestion().getType() != null
-                                ? run.getNewlineSuggestion().getType()
-                                : NewlineSuggestionType.STANDALONE
-                );
-                newlinePayload.put("baseAttributes", !baseAttrs.isEmpty() ? baseAttrs : null);
-                newlinePayload.put(
-                        "suggestionAttributes",
-                        !suggestionAttrs.isEmpty() ? suggestionAttrs : null
-                );
-
-                attrs.put("suggestion-newline", newlinePayload);
             }
 
             if (run.getDeleteSuggestion() != null) {
@@ -1393,9 +1375,37 @@ public class AttributionServiceImpl implements AttributionService {
                 }
 
                 delta.insert(insertValue, attrs.isEmpty() ? null : attrs);
-            } else {
-                delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
+                continue;
             }
+
+            /*
+             * Standalone inserted newline needs a visible virtual marker.
+             * The marker is review-only content inserted into visualDelta.
+             * The actual newline is still retained and owns the source references.
+             */
+            if (
+                    run.getNewlineSuggestion() != null
+                            && run.isText()
+                            && "\n".equals(run.getText())
+                            && (
+                            run.getNewlineSuggestion().getType() == null
+                                    || run.getNewlineSuggestion().getType() == NewlineSuggestionType.STANDALONE
+                    )
+            ) {
+                Map<String, Object> markerAttrs = new LinkedHashMap<>();
+
+                markerAttrs.put(
+                        "suggestion-newline",
+                        buildNewlineSuggestionPayload(run, true)
+                );
+
+                delta.insert(" ↵ ", markerAttrs);
+
+                delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
+                continue;
+            }
+
+            delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
         }
 
         return delta;
@@ -1435,5 +1445,67 @@ public class AttributionServiceImpl implements AttributionService {
         if (!sameInsertContentKind(run, insertKind)) return null;
 
         return run.getInsertSuggestion();
+    }
+
+    private Map<String, Object> buildNewlineSuggestionPayload(
+            ReviewRun run,
+            boolean marker
+    ) {
+        NewlineSuggestion suggestion = run.getNewlineSuggestion();
+
+        Map<String, Object> baseAttrs =
+                run.getBaseAttributes() != null
+                        ? run.getBaseAttributes()
+                        : Collections.emptyMap();
+
+        Map<String, Object> suggestionAttrs =
+                run.getSuggestionAttributes() != null
+                        ? run.getSuggestionAttributes()
+                        : Collections.emptyMap();
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+
+        payload.put("groupId", suggestion.getGroupId());
+        payload.put("actorEmail", suggestion.getActorEmail());
+        payload.put("createdAt", suggestion.getCreatedAt());
+
+        /*
+         * The virtual marker must not own source refs.
+         * The real newline owns the refs so accept/reject is recorded once.
+         */
+        payload.put(
+                "references",
+                marker
+                        ? new ArrayList<>()
+                        : cloneSuggestionReferences(run.getReferences())
+        );
+
+        payload.put(
+                "dependsOnReviewRunIds",
+                suggestion.getDependsOnReviewRunIds() != null
+                        ? new ArrayList<>(suggestion.getDependsOnReviewRunIds())
+                        : new ArrayList<>()
+        );
+
+        payload.put(
+                "type",
+                suggestion.getType() != null
+                        ? suggestion.getType()
+                        : NewlineSuggestionType.STANDALONE
+        );
+
+        payload.put("marker", marker);
+
+        payload.put(
+                "baseAttributes",
+                !baseAttrs.isEmpty() ? new LinkedHashMap<>(baseAttrs) : null
+        );
+
+        payload.put(
+                "suggestionAttributes",
+                !suggestionAttrs.isEmpty() ? new LinkedHashMap<>(suggestionAttrs) : null
+        );
+
+        return payload;
     }
 }

@@ -27,6 +27,15 @@ public class TextOperation {
         this.createdAt = createdAt;
     }
 
+    public TextOperation(String opId, Delta delta, String actorEmail, int revision, OpState state, LocalDateTime createdAt) {
+        this.opId = opId;
+        this.delta = delta;
+        this.actorEmail = actorEmail;
+        this.revision = revision;
+        this.state = state;
+        this.createdAt = createdAt;
+    }
+
     @Override
     public String toString() {
         return "TextOperation{" +

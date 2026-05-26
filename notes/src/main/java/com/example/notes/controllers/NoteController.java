@@ -69,6 +69,7 @@ public class NoteController {
     public ResponseDto enqueue(@PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
         OperationQueueInPayload payload = new OperationQueueInPayload(
                 noteId,
+                operation.getOpId(),
                 operation.getRevision(),
                 operation.getActorEmail(),
                 operation.getDelta()

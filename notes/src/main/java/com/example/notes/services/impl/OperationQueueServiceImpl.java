@@ -38,6 +38,26 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
+        String opId = message.getOpId();
+
+        if (opId == null || opId.isBlank()) {
+            throw new IllegalArgumentException("Operation opId is required");
+        }
+
+        TextOperation alreadyProcessed = findOperationById(note, opId);
+
+        if (alreadyProcessed != null) {
+            log.info(
+                    "Duplicate operation received. noteId={} opId={} existingRevision={}",
+                    noteId,
+                    opId,
+                    alreadyProcessed.getRevision()
+            );
+
+            operationRelayer.relay(noteId, alreadyProcessed);
+            return;
+        }
+
         Delta currentMasterDelta =
                 QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
 
@@ -70,6 +90,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         }
 
         TextOperation newTextOperation = new TextOperation(
+                opId,
                 transformedDelta,
                 message.getFrom(),
                 serverRevision + 1,
@@ -107,5 +128,20 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         redisService.updateNote(newRedisNote, newRedisNoteVersion);
         operationRelayer.relay(noteId, newTextOperation);
+    }
+
+    private TextOperation findOperationById(NoteDto note, String opId) {
+        if (note == null || note.revisionLog() == null) return null;
+        if (opId == null || opId.isBlank()) return null;
+
+        for (TextOperation op : note.revisionLog()) {
+            if (op == null) continue;
+
+            if (opId.equals(op.getOpId())) {
+                return op;
+            }
+        }
+
+        return null;
     }
 }
