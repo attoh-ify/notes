@@ -145,13 +145,26 @@ public class RedisServiceImpl implements RedisService {
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
             String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
+            String noteId = note.id().toString();
+            String dirtyTimestamp = String.valueOf(System.currentTimeMillis());
 
-            redisTemplate.opsForValue().set(noteKey, jsonNote);
-            redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
+            String script = """
+                redis.call('set', KEYS[1], ARGV[1])
+                redis.call('set', KEYS[2], ARGV[2])
+                redis.call('zadd', KEYS[3], ARGV[3], ARGV[4])
+                return 1
+                """;
 
-            markNoteDirty(note.id());
+            redisTemplate.execute(
+                    new DefaultRedisScript<>(script, Long.class),
+                    List.of(noteKey, noteVersionKey, DIRTY_NOTES_KEY),
+                    jsonNote,
+                    jsonNoteVersion,
+                    dirtyTimestamp,
+                    noteId
+            );
         } catch (Exception e) {
-            log.error("Failed to update note: {}", note.id(), e);
+            log.error("Failed to update note atomically: {}", note.id(), e);
             throw new RuntimeException(e);
         }
     }
