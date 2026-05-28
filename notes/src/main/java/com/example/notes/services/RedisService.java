@@ -6,6 +6,7 @@ import com.example.notes.dto.ot.TextOperation;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public interface RedisService {
@@ -16,6 +17,7 @@ public interface RedisService {
 
     NoteVersionDto getNoteVersion(UUID noteId);
     int getInitialRevision(UUID noteId);
+    void setInitialRevision(UUID noteId, int revision);
 
     void addCollaboratorToNote(UUID noteId, String actorEmail);
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);
@@ -26,4 +28,21 @@ public interface RedisService {
 
     void addCollaboratorSession(UUID noteId, String actorEmail, String sessionId);
     boolean removeCollaboratorSession(UUID noteId, String sessionId);
+
+    void markNoteDirty(UUID noteId);
+    Set<UUID> getDirtyNotesDueForPersistence(int limit, long olderThanMillis);
+    boolean tryAcquirePersistenceLock(UUID noteId, String owner, long ttlSeconds);
+    void releasePersistenceLock(UUID noteId, String owner);
+    void clearDirtyNoteIfRevisionUnchanged(UUID noteId, int persistedRevision);
+
+    boolean tryAcquireOperationLock(UUID noteId, String owner, long ttlSeconds);
+    void releaseOperationLock(UUID noteId, String owner);
+
+    TextOperation getProcessedOperation(UUID noteId, String opId);
+    void saveProcessedOperation(UUID noteId, TextOperation operation);
+
+    void compactTransformRevisionLogIfNeeded(UUID noteId, NoteDto note, int maxLogSize, int keepLatest);
+    void appendPendingHistoryOperation(UUID noteId, TextOperation operation);
+    List<TextOperation> getPendingHistoryOperations(UUID noteId);
+    void clearPendingHistoryOperationsUpToRevision(UUID noteId, int savedRevision);
 }

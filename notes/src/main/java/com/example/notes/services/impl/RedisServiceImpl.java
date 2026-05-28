@@ -11,8 +11,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.*;
 
 @Service
@@ -24,6 +26,9 @@ public class RedisServiceImpl implements RedisService {
     private final ObjectMapper objectMapper;
     private final NotePolicyService notePolicyService;
 
+    private static final String DIRTY_NOTES_KEY = "dirty-notes";
+    private static final String PERSIST_LOCK_PREFIX = "persist-lock:";
+    private static final String OPERATION_LOCK_PREFIX = "operation-lock:";
     private static final String[] COLLABORATOR_COLORS = {
             "#1F3A93",
             "#D32F2F",
@@ -91,7 +96,7 @@ public class RedisServiceImpl implements RedisService {
         if (redisTemplate.hasKey(noteKey)) return;
 
         Note note = notePolicyService.validateEditor(actorEmail, noteId);
-        NoteVersion noteVersion = notePolicyService.findNoteVersionByNoteId(noteId);
+        NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
 
         NoteDto redisNote = new NoteDto(
                 note.getId(),
@@ -143,6 +148,8 @@ public class RedisServiceImpl implements RedisService {
 
             redisTemplate.opsForValue().set(noteKey, jsonNote);
             redisTemplate.opsForValue().set(noteVersionKey, jsonNoteVersion);
+
+            markNoteDirty(note.id());
         } catch (Exception e) {
             log.error("Failed to update note: {}", note.id(), e);
             throw new RuntimeException(e);
@@ -170,14 +177,26 @@ public class RedisServiceImpl implements RedisService {
         String noteCollaboratorKey = getNoteCollaboratorsKey(noteId);
         String noteCollaboratorSessionsKey = getNoteCollaboratorSessionsKey(noteId);
         String noteInitialRevisionKey = getInitialRevisionKey(noteId);
+        String reviewInProgressKey = getReviewInProgressKey(noteId);
+        String persistenceLockKey = getPersistenceLockKey(noteId);
+        String operationLockKey = getOperationLockKey(noteId);
+        String processedOpsKey = getProcessedOperationsKey(noteId);
+        String pendingHistoryKey = getPendingHistoryKey(noteId);
 
         redisTemplate.delete(List.of(
                 noteKey,
                 noteVersionKey,
                 noteCollaboratorKey,
                 noteCollaboratorSessionsKey,
-                noteInitialRevisionKey
+                noteInitialRevisionKey,
+                reviewInProgressKey,
+                persistenceLockKey,
+                operationLockKey,
+                processedOpsKey,
+                pendingHistoryKey
         ));
+
+        redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, noteId.toString());
     }
 
     @Override
@@ -257,6 +276,346 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
+    public void markNoteDirty(UUID noteId) {
+        if (noteId == null) return;
+
+        long now = System.currentTimeMillis();
+
+        redisTemplate.opsForZSet().add(
+                DIRTY_NOTES_KEY,
+                noteId.toString(),
+                now
+        );
+    }
+
+    @Override
+    public Set<UUID> getDirtyNotesDueForPersistence(int limit, long olderThanMillis) {
+        long cutoff = System.currentTimeMillis() - olderThanMillis;
+
+        Set<String> rawNoteIds = redisTemplate.opsForZSet().rangeByScore(
+                DIRTY_NOTES_KEY,
+                0,
+                cutoff,
+                0,
+                limit
+        );
+
+        if (rawNoteIds == null || rawNoteIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        Set<UUID> noteIds = new LinkedHashSet<>();
+
+        for (String raw : rawNoteIds) {
+            try {
+                noteIds.add(UUID.fromString(raw));
+            } catch (Exception e) {
+                log.warn("Invalid noteId found in dirty set: {}", raw);
+                redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, raw);
+            }
+        }
+
+        return noteIds;
+    }
+
+    @Override
+    public boolean tryAcquirePersistenceLock(UUID noteId, String owner, long ttlSeconds) {
+        if (noteId == null || owner == null || owner.isBlank()) {
+            return false;
+        }
+
+        String key = getPersistenceLockKey(noteId);
+
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                key,
+                owner,
+                Duration.ofSeconds(ttlSeconds)
+        );
+
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    @Override
+    public void releasePersistenceLock(UUID noteId, String owner) {
+        if (noteId == null || owner == null || owner.isBlank()) {
+            return;
+        }
+
+        String key = getPersistenceLockKey(noteId);
+
+        String script = """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('del', KEYS[1])
+            else
+                return 0
+            end
+            """;
+
+        redisTemplate.execute(
+                new DefaultRedisScript<>(script, Long.class),
+                Collections.singletonList(key),
+                owner
+        );
+    }
+
+    @Override
+    public void clearDirtyNoteIfRevisionUnchanged(UUID noteId, int persistedRevision) {
+        if (noteId == null) return;
+
+        NoteVersionDto latestVersion = getNoteVersion(noteId);
+
+        if (latestVersion == null) {
+            redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, noteId.toString());
+            return;
+        }
+
+        if (latestVersion.revision() == persistedRevision) {
+            redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, noteId.toString());
+            return;
+        }
+
+        /*
+         * Redis changed while persistence was running.
+         * Keep/re-mark dirty so a later scheduler run saves the newer revision.
+         */
+        markNoteDirty(noteId);
+    }
+
+    @Override
+    public boolean tryAcquireOperationLock(UUID noteId, String owner, long ttlSeconds) {
+        if (noteId == null || owner == null || owner.isBlank()) {
+            return false;
+        }
+
+        String key = getOperationLockKey(noteId);
+
+        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                key,
+                owner,
+                java.time.Duration.ofSeconds(ttlSeconds)
+        );
+
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    @Override
+    public void releaseOperationLock(UUID noteId, String owner) {
+        if (noteId == null || owner == null || owner.isBlank()) {
+            return;
+        }
+
+        String key = getOperationLockKey(noteId);
+
+        String script = """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('del', KEYS[1])
+            else
+                return 0
+            end
+            """;
+
+        redisTemplate.execute(
+                new org.springframework.data.redis.core.script.DefaultRedisScript<>(script, Long.class),
+                java.util.Collections.singletonList(key),
+                owner
+        );
+    }
+
+    @Override
+    public TextOperation getProcessedOperation(UUID noteId, String opId) {
+        if (noteId == null || opId == null || opId.isBlank()) {
+            return null;
+        }
+
+        String key = getProcessedOperationsKey(noteId);
+        Object raw = redisTemplate.opsForHash().get(key, opId);
+
+        if (raw == null) {
+            return null;
+        }
+
+        try {
+            return objectMapper.readValue(String.valueOf(raw), TextOperation.class);
+        } catch (Exception e) {
+            log.error(
+                    "Failed to parse processed operation from Redis. noteId={} opId={}",
+                    noteId,
+                    opId,
+                    e
+            );
+
+            return null;
+        }
+    }
+
+    @Override
+    public void saveProcessedOperation(UUID noteId, TextOperation operation) {
+        if (noteId == null || operation == null) {
+            return;
+        }
+
+        String opId = operation.getOpId();
+
+        if (opId == null || opId.isBlank()) {
+            return;
+        }
+
+        try {
+            String key = getProcessedOperationsKey(noteId);
+            String json = objectMapper.writeValueAsString(operation);
+
+            redisTemplate.opsForHash().put(key, opId, json);
+        } catch (Exception e) {
+            log.error(
+                    "Failed to save processed operation to Redis. noteId={} opId={}",
+                    noteId,
+                    operation.getOpId(),
+                    e
+            );
+
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void compactTransformRevisionLogIfNeeded(
+            UUID noteId,
+            NoteDto note,
+            int maxLogSize,
+            int keepLatest
+    ) {
+        if (noteId == null || note == null || note.revisionLog() == null) {
+            return;
+        }
+
+        if (maxLogSize <= 0 || keepLatest <= 0) {
+            return;
+        }
+
+        if (keepLatest >= maxLogSize) {
+            throw new IllegalArgumentException("keepLatest must be smaller than maxLogSize");
+        }
+
+        int currentSize = note.revisionLog().size();
+
+        if (currentSize <= maxLogSize) {
+            return;
+        }
+
+        int removeCount = currentSize - keepLatest;
+
+        int oldInitialRevision = getInitialRevision(noteId);
+        int newInitialRevision = oldInitialRevision + removeCount;
+
+        List<TextOperation> compactedLog =
+                new ArrayList<>(note.revisionLog().subList(removeCount, currentSize));
+
+        note.revisionLog().clear();
+        note.revisionLog().addAll(compactedLog);
+
+        setInitialRevision(noteId, newInitialRevision);
+
+        log.info(
+                "Compacted live transform revision log. noteId={} oldInitialRevision={} newInitialRevision={} removedOps={} remainingOps={}",
+                noteId,
+                oldInitialRevision,
+                newInitialRevision,
+                removeCount,
+                note.revisionLog().size()
+        );
+    }
+
+    @Override
+    public void appendPendingHistoryOperation(UUID noteId, TextOperation operation) {
+        if (noteId == null || operation == null) {
+            return;
+        }
+
+        try {
+            String key = getPendingHistoryKey(noteId);
+            String json = objectMapper.writeValueAsString(operation);
+
+            redisTemplate.opsForList().rightPush(key, json);
+        } catch (Exception e) {
+            log.error(
+                    "Failed to append pending history operation. noteId={} opId={}",
+                    noteId,
+                    operation.getOpId(),
+                    e
+            );
+
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public List<TextOperation> getPendingHistoryOperations(UUID noteId) {
+        if (noteId == null) {
+            return Collections.emptyList();
+        }
+
+        String key = getPendingHistoryKey(noteId);
+
+        List<String> rawItems = redisTemplate.opsForList().range(key, 0, -1);
+
+        if (rawItems == null || rawItems.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<TextOperation> operations = new ArrayList<>();
+
+        for (String raw : rawItems) {
+            try {
+                operations.add(objectMapper.readValue(raw, TextOperation.class));
+            } catch (Exception e) {
+                log.error(
+                        "Failed to parse pending history operation. noteId={} raw={}",
+                        noteId,
+                        raw,
+                        e
+                );
+
+                throw new RuntimeException(e);
+            }
+        }
+
+        return operations;
+    }
+
+    @Override
+    public void clearPendingHistoryOperationsUpToRevision(UUID noteId, int savedRevision) {
+        if (noteId == null) {
+            return;
+        }
+
+        String key = getPendingHistoryKey(noteId);
+
+        List<TextOperation> pending = getPendingHistoryOperations(noteId);
+
+        if (pending.isEmpty()) {
+            return;
+        }
+
+        List<TextOperation> remaining = pending.stream()
+                .filter(op -> op.getRevision() > savedRevision)
+                .toList();
+
+        redisTemplate.delete(key);
+
+        for (TextOperation op : remaining) {
+            appendPendingHistoryOperation(noteId, op);
+        }
+
+        log.info(
+                "Cleared pending history operations. noteId={} savedRevision={} removed={} remaining={}",
+                noteId,
+                savedRevision,
+                pending.size() - remaining.size(),
+                remaining.size()
+        );
+    }
+
+    @Override
     public Map<Object, Object> getCollaborators(UUID noteId) {
         String key = getNoteCollaboratorsKey(noteId);
         return redisTemplate.opsForHash().entries(key);
@@ -283,6 +642,16 @@ public class RedisServiceImpl implements RedisService {
         return val != null ? Integer.parseInt(val) : 0;
     }
 
+    @Override
+    public void setInitialRevision(UUID noteId, int revision) {
+        if (noteId == null) return;
+
+        redisTemplate.opsForValue().set(
+                getInitialRevisionKey(noteId),
+                String.valueOf(revision)
+        );
+    }
+
     private String getNoteKey(UUID noteId) {
         return "note:" + noteId;
     }
@@ -305,5 +674,21 @@ public class RedisServiceImpl implements RedisService {
 
     private String getNoteCollaboratorSessionsKey(UUID noteId) {
         return "note-collaborator-sessions:" + noteId;
+    }
+
+    private String getPersistenceLockKey(UUID noteId) {
+        return PERSIST_LOCK_PREFIX + noteId;
+    }
+
+    private String getOperationLockKey(UUID noteId) {
+        return OPERATION_LOCK_PREFIX + noteId;
+    }
+
+    private String getProcessedOperationsKey(UUID noteId) {
+        return "note-processed-ops:" + noteId;
+    }
+
+    private String getPendingHistoryKey(UUID noteId) {
+        return "note-pending-history:" + noteId;
     }
 }

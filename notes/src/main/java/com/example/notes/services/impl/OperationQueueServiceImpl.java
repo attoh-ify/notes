@@ -20,9 +20,11 @@ import java.util.UUID;
 
 @Service
 public class OperationQueueServiceImpl implements OperationQueueService {
+    private static final Logger log = LoggerFactory.getLogger(OperationQueueServiceImpl.class);
     private final RedisService redisService;
-    private static final Logger log =
-            LoggerFactory.getLogger(OperationQueueServiceImpl.class);
+    private static final long OPERATION_LOCK_TTL_SECONDS = 60;
+    private static final int MAX_REVISION_LOG_SIZE = 1000;
+    private static final int KEEP_LATEST_REVISIONS = 500;
 
     @Autowired
     private OperationRelayer operationRelayer;
@@ -34,9 +36,54 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     @Override
     public void enqueue(OperationQueueInPayload message) {
         UUID noteId = message.getNoteId();
+        String lockOwner = UUID.randomUUID().toString();
+
+        boolean acquired = redisService.tryAcquireOperationLock(
+                noteId,
+                lockOwner,
+                OPERATION_LOCK_TTL_SECONDS
+        );
+
+        if (!acquired) {
+            log.warn(
+                    "Could not acquire operation lock. noteId={} opId={} from={} revision={}",
+                    noteId,
+                    message.getOpId(),
+                    message.getFrom(),
+                    message.getRevision()
+            );
+
+            throw new IllegalStateException(
+                    "Could not acquire operation lock for noteId=" + noteId
+            );
+        }
+
+        try {
+            processEnqueuedOperation(message);
+        } finally {
+            redisService.releaseOperationLock(noteId, lockOwner);
+        }
+    }
+
+    private void processEnqueuedOperation(OperationQueueInPayload message) {
+        UUID noteId = message.getNoteId();
 
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
+
+        if (note == null || noteVersion == null) {
+            log.error(
+                    "Cannot process operation because note is not initialized in Redis. noteId={} opId={} from={} clientRevision={}",
+                    noteId,
+                    message.getOpId(),
+                    message.getFrom(),
+                    message.getRevision()
+            );
+
+            throw new IllegalStateException(
+                    "Note is not initialized in Redis for noteId=" + noteId
+            );
+        }
 
         String opId = message.getOpId();
 
@@ -44,14 +91,15 @@ public class OperationQueueServiceImpl implements OperationQueueService {
             throw new IllegalArgumentException("Operation opId is required");
         }
 
-        TextOperation alreadyProcessed = findOperationById(note, opId);
+        TextOperation alreadyProcessed = redisService.getProcessedOperation(noteId, opId);
 
         if (alreadyProcessed != null) {
             log.info(
-                    "Duplicate operation received. noteId={} opId={} existingRevision={}",
+                    "Duplicate operation received. noteId={} opId={} existingRevision={} from={}",
                     noteId,
                     opId,
-                    alreadyProcessed.getRevision()
+                    alreadyProcessed.getRevision(),
+                    message.getFrom()
             );
 
             operationRelayer.relay(noteId, alreadyProcessed);
@@ -64,6 +112,18 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         int serverRevision = noteVersion.revision();
         int clientRevision = message.getRevision();
 
+        if (clientRevision > serverRevision) {
+            log.error(
+                    "Client revision ahead of server. noteId={} opId={} clientRevision={} serverRevision={}",
+                    noteId,
+                    opId,
+                    clientRevision,
+                    serverRevision
+            );
+
+            throw new IllegalStateException("Client revision is ahead of server revision");
+        }
+
         Delta transformedDelta = message.getDelta();
 
         if (clientRevision < serverRevision) {
@@ -71,9 +131,26 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 int logIndex = i - redisService.getInitialRevision(noteId);
 
                 if (logIndex < 0 || logIndex >= note.revisionLog().size()) {
-                    log.warn("logIndex {} out of bounds (size={}), skipping",
-                            logIndex, note.revisionLog().size());
-                    continue;
+                    log.error(
+                            "Cannot transform operation because revision log is incomplete. noteId={} opId={} from={} clientRevision={} serverRevision={} requiredRevision={} logIndex={} logSize={} initialRevision={}",
+                            noteId,
+                            message.getOpId(),
+                            message.getFrom(),
+                            clientRevision,
+                            serverRevision,
+                            i,
+                            logIndex,
+                            note.revisionLog().size(),
+                            redisService.getInitialRevision(noteId)
+                    );
+
+                    throw new IllegalStateException(
+                            "Cannot transform operation because revision log is incomplete. " +
+                                    "noteId=" + noteId +
+                                    ", requiredRevision=" + i +
+                                    ", clientRevision=" + clientRevision +
+                                    ", serverRevision=" + serverRevision
+                    );
                 }
 
                 TextOperation historyOp = note.revisionLog().get(logIndex);
@@ -99,6 +176,15 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         );
 
         note.revisionLog().add(newTextOperation);
+
+        redisService.appendPendingHistoryOperation(noteId, newTextOperation);
+
+        redisService.compactTransformRevisionLogIfNeeded(
+                noteId,
+                note,
+                MAX_REVISION_LOG_SIZE,
+                KEEP_LATEST_REVISIONS
+        );
 
         NoteDto newRedisNote = new NoteDto(
                 note.id(),
@@ -127,22 +213,8 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         );
 
         redisService.updateNote(newRedisNote, newRedisNoteVersion);
+        redisService.saveProcessedOperation(noteId, newTextOperation);
         operationRelayer.relay(noteId, newTextOperation);
-    }
-
-    private TextOperation findOperationById(NoteDto note, String opId) {
-        if (note == null || note.revisionLog() == null) return null;
-        if (opId == null || opId.isBlank()) return null;
-
-        for (TextOperation op : note.revisionLog()) {
-            if (op == null) continue;
-
-            if (opId.equals(op.getOpId())) {
-                return op;
-            }
-        }
-
-        return null;
     }
 
     private boolean serverHasPriority(OperationQueueInPayload incoming, TextOperation historyOp) {

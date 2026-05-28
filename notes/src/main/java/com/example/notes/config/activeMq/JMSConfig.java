@@ -29,7 +29,7 @@ public class JMSConfig {
         factory.setConnectionFactory(connectionFactory);
         factory.setMessageConverter(messageConverter);
         factory.setPubSubDomain(false);
-        factory.setConcurrency("1");
+        factory.setConcurrency("2-8");
         return factory;
     }
 

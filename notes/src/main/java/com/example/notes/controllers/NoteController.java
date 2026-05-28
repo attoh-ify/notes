@@ -11,6 +11,7 @@ import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
 import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
+import com.example.notes.services.impl.NotePolicyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,10 +29,12 @@ import java.util.UUID;
 public class NoteController {
     private final NoteService noteService;
     private final MessageProducer messageProducer;
+    private final NotePolicyService notePolicyService;
 
-    public NoteController(NoteService noteService, MessageProducer messageProducer) {
+    public NoteController(NoteService noteService, MessageProducer messageProducer, NotePolicyService notePolicyService) {
         this.noteService = noteService;
         this.messageProducer = messageProducer;
+        this.notePolicyService = notePolicyService;
     }
 
     @PostMapping
@@ -67,6 +70,8 @@ public class NoteController {
 
     @PostMapping("/{noteId}/enqueue")
     public ResponseDto enqueue(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
+        notePolicyService.validateEditor(currentUser.getEmail(), noteId);
+
         OperationQueueInPayload payload = new OperationQueueInPayload(
                 noteId,
                 operation.getOpId(),

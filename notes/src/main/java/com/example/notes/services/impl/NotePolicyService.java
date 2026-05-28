@@ -43,13 +43,12 @@ public class NotePolicyService {
                 });
     }
 
-    public NoteVersion findNoteVersionByNoteId(UUID noteId) {
-        Note note = findNoteById(noteId);
-        return noteVersionRepository.findByNote_IdAndVersionNumber(noteId, note.getCurrentNoteVersionNumber())
+    public NoteVersion findNoteCopy(UUID noteId) {
+        return noteVersionRepository.findByNote_IdAndVersionNumber(noteId, 0)
                 .orElseThrow(() -> {
-                    log.warn("Note version not found id={}", note.getCurrentNoteVersionNumber());
+                    log.warn("Note copy not found");
                     return new BadRequestException(
-                            "Note version with this id does not exist."
+                            "Note copy does not exist."
                     );
                 });
     }

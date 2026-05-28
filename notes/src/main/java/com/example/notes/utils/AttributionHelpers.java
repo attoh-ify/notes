@@ -1127,28 +1127,50 @@ public class AttributionHelpers {
         return false;
     }
 
-    public static NewlineSuggestion adjacentNewlineSuggestionSameAuthor(
+    public static NewlineSuggestion adjacentStandaloneNewlineSuggestionSameAuthor(
             List<ReviewRun> runs,
             int insertAtIdx,
             String authorEmail
     ) {
         ReviewRun left = insertAtIdx > 0 ? runs.get(insertAtIdx - 1) : null;
-        if (left != null
-                && isNewlineRun(left)
-                && left.getNewlineSuggestion() != null
-                && authorEmail.equals(left.getNewlineSuggestion().getActorEmail())) {
+
+        if (isReusableStandaloneNewlineGroup(left, authorEmail)) {
             return left.getNewlineSuggestion();
         }
 
         ReviewRun right = insertAtIdx < runs.size() ? runs.get(insertAtIdx) : null;
-        if (right != null
-                && isNewlineRun(right)
-                && right.getNewlineSuggestion() != null
-                && authorEmail.equals(right.getNewlineSuggestion().getActorEmail())) {
+
+        if (isReusableStandaloneNewlineGroup(right, authorEmail)) {
             return right.getNewlineSuggestion();
         }
 
         return null;
+    }
+
+    private static boolean isReusableStandaloneNewlineGroup(
+            ReviewRun run,
+            String authorEmail
+    ) {
+        if (run == null) return false;
+        if (!isNewlineRun(run)) return false;
+        if (run.getNewlineSuggestion() == null) return false;
+
+        NewlineSuggestion suggestion = run.getNewlineSuggestion();
+
+        if (!authorEmail.equals(suggestion.getActorEmail())) {
+            return false;
+        }
+
+        boolean standaloneType =
+                suggestion.getType() == null
+                        || suggestion.getType() == NewlineSuggestionType.STANDALONE;
+
+        if (!standaloneType) {
+            return false;
+        }
+
+        return suggestion.getDependsOnReviewRunIds() == null
+                || suggestion.getDependsOnReviewRunIds().isEmpty();
     }
 
     public static NewlineSuggestion createNewlineSuggestionForInsertedNewline(
@@ -1161,7 +1183,7 @@ public class AttributionHelpers {
         boolean lineHasContent = lineHasMeaningfulContentBeforeIndex(runs, insertAtIdx);
 
         NewlineSuggestion adjacent = !lineHasContent
-                ? adjacentNewlineSuggestionSameAuthor(runs, insertAtIdx, authorEmail)
+                ? adjacentStandaloneNewlineSuggestionSameAuthor(runs, insertAtIdx, authorEmail)
                 : null;
 
         String groupId = adjacent != null ? adjacent.getGroupId() : nextId();

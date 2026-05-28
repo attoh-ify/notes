@@ -5,6 +5,7 @@ import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.notifier.ReviewInProgressNotifier;
+import com.example.notes.services.NoteService;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,7 @@ import java.util.UUID;
 public class SessionDisconnectEventListener implements ApplicationListener<SessionDisconnectEvent> {
     private static final Logger log = LoggerFactory.getLogger(SessionDisconnectEventListener.class);
     private final RedisService redisService;
+    private final NoteService noteService;
 
     @Autowired
     public CollaboratorCountNotifier collaboratorCountNotifier;
@@ -29,8 +31,9 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
     @Autowired
     private ReviewInProgressNotifier reviewInProgressNotifier;
 
-    public SessionDisconnectEventListener(RedisService redisService) {
+    public SessionDisconnectEventListener(RedisService redisService, NoteService noteService) {
         this.redisService = redisService;
+        this.noteService = noteService;
     }
 
     @Override
@@ -60,10 +63,6 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
         NoteDto note = redisService.getNote(noteId);
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
-        /*
-         * Only clear review-in-progress if this was the user's final active
-         * websocket session for this note.
-         */
         if (removedFinalUserSession && redisService.isReviewInProgress(noteId, userEmail)) {
             redisService.setReviewInProgress(noteId, userEmail, "false");
             reviewInProgressNotifier.notifyReviewInProgress(
@@ -79,6 +78,7 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
                         new CollaboratorsPayload(collaborators)
                 );
             } else {
+                noteService.saveNote(userEmail, noteId);
                 redisService.deleteNote(noteId);
             }
         }
