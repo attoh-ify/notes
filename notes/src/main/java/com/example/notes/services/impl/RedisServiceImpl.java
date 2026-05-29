@@ -107,7 +107,7 @@ public class RedisServiceImpl implements RedisService {
                 note.getId(),
                 note.getUser().getEmail(),
                 note.getTitle(),
-                note.getRevisionLog(),
+                new ArrayList<>(),
                 note.getVisibility(),
                 null,
                 note.getCurrentNoteVersionNumber(),
