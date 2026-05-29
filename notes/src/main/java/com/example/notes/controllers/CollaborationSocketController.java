@@ -5,6 +5,7 @@ import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.notifier.CursorNotifier;
+import com.example.notes.services.RedisService;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -18,13 +19,15 @@ import java.util.UUID;
 public class CollaborationSocketController {
     private final MessageProducer messageProducer;
     private final CursorNotifier cursorNotifier;
+    private final RedisService redisService;
 
     public CollaborationSocketController(
             MessageProducer messageProducer,
-            CursorNotifier cursorNotifier
+            CursorNotifier cursorNotifier, RedisService redisService
     ) {
         this.messageProducer = messageProducer;
         this.cursorNotifier = cursorNotifier;
+        this.redisService = redisService;
     }
 
     @MessageMapping("/note/{noteId}/operation")
@@ -62,6 +65,15 @@ public class CollaborationSocketController {
         );
     }
 
+    @MessageMapping("/note/{noteId}/heartbeat")
+    public void heartbeat(
+            @DestinationVariable UUID noteId,
+            Principal principal,
+            StompHeaderAccessor accessor
+    ) {
+        requireJoinedNote(noteId, principal, accessor);
+    }
+
     private void requireJoinedNote(
             UUID noteId,
             Principal principal,
@@ -81,6 +93,16 @@ public class CollaborationSocketController {
 
         if (joinedNoteId == null || !noteId.toString().equals(String.valueOf(joinedNoteId))) {
             throw new IllegalStateException("Websocket session is not joined to this note");
+        }
+
+        String sessionId = accessor.getSessionId();
+
+        if (sessionId != null) {
+            redisService.refreshCollaboratorSessionHeartbeat(
+                    noteId,
+                    sessionId,
+                    principal.getName()
+            );
         }
     }
 }

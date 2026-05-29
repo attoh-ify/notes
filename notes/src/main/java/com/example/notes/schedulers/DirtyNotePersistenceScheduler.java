@@ -1,8 +1,9 @@
-package com.example.notes.services.impl;
+package com.example.notes.schedulers;
 
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.services.RedisService;
+import com.example.notes.services.impl.NotePersistenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -13,10 +14,6 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class DirtyNotePersistenceScheduler {
-    private static final int BATCH_SIZE = 1000;
-    private static final long DIRTY_AGE_MILLIS = 60_000;
-    private static final long LOCK_TTL_SECONDS = 120;
-
     private final RedisService redisService;
     private final NotePersistenceService notePersistenceService;
 
@@ -31,10 +28,7 @@ public class DirtyNotePersistenceScheduler {
     @Scheduled(fixedDelay = 60_000)
     public void persistDirtyNotes() {
         Set<UUID> dirtyNoteIds =
-                redisService.getDirtyNotesDueForPersistence(
-                        BATCH_SIZE,
-                        DIRTY_AGE_MILLIS
-                );
+                redisService.getDirtyNotesDueForPersistence();
 
         if (dirtyNoteIds.isEmpty()) {
             return;
@@ -50,8 +44,7 @@ public class DirtyNotePersistenceScheduler {
 
         boolean locked = redisService.tryAcquirePersistenceLock(
                 noteId,
-                lockOwner,
-                LOCK_TTL_SECONDS
+                lockOwner
         );
 
         if (!locked) {

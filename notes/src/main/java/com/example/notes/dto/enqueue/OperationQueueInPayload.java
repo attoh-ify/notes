@@ -32,7 +32,7 @@ public class OperationQueueInPayload {
                 ", opId='" + opId + '\'' +
                 ", revision=" + revision +
                 ", from=" + from +
-                ", delta=" + delta +
+                ", deltaOps=" + (delta != null && delta.ops != null ? delta.ops.size() : 0) +
                 '}';
     }
 }

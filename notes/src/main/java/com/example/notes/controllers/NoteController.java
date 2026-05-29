@@ -56,34 +56,6 @@ public class NoteController {
         );
     }
 
-    @PostMapping("/{noteId}/cursor")
-    public ResponseDto changeCursor(
-            @CurrentUser UserPrincipal currentUser,
-            @PathVariable UUID noteId,
-            @RequestBody CursorDto payload
-    ) {
-        noteService.changeCursor(payload, noteId, currentUser.getEmail());
-        return new ResponseDto(
-                true, "Ok", null
-        );
-    }
-
-    @PostMapping("/{noteId}/enqueue")
-    public ResponseDto enqueue(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody TextOperation operation) throws Exception {
-        notePolicyService.validateEditor(currentUser.getEmail(), noteId);
-
-        OperationQueueInPayload payload = new OperationQueueInPayload(
-                noteId,
-                operation.getOpId(),
-                operation.getRevision(),
-                currentUser.getEmail(),
-                operation.getDelta()
-        );
-        messageProducer.sendMessage(payload, noteId);
-
-        return new ResponseDto("ok");
-    }
-
     @GetMapping("/{noteId}/build-attribution")
     public ResponseDto buildAttribution(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
         ReviewProjection reviewProjection = noteService.buildAttribution(currentUser.getEmail(), noteId);
@@ -120,7 +92,6 @@ public class NoteController {
     public ResponseDto getAllNotes(
             @CurrentUser UserPrincipal currentUser
     ) {
-        System.out.println("Fetching all notes for user " + currentUser.getEmail());
         List<NoteDto> notes = noteService.fetchNotes(currentUser.getEmail());
         return new ResponseDto("Notes fetched", notes);
     }

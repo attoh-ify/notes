@@ -29,6 +29,11 @@ public class RedisServiceImpl implements RedisService {
     private static final String DIRTY_NOTES_KEY = "dirty-notes";
     private static final String PERSIST_LOCK_PREFIX = "persist-lock:";
     private static final String OPERATION_LOCK_PREFIX = "operation-lock:";
+    private static final long COLLABORATOR_SESSION_HEARTBEAT_TTL_SECONDS = 300;
+    private static final String ACTIVE_COLLABORATION_NOTES_KEY = "active-collaboration-notes";
+    private static final long LOCK_TTL_SECONDS = 120;
+    private static final int BATCH_SIZE = 1000;
+    private static final long DIRTY_AGE_MILLIS = 60_000;
     private static final String[] COLLABORATOR_COLORS = {
             "#1F3A93",
             "#D32F2F",
@@ -248,6 +253,11 @@ public class RedisServiceImpl implements RedisService {
 
         String sessionsKey = getNoteCollaboratorSessionsKey(noteId);
         redisTemplate.opsForHash().put(sessionsKey, sessionId, actorEmail);
+
+        redisTemplate.opsForSet().add(ACTIVE_COLLABORATION_NOTES_KEY, noteId.toString());
+        refreshCollaboratorSessionHeartbeat(noteId, sessionId, actorEmail);
+
+        rebuildCollaboratorsFromSessions(noteId);
     }
 
     @Override
@@ -258,7 +268,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public boolean removeCollaboratorSession(UUID noteId, String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
+        if (noteId == null || sessionId == null || sessionId.isBlank()) {
             return false;
         }
 
@@ -266,12 +276,14 @@ public class RedisServiceImpl implements RedisService {
         Object actorEmailObj = redisTemplate.opsForHash().get(sessionsKey, sessionId);
 
         if (actorEmailObj == null) {
+            redisTemplate.delete(getCollaboratorSessionHeartbeatKey(noteId, sessionId));
             return false;
         }
 
         String actorEmail = actorEmailObj.toString();
 
         redisTemplate.opsForHash().delete(sessionsKey, sessionId);
+        redisTemplate.delete(getCollaboratorSessionHeartbeatKey(noteId, sessionId));
 
         Map<Object, Object> remainingSessions = redisTemplate.opsForHash().entries(sessionsKey);
 
@@ -280,12 +292,16 @@ public class RedisServiceImpl implements RedisService {
                 .stream()
                 .anyMatch(email -> actorEmail.equals(String.valueOf(email)));
 
-        if (!stillConnected) {
-            removeCollaboratorFromNote(noteId, actorEmail);
-            return true;
+        rebuildCollaboratorsFromSessions(noteId);
+
+        if (remainingSessions.isEmpty()) {
+            redisTemplate.opsForSet().remove(
+                    ACTIVE_COLLABORATION_NOTES_KEY,
+                    noteId.toString()
+            );
         }
 
-        return false;
+        return !stillConnected;
     }
 
     @Override
@@ -302,15 +318,15 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public Set<UUID> getDirtyNotesDueForPersistence(int limit, long olderThanMillis) {
-        long cutoff = System.currentTimeMillis() - olderThanMillis;
+    public Set<UUID> getDirtyNotesDueForPersistence() {
+        long cutoff = System.currentTimeMillis() - DIRTY_AGE_MILLIS;
 
         Set<String> rawNoteIds = redisTemplate.opsForZSet().rangeByScore(
                 DIRTY_NOTES_KEY,
                 0,
                 cutoff,
                 0,
-                limit
+                BATCH_SIZE
         );
 
         if (rawNoteIds == null || rawNoteIds.isEmpty()) {
@@ -332,7 +348,7 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public boolean tryAcquirePersistenceLock(UUID noteId, String owner, long ttlSeconds) {
+    public boolean tryAcquirePersistenceLock(UUID noteId, String owner) {
         if (noteId == null || owner == null || owner.isBlank()) {
             return false;
         }
@@ -342,7 +358,7 @@ public class RedisServiceImpl implements RedisService {
         Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
                 key,
                 owner,
-                Duration.ofSeconds(ttlSeconds)
+                Duration.ofSeconds(LOCK_TTL_SECONDS)
         );
 
         return Boolean.TRUE.equals(acquired);
@@ -387,10 +403,6 @@ public class RedisServiceImpl implements RedisService {
             return;
         }
 
-        /*
-         * Redis changed while persistence was running.
-         * Keep/re-mark dirty so a later scheduler run saves the newer revision.
-         */
         markNoteDirty(noteId);
     }
 
@@ -629,6 +641,84 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
+    public void refreshCollaboratorSessionHeartbeat(UUID noteId, String sessionId, String actorEmail) {
+        if (noteId == null || sessionId == null || sessionId.isBlank()) return;
+
+        String key = getCollaboratorSessionHeartbeatKey(noteId, sessionId);
+
+        redisTemplate.opsForValue().set(
+                key,
+                actorEmail != null ? actorEmail : "",
+                java.time.Duration.ofSeconds(COLLABORATOR_SESSION_HEARTBEAT_TTL_SECONDS)
+        );
+    }
+
+    @Override
+    public boolean collaboratorSessionHeartbeatExists(UUID noteId, String sessionId) {
+        if (noteId == null || sessionId == null || sessionId.isBlank()) {
+            return false;
+        }
+
+        return redisTemplate.hasKey(getCollaboratorSessionHeartbeatKey(noteId, sessionId));
+    }
+
+    @Override
+    public Set<UUID> getActiveCollaborationNoteIds() {
+        Set<String> raw = redisTemplate.opsForSet().members(ACTIVE_COLLABORATION_NOTES_KEY);
+
+        if (raw == null || raw.isEmpty()) {
+            return java.util.Collections.emptySet();
+        }
+
+        Set<UUID> noteIds = new java.util.LinkedHashSet<>();
+
+        for (String item : raw) {
+            try {
+                noteIds.add(UUID.fromString(item));
+            } catch (Exception e) {
+                redisTemplate.opsForSet().remove(ACTIVE_COLLABORATION_NOTES_KEY, item);
+            }
+        }
+
+        return noteIds;
+    }
+
+    @Override
+    public void cleanupStaleCollaboratorSessions(UUID noteId) {
+        if (noteId == null) return;
+
+        String sessionKey = getNoteCollaboratorSessionsKey(noteId);
+
+        Map<Object, Object> sessions = redisTemplate.opsForHash().entries(sessionKey);
+
+        if (sessions.isEmpty()) {
+            redisTemplate.opsForSet().remove(ACTIVE_COLLABORATION_NOTES_KEY, noteId.toString());
+            return;
+        }
+
+        boolean removedAny = false;
+
+        for (Map.Entry<Object, Object> entry : sessions.entrySet()) {
+            String sessionId = String.valueOf(entry.getKey());
+
+            if (!collaboratorSessionHeartbeatExists(noteId, sessionId)) {
+                redisTemplate.opsForHash().delete(sessionKey, sessionId);
+                removedAny = true;
+            }
+        }
+
+        if (removedAny) {
+            rebuildCollaboratorsFromSessions(noteId);
+        }
+
+        Map<Object, Object> remainingSessions = redisTemplate.opsForHash().entries(sessionKey);
+
+        if (remainingSessions.isEmpty()) {
+            redisTemplate.opsForSet().remove(ACTIVE_COLLABORATION_NOTES_KEY, noteId.toString());
+        }
+    }
+
+    @Override
     public Map<Object, Object> getCollaborators(UUID noteId) {
         String key = getNoteCollaboratorsKey(noteId);
         return redisTemplate.opsForHash().entries(key);
@@ -703,5 +793,40 @@ public class RedisServiceImpl implements RedisService {
 
     private String getPendingHistoryKey(UUID noteId) {
         return "note-pending-history:" + noteId;
+    }
+
+    private String getCollaboratorSessionHeartbeatKey(UUID noteId, String sessionId) {
+        return "note-session-heartbeat:" + noteId + ":" + sessionId;
+    }
+
+    private void rebuildCollaboratorsFromSessions(UUID noteId) {
+        String sessionKey = getNoteCollaboratorSessionsKey(noteId);
+        String collaboratorsKey = getNoteCollaboratorsKey(noteId);
+
+        Map<Object, Object> sessions = redisTemplate.opsForHash().entries(sessionKey);
+
+        redisTemplate.delete(collaboratorsKey);
+
+        if (sessions.isEmpty()) {
+            return;
+        }
+
+        Set<String> uniqueEmails = new LinkedHashSet<>();
+
+        for (Object emailObj : sessions.values()) {
+            if (emailObj == null) continue;
+
+            String email = String.valueOf(emailObj);
+
+            if (!email.isBlank()) {
+                uniqueEmails.add(email);
+            }
+        }
+
+        for (String email : uniqueEmails) {
+            String assignedColor = COLLABORATOR_COLORS[Math.abs(email.hashCode() % COLLABORATOR_COLORS.length)];
+
+            redisTemplate.opsForHash().put(collaboratorsKey, email, assignedColor);
+        }
     }
 }

@@ -132,7 +132,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 throw new IllegalStateException("Missing SEND destination");
             }
 
-            if (isNoteAppDestination(destination, "/operation") || isNoteAppDestination(destination, "/cursor")) {
+            if (isNoteAppDestination(destination, "/operation") || isNoteAppDestination(destination, "/cursor") || isNoteAppDestination(destination, "/heartbeat")) {
                 UUID noteId = extractNoteIdFromAppDestination(destination);
 
                 Map<String, Object> sessionAttributes = accessor.getSessionAttributes();

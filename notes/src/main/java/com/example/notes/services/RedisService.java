@@ -30,8 +30,8 @@ public interface RedisService {
     boolean removeCollaboratorSession(UUID noteId, String sessionId);
 
     void markNoteDirty(UUID noteId);
-    Set<UUID> getDirtyNotesDueForPersistence(int limit, long olderThanMillis);
-    boolean tryAcquirePersistenceLock(UUID noteId, String owner, long ttlSeconds);
+    Set<UUID> getDirtyNotesDueForPersistence();
+    boolean tryAcquirePersistenceLock(UUID noteId, String owner);
     void releasePersistenceLock(UUID noteId, String owner);
     void clearDirtyNoteIfRevisionUnchanged(UUID noteId, int persistedRevision);
 
@@ -45,4 +45,9 @@ public interface RedisService {
     void appendPendingHistoryOperation(UUID noteId, TextOperation operation);
     List<TextOperation> getPendingHistoryOperations(UUID noteId);
     void clearPendingHistoryOperationsUpToRevision(UUID noteId, int savedRevision);
+
+    void refreshCollaboratorSessionHeartbeat(UUID noteId, String sessionId, String actorEmail);
+    boolean collaboratorSessionHeartbeatExists(UUID noteId, String sessionId);
+    Set<UUID> getActiveCollaborationNoteIds();
+    void cleanupStaleCollaboratorSessions(UUID noteId);
 }

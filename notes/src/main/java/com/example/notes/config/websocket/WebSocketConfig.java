@@ -47,6 +47,15 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
+        /*
+         * Development / single-instance mode:
+         * This simple broker is in-memory and only works reliably when all websocket
+         * clients for collaboration are connected to this same backend instance.
+         *
+         * Production / multi-instance mode:
+         * Replace this with enableStompBrokerRelay(...) backed by an external broker
+         * such as Artemis or RabbitMQ.
+         */
         registry.enableSimpleBroker("/topic");
         registry.setApplicationDestinationPrefixes("/app");
     }

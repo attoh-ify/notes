@@ -40,7 +40,7 @@ public class TextOperation {
     public String toString() {
         return "TextOperation{" +
                 "opId='" + opId + '\'' +
-                ", delta=" + delta +
+                ", deltaOps=" + (delta != null && delta.ops != null ? delta.ops.size() : 0) +
                 ", actorEmail='" + actorEmail + '\'' +
                 ", revision=" + revision +
                 ", state=" + state +
