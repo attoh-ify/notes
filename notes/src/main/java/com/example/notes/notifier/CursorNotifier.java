@@ -1,7 +1,7 @@
 package com.example.notes.notifier;
 
 import com.example.notes.dto.message_payload.CursorPayload;
-import com.example.notes.entities.MessageType;
+import com.example.notes.dto.message_payload.MessageType;
 import com.example.notes.listeners.MessagePusher;
 import org.springframework.beans.factory.annotation.Autowired;
 

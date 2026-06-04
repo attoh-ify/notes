@@ -1,5 +1,6 @@
 package com.example.notes.services;
 
+import com.example.notes.dto.note.CollaborationMode;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.TextOperation;
@@ -50,4 +51,8 @@ public interface RedisService {
     boolean collaboratorSessionHeartbeatExists(UUID noteId, String sessionId);
     Set<UUID> getActiveCollaborationNoteIds();
     void cleanupStaleCollaboratorSessions(UUID noteId);
+
+    int getActiveSessionCount(UUID noteId);
+    boolean isCollaborativeMode(UUID noteId);
+    CollaborationMode getCollaborationMode(UUID noteId);
 }

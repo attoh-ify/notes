@@ -75,7 +75,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
             }
 
             accessor.setUser(() -> username);
-            log.info("WebSocket authenticated user={}", username);
+            log.debug("WebSocket authenticated user={}", username);
         }
 
         if (StompCommand.SUBSCRIBE.equals(command)) {
@@ -105,6 +105,10 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 
                 String sessionId = accessor.getSessionId();
 
+                if (sessionId == null || sessionId.isBlank()) {
+                    throw new IllegalStateException("WebSocket sessionId is required");
+                }
+
                 redisService.addCollaboratorSession(noteId, userEmail, sessionId);
 
                 return message;
@@ -132,8 +136,8 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 throw new IllegalStateException("Missing SEND destination");
             }
 
-            if (isNoteAppDestination(destination, "/operation") || isNoteAppDestination(destination, "/cursor") || isNoteAppDestination(destination, "/heartbeat")) {
-                UUID noteId = extractNoteIdFromAppDestination(destination);
+            if (isNoteAppDestination(destination, "/operation") || isNoteAppDestination(destination, "/cursor") || isNoteAppDestination(destination, "/heartbeat") || isNoteAppDestination(destination, "/solo-sync")) {
+                UUID noteId = UUID.fromString(extractNoteIdFromAppDestination(destination));
 
                 Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
 
@@ -186,7 +190,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 && destination.endsWith(suffix);
     }
 
-    private UUID extractNoteIdFromAppDestination(String destination) {
+    private String extractNoteIdFromAppDestination(String destination) {
         try {
             String prefix = "/app/note/";
             String withoutPrefix = destination.substring(prefix.length());
@@ -197,9 +201,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
                 throw new IllegalArgumentException("Invalid note app destination");
             }
 
-            String noteId = withoutPrefix.substring(0, slashIndex);
-
-            return UUID.fromString(noteId);
+            return withoutPrefix.substring(0, slashIndex);
         } catch (Exception e) {
             log.error("Invalid app destination={}", destination);
             throw new IllegalArgumentException("Invalid app destination");

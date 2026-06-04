@@ -25,5 +25,9 @@ public record JoinNoteResponse (
     @Schema(
             description = "Boolean indicating if the owner of the note is currently reviewing it"
     )
-    boolean isReviewing
+    boolean isReviewing,
+
+    CollaborationMode mode,
+
+    int activeSessionCount
 ) {}

@@ -1,6 +1,5 @@
 package com.example.notes.dto.message_payload;
 
-import com.example.notes.entities.MessageType;
 import lombok.Getter;
 import lombok.Setter;
 
