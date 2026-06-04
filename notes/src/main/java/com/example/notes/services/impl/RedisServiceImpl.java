@@ -1,5 +1,6 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.note.CollaborationMode;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.TextOperation;
@@ -19,9 +20,7 @@ import java.util.*;
 
 @Service
 public class RedisServiceImpl implements RedisService {
-    private static final Logger log =
-            LoggerFactory.getLogger(RedisServiceImpl.class);
-
+    private static final Logger log = LoggerFactory.getLogger(RedisServiceImpl.class);
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final NotePolicyService notePolicyService;
@@ -716,6 +715,29 @@ public class RedisServiceImpl implements RedisService {
         if (remainingSessions.isEmpty()) {
             redisTemplate.opsForSet().remove(ACTIVE_COLLABORATION_NOTES_KEY, noteId.toString());
         }
+    }
+
+    @Override
+    public int getActiveSessionCount(UUID noteId) {
+        if (noteId == null) return 0;
+
+        String sessionsKey = getNoteCollaboratorSessionsKey(noteId);
+
+        Long size = redisTemplate.opsForHash().size(sessionsKey);
+
+        return size.intValue();
+    }
+
+    @Override
+    public boolean isCollaborativeMode(UUID noteId) {
+        return getActiveSessionCount(noteId) > 1;
+    }
+
+    @Override
+    public CollaborationMode getCollaborationMode(UUID noteId) {
+        return isCollaborativeMode(noteId)
+                ? CollaborationMode.COLLABORATIVE
+                : CollaborationMode.SOLO;
     }
 
     @Override

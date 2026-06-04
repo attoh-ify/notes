@@ -506,9 +506,7 @@ public class AttributionHelpers {
                 .componentIndex(componentIndex)
                 .build();
 
-        List<Reference> result = appendAndCoalesceSuggestionReference(out, incoming);
-
-        return result;
+        return appendAndCoalesceSuggestionReference(out, incoming);
     }
 
     public static List<Reference> appendAndCoalesceSuggestionReference(
@@ -604,8 +602,7 @@ public class AttributionHelpers {
             raw.add(ReviewRange.builder().start(ref.getReviewStart()).length(ref.getLength()).build());
         }
 
-        List<ReviewRange> merged = mergeOverlappingRanges(raw);
-        return merged;
+        return mergeOverlappingRanges(raw);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1106,48 +1103,27 @@ public class AttributionHelpers {
         return run.isText() && !"\n".equals(run.getText()) && !run.getText().isEmpty();
     }
 
-    public static boolean lineHasMeaningfulContentBeforeIndex(
-            List<ReviewRun> runs,
-            int index
-    ) {
-        if (runs == null || runs.isEmpty()) return false;
-
-        for (int i = index - 1; i >= 0; i--) {
-            ReviewRun run = runs.get(i);
-
-            if (isNewlineRun(run)) {
-                return false;
-            }
-
-            if (isMeaningfulLineContentRun(run)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public static NewlineSuggestion adjacentStandaloneNewlineSuggestionSameAuthor(
+    public static NewlineSuggestion adjacentNewlineSuggestionSameAuthor(
             List<ReviewRun> runs,
             int insertAtIdx,
             String authorEmail
     ) {
         ReviewRun left = insertAtIdx > 0 ? runs.get(insertAtIdx - 1) : null;
 
-        if (isReusableStandaloneNewlineGroup(left, authorEmail)) {
+        if (isReusableNewlineGroup(left, authorEmail)) {
             return left.getNewlineSuggestion();
         }
 
         ReviewRun right = insertAtIdx < runs.size() ? runs.get(insertAtIdx) : null;
 
-        if (isReusableStandaloneNewlineGroup(right, authorEmail)) {
+        if (isReusableNewlineGroup(right, authorEmail)) {
             return right.getNewlineSuggestion();
         }
 
         return null;
     }
 
-    private static boolean isReusableStandaloneNewlineGroup(
+    private static boolean isReusableNewlineGroup(
             ReviewRun run,
             String authorEmail
     ) {
@@ -1157,52 +1133,21 @@ public class AttributionHelpers {
 
         NewlineSuggestion suggestion = run.getNewlineSuggestion();
 
-        if (!authorEmail.equals(suggestion.getActorEmail())) {
-            return false;
-        }
-
-        boolean standaloneType =
-                suggestion.getType() == null
-                        || suggestion.getType() == NewlineSuggestionType.STANDALONE;
-
-        if (!standaloneType) {
-            return false;
-        }
-
-        return suggestion.getDependsOnReviewRunIds() == null
-                || suggestion.getDependsOnReviewRunIds().isEmpty();
+        return authorEmail.equals(suggestion.getActorEmail());
     }
 
     public static NewlineSuggestion createNewlineSuggestionForInsertedNewline(
-            List<ReviewRun> runs,
-            int insertAtIdx,
             String authorEmail,
             String createdAt,
             List<Reference> references
     ) {
-        boolean lineHasContent = lineHasMeaningfulContentBeforeIndex(runs, insertAtIdx);
-
-        NewlineSuggestion adjacent = !lineHasContent
-                ? adjacentStandaloneNewlineSuggestionSameAuthor(runs, insertAtIdx, authorEmail)
-                : null;
-
-        String groupId = adjacent != null ? adjacent.getGroupId() : nextId();
-        String resolvedCreatedAt = createdAt;
-
-        if (adjacent != null
-                && adjacent.getCreatedAt() != null
-                && createdAt != null
-                && adjacent.getCreatedAt().compareTo(createdAt) > 0) {
-            resolvedCreatedAt = adjacent.getCreatedAt();
-        }
-
         return NewlineSuggestion.builder()
-                .groupId(groupId)
+                .groupId(nextId())
                 .actorEmail(authorEmail)
-                .createdAt(resolvedCreatedAt)
+                .createdAt(createdAt)
                 .references(cloneSuggestionReferences(references))
                 .dependsOnReviewRunIds(new ArrayList<>())
-                .type(NewlineSuggestionType.STANDALONE)
+                .type(null)
                 .build();
     }
 
@@ -1238,7 +1183,7 @@ public class AttributionHelpers {
         }
     }
 
-    public static void refreshNewlineSuggestionDependencies(List<ReviewRun> runs) {
+    public static void classifyNewlineSuggestions(List<ReviewRun> runs) {
         if (runs == null || runs.isEmpty()) return;
 
         ensureReviewRunIds(runs);
@@ -1246,19 +1191,228 @@ public class AttributionHelpers {
         for (int i = 0; i < runs.size(); i++) {
             ReviewRun newlineRun = runs.get(i);
 
-            if (!isNewlineRun(newlineRun) || newlineRun.getNewlineSuggestion() == null) {
+            if (!isNewlineRun(newlineRun) || newlineRun.getNewlineSuggestion() == null) continue;
+
+            ReviewRun previousVisible = previousVisibleRun(runs, i);
+            ReviewRun nextVisible = nextVisibleRun(runs, i);
+
+            boolean standalone = isStandaloneInsertedNewline(
+                    previousVisible,
+                    nextVisible
+            );
+
+            NewlineSuggestion suggestion = newlineRun.getNewlineSuggestion();
+
+            if (standalone) {
+                suggestion.setDependsOnReviewRunIds(new ArrayList<>());
+                suggestion.setType(NewlineSuggestionType.STANDALONE);
                 continue;
             }
 
-            List<String> dependsOn = collectLineDependencyRunIdsForNewline(runs, i);
+            List<String> dependsOn =
+                    collectFollowingLineDependencyRunIdsForNewline(runs, i);
 
-            NewlineSuggestion suggestion = newlineRun.getNewlineSuggestion();
             suggestion.setDependsOnReviewRunIds(dependsOn);
-            suggestion.setType(
-                    dependsOn.isEmpty()
-                            ? NewlineSuggestionType.STANDALONE
-                            : NewlineSuggestionType.DEPENDENT
-            );
+            suggestion.setType(NewlineSuggestionType.DEPENDENT);
+        }
+
+        mergeAdjacentStandaloneNewlineGroups(runs);
+    }
+
+    private static ReviewRun previousVisibleRun(
+            List<ReviewRun> runs,
+            int index
+    ) {
+        if (runs == null || index <= 0) return null;
+
+        for (int i = index - 1; i >= 0; i--) {
+            ReviewRun run = runs.get(i);
+
+            if (run == null) continue;
+
+            if (run.length() > 0) {
+                return run;
+            }
+        }
+
+        return null;
+    }
+
+    private static ReviewRun nextVisibleRun(
+            List<ReviewRun> runs,
+            int index
+    ) {
+        if (runs == null || index < 0 || index >= runs.size() - 1) {
+            return null;
+        }
+
+        for (int i = index + 1; i < runs.size(); i++) {
+            ReviewRun run = runs.get(i);
+
+            if (run == null) continue;
+
+            if (run.length() > 0) {
+                return run;
+            }
+        }
+
+        return null;
+    }
+
+    public static boolean isStandaloneInsertedNewline(
+            ReviewRun previousVisible,
+            ReviewRun nextVisible
+    ) {
+        /*
+         * Case:
+         * (note begins)(pending \n)[content]
+         *
+         * This creates a leading blank line, so it is standalone.
+         */
+        if (previousVisible == null) {
+            return true;
+        }
+
+        /*
+         * Case:
+         * [content](pending \n)(end)
+         *
+         * Rare because Quill normally keeps a terminal newline, but if it happens,
+         * it is a trailing blank line.
+         */
+        if (nextVisible == null) {
+            return true;
+        }
+
+        /*
+         * Case:
+         * [content](pending \n)(\n terminal/base/pending)
+         * (\n)(pending \n)(\n)
+         *
+         * This pending newline creates blank-line space.
+         */
+        if (isNewlineRun(nextVisible)) {
+            return true;
+        }
+
+        /*
+         * Case:
+         * [content](pending \n)[content]
+         * (\n)(pending \n)[content]
+         *
+         * The pending newline is needed to position the following content.
+         */
+        return false;
+    }
+
+    public static List<String> collectFollowingLineDependencyRunIdsForNewline(
+            List<ReviewRun> runs,
+            int newlineIndex
+    ) {
+        List<String> deps = new ArrayList<>();
+
+        if (runs == null || newlineIndex < 0 || newlineIndex >= runs.size()) {
+            return deps;
+        }
+
+        for (int i = newlineIndex + 1; i < runs.size(); i++) {
+            ReviewRun run = runs.get(i);
+
+            if (run == null) continue;
+
+            if (isNewlineRun(run)) {
+                break;
+            }
+
+            if (!isMeaningfulLineContentRun(run)) {
+                continue;
+            }
+
+            String dependencyId = logicalLineDependencyId(run);
+
+            if (dependencyId == null || dependencyId.isBlank()) {
+                continue;
+            }
+
+            if (!deps.contains(dependencyId)) {
+                deps.add(dependencyId);
+            }
+        }
+
+        return deps;
+    }
+
+    public static void mergeAdjacentStandaloneNewlineGroups(
+            List<ReviewRun> runs
+    ) {
+        if (runs == null || runs.isEmpty()) return;
+
+        List<ReviewRun> activeGroupRuns = new ArrayList<>();
+
+        for (ReviewRun run : runs) {
+            if (!isMergeableStandaloneNewline(run)) {
+                applyMergedStandaloneNewlineGroup(activeGroupRuns);
+                activeGroupRuns.clear();
+                continue;
+            }
+
+            if (activeGroupRuns.isEmpty()) {
+                activeGroupRuns.add(run);
+                continue;
+            }
+
+            NewlineSuggestion current = run.getNewlineSuggestion();
+            NewlineSuggestion active = activeGroupRuns.get(0).getNewlineSuggestion();
+
+            boolean sameActor =
+                    Objects.equals(active.getActorEmail(), current.getActorEmail());
+
+            if (!sameActor) {
+                applyMergedStandaloneNewlineGroup(activeGroupRuns);
+                activeGroupRuns.clear();
+            }
+
+            activeGroupRuns.add(run);
+        }
+
+        applyMergedStandaloneNewlineGroup(activeGroupRuns);
+    }
+
+    private static boolean isMergeableStandaloneNewline(ReviewRun run) {
+        return isNewlineRun(run)
+                && run.getNewlineSuggestion() != null
+                && run.getNewlineSuggestion().getType() == NewlineSuggestionType.STANDALONE;
+    }
+
+    private static void applyMergedStandaloneNewlineGroup(
+            List<ReviewRun> groupRuns
+    ) {
+        if (groupRuns == null || groupRuns.isEmpty()) return;
+
+        NewlineSuggestion first = groupRuns.get(0).getNewlineSuggestion();
+
+        String mergedGroupId = first.getGroupId();
+        String actorEmail = first.getActorEmail();
+        String mergedCreatedAt = first.getCreatedAt();
+
+        for (ReviewRun run : groupRuns) {
+            NewlineSuggestion suggestion = run.getNewlineSuggestion();
+
+            if (suggestion.getCreatedAt() != null
+                    && (mergedCreatedAt == null
+                    || suggestion.getCreatedAt().compareTo(mergedCreatedAt) < 0)) {
+                mergedCreatedAt = suggestion.getCreatedAt();
+            }
+        }
+
+        for (ReviewRun run : groupRuns) {
+            NewlineSuggestion suggestion = run.getNewlineSuggestion();
+
+            suggestion.setGroupId(mergedGroupId);
+            suggestion.setActorEmail(actorEmail);
+            suggestion.setCreatedAt(mergedCreatedAt);
+            suggestion.setType(NewlineSuggestionType.STANDALONE);
+            suggestion.setDependsOnReviewRunIds(new ArrayList<>());
         }
     }
 
@@ -1842,7 +1996,7 @@ public class AttributionHelpers {
                 continue;
             }
 
-            if (start <= newlinePos && newlinePos < end) {
+            if (start <= newlinePos) {
                 if (run.isEmbed()) {
                     line.append("[image]");
                 } else if (run.isText()) {

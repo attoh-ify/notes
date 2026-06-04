@@ -38,13 +38,13 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         UUID noteId = message.getNoteId();
         String lockOwner = UUID.randomUUID().toString();
 
-        boolean acquired = redisService.tryAcquireOperationLock(
+        boolean acquiredLock = redisService.tryAcquireOperationLock(
                 noteId,
                 lockOwner,
                 OPERATION_LOCK_TTL_SECONDS
         );
 
-        if (!acquired) {
+        if (!acquiredLock) {
             log.warn(
                     "Could not acquire operation lock. noteId={} opId={} from={} revision={}",
                     noteId,

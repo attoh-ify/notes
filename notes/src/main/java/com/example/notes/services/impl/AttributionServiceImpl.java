@@ -304,6 +304,13 @@ public class AttributionServiceImpl implements AttributionService {
                                     }
                                 }
 
+                                if (attrValue == null) {
+                                    if (target.getSuggestionAttributes() != null) {
+                                        target.getSuggestionAttributes().remove(attrKey);
+                                    }
+                                    continue;
+                                }
+
                                 if (Objects.equals(baseValue, attrValue)) {
                                     continue;
                                 }
@@ -687,8 +694,6 @@ public class AttributionServiceImpl implements AttributionService {
                         if (fragment.newline()) {
                             NewlineSuggestion newlineSuggestion =
                                     createNewlineSuggestionForInsertedNewline(
-                                            runs,
-                                            spliceAt,
                                             authorEmail,
                                             createdAt,
                                             runRefs
@@ -711,8 +716,6 @@ public class AttributionServiceImpl implements AttributionService {
                         runs.add(spliceAt++, newRun);
 
                         if (fragment.newline()) {
-                            refreshNewlineSuggestionDependencies(runs);
-
                             Map<String, Object> insertedBlockAttrs = onlyBlockAttrs(component.getAttributes());
 
                             for (Map.Entry<String, Object> entry : insertedBlockAttrs.entrySet()) {
@@ -958,7 +961,6 @@ public class AttributionServiceImpl implements AttributionService {
                             }
 
                             remaining -= len;
-                            localLogPos += len;
                         } else {
                             boolean deletingBaseNewline = isBlockTargetRun(target);
 
@@ -1112,7 +1114,7 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         // ── PHASE 7 ───────────────────────────────────────────────────────────
-        refreshNewlineSuggestionDependencies(runs);
+        classifyNewlineSuggestions(runs);
 
         normalizeContinuingBlockFormatGroups(
                 runs,
@@ -1399,9 +1401,25 @@ public class AttributionServiceImpl implements AttributionService {
                         buildNewlineSuggestionPayload(run, true)
                 );
 
-                delta.insert(" ↵ ", markerAttrs);
+                boolean startsDocument = run.getLogicalStart() == 0;
 
-                delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
+                if (startsDocument) {
+                    /*
+                     * Leading standalone newline:
+                     * marker comes before because there is no previous visual line.
+                     */
+                    delta.insert(" ↵ ", markerAttrs);
+                    delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
+                } else {
+                    /*
+                     * Normal standalone newline:
+                     * retain the real newline first, then place the marker after it,
+                     * so the marker appears on the blank line created by the newline.
+                     */
+                    delta.retain(run.length(), attrs.isEmpty() ? null : attrs);
+                    delta.insert(" ↵ ", markerAttrs);
+                }
+
                 continue;
             }
 

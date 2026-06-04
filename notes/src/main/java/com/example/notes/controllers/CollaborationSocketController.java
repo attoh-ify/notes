@@ -3,8 +3,11 @@ package com.example.notes.controllers;
 import com.example.notes.config.activeMq.MessageProducer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.message_payload.CursorPayload;
+import com.example.notes.dto.message_payload.SoloSyncAckPayload;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.notifier.CursorNotifier;
+import com.example.notes.notifier.SoloSyncNotifier;
+import com.example.notes.services.NoteService;
 import com.example.notes.services.RedisService;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -20,14 +23,18 @@ public class CollaborationSocketController {
     private final MessageProducer messageProducer;
     private final CursorNotifier cursorNotifier;
     private final RedisService redisService;
+    private final NoteService noteService;
+    private final SoloSyncNotifier soloSyncNotifier;
 
     public CollaborationSocketController(
             MessageProducer messageProducer,
-            CursorNotifier cursorNotifier, RedisService redisService
+            CursorNotifier cursorNotifier, RedisService redisService, NoteService noteService, SoloSyncNotifier soloSyncNotifier
     ) {
         this.messageProducer = messageProducer;
         this.cursorNotifier = cursorNotifier;
         this.redisService = redisService;
+        this.noteService = noteService;
+        this.soloSyncNotifier = soloSyncNotifier;
     }
 
     @MessageMapping("/note/{noteId}/operation")
@@ -72,6 +79,71 @@ public class CollaborationSocketController {
             StompHeaderAccessor accessor
     ) {
         requireJoinedNote(noteId, principal, accessor);
+    }
+
+    @MessageMapping("/note/{noteId}/solo-sync")
+    public void soloSync(
+            @DestinationVariable UUID noteId,
+            TextOperation operation,
+            Principal principal,
+            StompHeaderAccessor accessor
+    ) {
+        requireJoinedNote(noteId, principal, accessor);
+
+        String opId = operation != null ? operation.getOpId() : null;
+
+        try {
+            if (redisService.isCollaborativeMode(noteId) && operation != null) {
+                OperationQueueInPayload payload = new OperationQueueInPayload(
+                        noteId,
+                        operation.getOpId(),
+                        operation.getRevision(),
+                        principal.getName(),
+                        operation.getDelta()
+                );
+
+                messageProducer.sendMessage(payload, noteId);
+
+                /*
+                 * Do NOT send success SOLO_SYNC_ACK here.
+                 * The queue has accepted the op, but it has not processed it yet.
+                 * The real ack is the OPERATION relay.
+                 */
+                return;
+            }
+
+            int newRevision = noteService.soloSyncFromJoinedSession(
+                    principal.getName(),
+                    noteId,
+                    operation
+            );
+
+            if (newRevision == 0) {
+                return;
+            }
+
+            soloSyncNotifier.notifySoloSyncAck(
+                    noteId,
+                    new SoloSyncAckPayload(
+                            noteId,
+                            opId,
+                            true,
+                            newRevision,
+                            null
+                    )
+            );
+        } catch (Exception e) {
+            soloSyncNotifier.notifySoloSyncAck(
+                    noteId,
+                    new SoloSyncAckPayload(
+                            noteId,
+                            opId,
+                            false,
+                            null,
+                            e.getMessage()
+                    )
+            );
+        }
     }
 
     private void requireJoinedNote(

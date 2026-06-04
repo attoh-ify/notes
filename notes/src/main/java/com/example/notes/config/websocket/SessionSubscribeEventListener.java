@@ -1,6 +1,8 @@
 package com.example.notes.config.websocket;
 
+import com.example.notes.dto.message_payload.CollaborationModePayload;
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
+import com.example.notes.notifier.CollaborationModeNotifier;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.services.RedisService;
 import org.slf4j.Logger;
@@ -22,6 +24,9 @@ public class SessionSubscribeEventListener implements ApplicationListener<Sessio
 
     @Autowired
     public CollaboratorCountNotifier collaboratorCountNotifier;
+
+    @Autowired
+    public CollaborationModeNotifier collaborationModeNotifier;
 
     public SessionSubscribeEventListener(RedisService redisService) {
         this.redisService = redisService;
@@ -62,6 +67,17 @@ public class SessionSubscribeEventListener implements ApplicationListener<Sessio
         collaboratorCountNotifier.notifyCount(
                 noteId,
                 new CollaboratorsPayload(collaborators)
+        );
+
+        int activeSessionCount = redisService.getActiveSessionCount(noteId);
+
+        collaborationModeNotifier.notifyMode(
+                noteId,
+                new CollaborationModePayload(
+                        noteId,
+                        redisService.getCollaborationMode(noteId),
+                        activeSessionCount
+                )
         );
     }
 }

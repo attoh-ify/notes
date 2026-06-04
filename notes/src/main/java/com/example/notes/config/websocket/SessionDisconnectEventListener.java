@@ -63,6 +63,14 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
         NoteDto note = redisService.getNote(noteId);
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
+        log.info(
+                "Disconnect cleanup reached. noteId={} sessionId={} removedFinalUserSession={} collaborators={}",
+                noteId,
+                sessionId,
+                removedFinalUserSession,
+                collaborators
+        );
+
         if (removedFinalUserSession && redisService.isReviewInProgress(noteId, userEmail)) {
             redisService.setReviewInProgress(noteId, userEmail, "false");
             reviewInProgressNotifier.notifyReviewInProgress(
@@ -78,8 +86,20 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
                         new CollaboratorsPayload(collaborators)
                 );
             } else {
-                noteService.saveNote(userEmail, noteId);
-                redisService.deleteNote(noteId);
+                log.info("Final collaborator left. Saving then deleting Redis note. noteId={}", noteId);
+                try {
+                    noteService.saveNote(userEmail, noteId);
+                    log.info("Final disconnect save succeeded. Deleting Redis note. noteId={}", noteId);
+                } catch (Exception e) {
+                    log.warn(
+                            "Could not save note on final websocket disconnect. It may already be deleted. noteId={} user={}",
+                            noteId,
+                            userEmail,
+                            e
+                    );
+                } finally {
+                    redisService.deleteNote(noteId);
+                }
             }
         }
     }

@@ -1,17 +1,13 @@
 package com.example.notes.controllers;
 
-import com.example.notes.config.activeMq.MessageProducer;
 import com.example.notes.dto.attribution.ReviewProjection;
-import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
 import com.example.notes.security.CurrentUser;
-import com.example.notes.services.AttributionService;
 import com.example.notes.services.NoteService;
-import com.example.notes.services.impl.NotePolicyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,13 +24,9 @@ import java.util.UUID;
 )
 public class NoteController {
     private final NoteService noteService;
-    private final MessageProducer messageProducer;
-    private final NotePolicyService notePolicyService;
 
-    public NoteController(NoteService noteService, MessageProducer messageProducer, NotePolicyService notePolicyService) {
+    public NoteController(NoteService noteService) {
         this.noteService = noteService;
-        this.messageProducer = messageProducer;
-        this.notePolicyService = notePolicyService;
     }
 
     @PostMapping

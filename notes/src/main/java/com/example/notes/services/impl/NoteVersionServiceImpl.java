@@ -75,12 +75,10 @@ public class NoteVersionServiceImpl implements NoteVersionService {
             UUID noteId,
             CreateNoteVersionPayload payload
     ) {
-        notePolicyService.validateSuper(actorEmail, noteId);
+        Note note = notePolicyService.validateSuper(actorEmail, noteId);
+        NoteVersion oldNoteVersion = notePolicyService.findNoteCopy(noteId);
 
-        NoteDto note = redisService.getNote(noteId);
-        NoteVersionDto oldNoteVersion = redisService.getNoteVersion(noteId);
-
-        for (TextOperation op : note.revisionLog()) {
+        for (TextOperation op : note.getRevisionLog()) {
             if (op.getState().equals(OpState.PENDING)) {
                 op.setState(OpState.COMMITTED);
             }
@@ -88,7 +86,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
         Delta newMasterDelta = QuillDeltaUtils.emptyDocument();
 
-        List<TextOperation> committedOps = note.revisionLog().stream()
+        List<TextOperation> committedOps = note.getRevisionLog().stream()
                 .filter(op -> op.getState().equals(OpState.COMMITTED))
                 .sorted(Comparator.comparingInt(TextOperation::getRevision))
                 .toList();
@@ -103,25 +101,11 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         int newRevision = committedOps.stream()
                 .mapToInt(TextOperation::getRevision)
                 .max()
-                .orElse(oldNoteVersion.revision());
-
-        NoteVersionDto newWorkingNoteVersion = new NoteVersionDto(
-                oldNoteVersion.id(),
-                newMasterDelta,
-                newRevision,
-                oldNoteVersion.comment(),
-                oldNoteVersion.versionNumber(),
-                oldNoteVersion.createdAt()
-        );
-
-        redisService.updateNote(note, newWorkingNoteVersion);
-        noteService.saveNote(actorEmail, noteId);
-
-        Note updatedNote = notePolicyService.validateSuper(actorEmail, noteId);
+                .orElse(oldNoteVersion.getRevision());
 
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
-                updatedNote,
+                note,
                 newMasterDelta,
                 newRevision,
                 payload.comment(),

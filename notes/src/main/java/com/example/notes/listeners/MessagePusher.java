@@ -1,7 +1,7 @@
 package com.example.notes.listeners;
 
 import com.example.notes.dto.message_payload.MessageOutPayloadWrapper;
-import com.example.notes.entities.MessageType;
+import com.example.notes.dto.message_payload.MessageType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

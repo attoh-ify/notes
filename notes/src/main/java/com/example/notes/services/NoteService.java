@@ -22,4 +22,5 @@ public interface NoteService {
     void saveNote(String actorEmail, UUID noteId);
     void deleteNote(String actorEmail, UUID noteId);
     void changeNoteVisibility(String userEmail, UUID noteId, NoteVisibility visibility);
+    int soloSyncFromJoinedSession(String actorEmail, UUID noteId, TextOperation operation);
 }
