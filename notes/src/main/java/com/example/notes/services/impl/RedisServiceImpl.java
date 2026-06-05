@@ -26,13 +26,13 @@ public class RedisServiceImpl implements RedisService {
     private final NotePolicyService notePolicyService;
 
     private static final String DIRTY_NOTES_KEY = "dirty-notes";
-    private static final String PERSIST_LOCK_PREFIX = "persist-lock:";
-    private static final String OPERATION_LOCK_PREFIX = "operation-lock:";
-    private static final long COLLABORATOR_SESSION_HEARTBEAT_TTL_SECONDS = 300;
     private static final String ACTIVE_COLLABORATION_NOTES_KEY = "active-collaboration-notes";
+    private static final long COLLABORATOR_SESSION_HEARTBEAT_TTL_SECONDS = 300;
     private static final long LOCK_TTL_SECONDS = 120;
     private static final int BATCH_SIZE = 1000;
     private static final long DIRTY_AGE_MILLIS = 60_000;
+    private static final int MAX_REVISION_LOG_SIZE = 1000;
+    private static final int KEEP_LATEST_REVISIONS = 500;
     private static final String[] COLLABORATOR_COLORS = {
             "#1F3A93",
             "#D32F2F",
@@ -84,7 +84,6 @@ public class RedisServiceImpl implements RedisService {
             "#9E9D24",
             "#0288D1",
             "#D84315"
-
     };
 
     public RedisServiceImpl(StringRedisTemplate redisTemplate, ObjectMapper objectMapper, NotePolicyService notePolicyService) {
@@ -214,6 +213,26 @@ public class RedisServiceImpl implements RedisService {
         ));
 
         redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, noteId.toString());
+        redisTemplate.opsForSet().remove(ACTIVE_COLLABORATION_NOTES_KEY, noteId.toString());
+    }
+
+    @Override
+    public void refreshNoteContent(String actorEmail, UUID noteId) {
+        if (noteId == null || actorEmail == null || actorEmail.isBlank()) {
+            return;
+        }
+
+        String noteKey = getNoteKey(noteId);
+        String noteVersionKey = getNoteVersionKey(noteId);
+        String noteInitialRevisionKey = getInitialRevisionKey(noteId);
+
+        redisTemplate.delete(List.of(
+                noteKey,
+                noteVersionKey,
+                noteInitialRevisionKey
+        ));
+
+        initializeNote(actorEmail, noteId);
     }
 
     @Override
@@ -274,12 +293,7 @@ public class RedisServiceImpl implements RedisService {
         String sessionsKey = getNoteCollaboratorSessionsKey(noteId);
         Object actorEmailObj = redisTemplate.opsForHash().get(sessionsKey, sessionId);
 
-        if (actorEmailObj == null) {
-            redisTemplate.delete(getCollaboratorSessionHeartbeatKey(noteId, sessionId));
-            return false;
-        }
-
-        String actorEmail = actorEmailObj.toString();
+        String actorEmail = actorEmailObj != null ? actorEmailObj.toString() : "";
 
         redisTemplate.opsForHash().delete(sessionsKey, sessionId);
         redisTemplate.delete(getCollaboratorSessionHeartbeatKey(noteId, sessionId));
@@ -440,7 +454,7 @@ public class RedisServiceImpl implements RedisService {
 
         redisTemplate.execute(
                 new org.springframework.data.redis.core.script.DefaultRedisScript<>(script, Long.class),
-                java.util.Collections.singletonList(key),
+                Collections.singletonList(key),
                 owner
         );
     }
@@ -502,31 +516,18 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public void compactTransformRevisionLogIfNeeded(
-            UUID noteId,
-            NoteDto note,
-            int maxLogSize,
-            int keepLatest
-    ) {
+    public void compactTransformRevisionLogIfNeeded(UUID noteId, NoteDto note) {
         if (noteId == null || note == null || note.revisionLog() == null) {
             return;
         }
 
-        if (maxLogSize <= 0 || keepLatest <= 0) {
-            return;
-        }
-
-        if (keepLatest >= maxLogSize) {
-            throw new IllegalArgumentException("keepLatest must be smaller than maxLogSize");
-        }
-
         int currentSize = note.revisionLog().size();
 
-        if (currentSize <= maxLogSize) {
+        if (currentSize <= MAX_REVISION_LOG_SIZE) {
             return;
         }
 
-        int removeCount = currentSize - keepLatest;
+        int removeCount = currentSize - KEEP_LATEST_REVISIONS;
 
         int oldInitialRevision = getInitialRevision(noteId);
         int newInitialRevision = oldInitialRevision + removeCount;
@@ -802,11 +803,11 @@ public class RedisServiceImpl implements RedisService {
     }
 
     private String getPersistenceLockKey(UUID noteId) {
-        return PERSIST_LOCK_PREFIX + noteId;
+        return "persist-lock:" + noteId;
     }
 
     private String getOperationLockKey(UUID noteId) {
-        return OPERATION_LOCK_PREFIX + noteId;
+        return "operation-lock:" + noteId;
     }
 
     private String getProcessedOperationsKey(UUID noteId) {
@@ -846,9 +847,7 @@ public class RedisServiceImpl implements RedisService {
         }
 
         for (String email : uniqueEmails) {
-            String assignedColor = COLLABORATOR_COLORS[Math.abs(email.hashCode() % COLLABORATOR_COLORS.length)];
-
-            redisTemplate.opsForHash().put(collaboratorsKey, email, assignedColor);
+            addCollaboratorToNote(noteId, email);
         }
     }
 }

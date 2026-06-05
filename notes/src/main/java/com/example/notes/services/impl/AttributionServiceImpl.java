@@ -61,6 +61,9 @@ public class AttributionServiceImpl implements AttributionService {
                     : new LinkedHashMap<>();
 
             if (op.getInsert() instanceof String insertStr) {
+                Map<String, Object> inlineAttrs = onlyInlineAttrs(opAttrs);
+                Map<String, Object> blockAttrs = onlyBlockAttrs(opAttrs);
+
                 String[] parts = insertStr.split("\n", -1);
 
                 for (int i = 0; i < parts.length; i++) {
@@ -69,7 +72,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 ReviewRun.builder()
                                         .id(reviewRunIdForBase(seedPos))
                                         .text(parts[i])
-                                        .baseAttributes(new LinkedHashMap<>(opAttrs))
+                                        .baseAttributes(new LinkedHashMap<>(inlineAttrs))
                                         .suggestionAttributes(new LinkedHashMap<>())
                                         .references(new ArrayList<>())
                                         .logicalStart(seedPos)
@@ -83,7 +86,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 ReviewRun.builder()
                                         .id(reviewRunIdForBase(seedPos))
                                         .text("\n")
-                                        .baseAttributes(new LinkedHashMap<>())
+                                        .baseAttributes(new LinkedHashMap<>(blockAttrs))
                                         .suggestionAttributes(new LinkedHashMap<>())
                                         .references(new ArrayList<>())
                                         .logicalStart(seedPos)
@@ -92,16 +95,12 @@ public class AttributionServiceImpl implements AttributionService {
                         seedPos += 1;
                     }
                 }
-
-                continue;
-            }
-
-            if (op.getInsert() instanceof Map<?, ?> embed) {
+            }  else if (op.getInsert() instanceof Map<?, ?> embed) {
                 runs.add(
                         ReviewRun.builder()
                                 .id(reviewRunIdForBase(seedPos))
                                 .embed(cloneEmbed(embed))
-                                .baseAttributes(new LinkedHashMap<>(opAttrs))
+                                .baseAttributes(new LinkedHashMap<>(onlyInlineAttrs(opAttrs)))
                                 .suggestionAttributes(new LinkedHashMap<>())
                                 .references(new ArrayList<>())
                                 .logicalStart(seedPos)
@@ -304,21 +303,17 @@ public class AttributionServiceImpl implements AttributionService {
                                     }
                                 }
 
-                                if (attrValue == null) {
-                                    if (target.getSuggestionAttributes() != null) {
-                                        target.getSuggestionAttributes().remove(attrKey);
-                                    }
-                                    continue;
-                                }
-
                                 if (Objects.equals(baseValue, attrValue)) {
                                     continue;
                                 }
 
+                                Map<String, Object> attrsToOverlay = new HashMap<>();
+                                attrsToOverlay.put(attrKey, attrValue);
+
                                 target.setSuggestionAttributes(
                                         overlayAttrsPreserveNull(
                                                 target.getSuggestionAttributes(),
-                                                Map.of(attrKey, attrValue)
+                                                attrsToOverlay
                                         )
                                 );
 
@@ -1358,6 +1353,31 @@ public class AttributionServiceImpl implements AttributionService {
                 }
             }
 
+            boolean isPlainBaseReviewRun =
+                    run.getInsertSuggestion() == null
+                            && run.getNewlineSuggestion() == null
+                            && run.getDeleteSuggestion() == null;
+
+            if (isPlainBaseReviewRun) {
+                Map<String, Object> basePayload = new LinkedHashMap<>();
+
+                basePayload.put(
+                        "baseAttributes",
+                        !baseAttrs.isEmpty() ? new LinkedHashMap<>(baseAttrs) : null
+                );
+
+                basePayload.put(
+                        "suggestionAttributes",
+                        !suggestionAttrs.isEmpty() ? new LinkedHashMap<>(suggestionAttrs) : null
+                );
+
+                if (run.isText() && "\n".equals(run.getText())) {
+                    attrs.put("review-block-base", basePayload);
+                } else {
+                    attrs.put("review-base", basePayload);
+                }
+            }
+
             if (isDeletedPending) {
                 Object insertValue;
 
@@ -1389,6 +1409,7 @@ public class AttributionServiceImpl implements AttributionService {
                     run.getNewlineSuggestion() != null
                             && run.isText()
                             && "\n".equals(run.getText())
+                            && !isTerminalDocumentNewline(collapsed, run)
                             && (
                             run.getNewlineSuggestion().getType() == null
                                     || run.getNewlineSuggestion().getType() == NewlineSuggestionType.STANDALONE
@@ -1525,5 +1546,26 @@ public class AttributionServiceImpl implements AttributionService {
         );
 
         return payload;
+    }
+
+    private boolean isTerminalDocumentNewline(
+            List<ReviewRun> runs,
+            ReviewRun candidate
+    ) {
+        if (candidate == null || !candidate.isText() || !"\n".equals(candidate.getText())) {
+            return false;
+        }
+
+        for (int i = runs.size() - 1; i >= 0; i--) {
+            ReviewRun run = runs.get(i);
+
+            if (run == null || run.length() <= 0) {
+                continue;
+            }
+
+            return run == candidate;
+        }
+
+        return false;
     }
 }

@@ -23,8 +23,6 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     private static final Logger log = LoggerFactory.getLogger(OperationQueueServiceImpl.class);
     private final RedisService redisService;
     private static final long OPERATION_LOCK_TTL_SECONDS = 60;
-    private static final int MAX_REVISION_LOG_SIZE = 1000;
-    private static final int KEEP_LATEST_REVISIONS = 500;
 
     @Autowired
     private OperationRelayer operationRelayer;
@@ -155,11 +153,6 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
                 TextOperation historyOp = note.revisionLog().get(logIndex);
 
-                if (opId.equals(historyOp.getOpId())) {
-                    log.info("Same opId in history, skipping transform. opId={}", opId);
-                    continue;
-                }
-
                 boolean serverHasOpPriority = serverHasPriority(message, historyOp);
 
                 transformedDelta = historyOp.getDelta().transform(transformedDelta, serverHasOpPriority);
@@ -181,9 +174,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         redisService.compactTransformRevisionLogIfNeeded(
                 noteId,
-                note,
-                MAX_REVISION_LOG_SIZE,
-                KEEP_LATEST_REVISIONS
+                note
         );
 
         NoteDto newRedisNote = new NoteDto(

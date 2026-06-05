@@ -2,7 +2,6 @@ package com.example.notes.controllers;
 
 import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.note.*;
-import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
 import com.example.notes.entities.user.UserPrincipal;
@@ -98,17 +97,6 @@ public class NoteController {
     ) {
         NoteDto note = noteService.fetchNote(currentUser.getEmail(), noteId);
         return new ResponseDto("Note fetched", note);
-    }
-
-    @GetMapping("/{noteId}/revision-log")
-    @Operation(summary = "Fetch revision log", description = "Fetch revision log for a single note")
-    public ResponseDto getRevisionLog(
-            @CurrentUser UserPrincipal currentUser,
-
-            @Parameter(description = "Unique identifier of the note", required = true)
-            @PathVariable UUID noteId) {
-        List<TextOperation> revisionLog = noteService.fetchRevisionLog(currentUser.getEmail(), noteId);
-        return new ResponseDto("Revision log fetched successfully.", revisionLog);
     }
 
     @DeleteMapping("/{noteId}")

@@ -11,11 +11,9 @@ import java.util.UUID;
 public interface NoteService {
     List<NoteDto> fetchNotes(String actorEmail);
     NoteDto fetchNote(String actorEmail, UUID noteId);
-    List<TextOperation> fetchRevisionLog(String actorEmail, UUID noteId);
     NoteDto createNote(String actorEmail, CreateNotePayload payload);
     JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId);
     ReviewProjection buildAttribution(String actorEmail, UUID noteId);
-    void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail);
     void startReview(String actorEmail, UUID noteId);
     void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload);
     void exitReviewNote(String actorEmail, UUID noteId);

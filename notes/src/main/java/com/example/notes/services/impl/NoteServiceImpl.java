@@ -5,7 +5,6 @@ import com.example.notes.dto.attribution.ReviewDecisionReference;
 import com.example.notes.dto.attribution.ReviewOperationAccumulator;
 import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
-import com.example.notes.dto.message_payload.CursorPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
@@ -20,7 +19,6 @@ import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteMapper;
 import com.example.notes.notifier.CollaboratorCountNotifier;
-import com.example.notes.notifier.CursorNotifier;
 import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
@@ -44,9 +42,6 @@ public class NoteServiceImpl implements NoteService {
     @Autowired
     private ReviewInProgressNotifier reviewInProgressNotifier;
 
-    @Autowired
-    private CursorNotifier cursorNotifier;
-
     private final NoteRepository noteRepository;
     private final NoteMapper noteMapper;
     private final NoteVersionRepository noteVersionRepository;
@@ -57,8 +52,7 @@ public class NoteServiceImpl implements NoteService {
     private final NotePersistenceService notePersistenceService;
     private final MessageProducer messageProducer;
 
-    private static final Logger log =
-            LoggerFactory.getLogger(NoteServiceImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(NoteServiceImpl.class);
 
     public NoteServiceImpl(NoteRepository noteRepository, NoteMapper noteMapper, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, UserPolicyService userPolicyService, RedisService redisService, AttributionService attributionService, NotePersistenceService notePersistenceService, MessageProducer messageProducer) {
         this.noteRepository = noteRepository;
@@ -99,20 +93,6 @@ public class NoteServiceImpl implements NoteService {
         return noteMapper.toDto(note, actorEmail);
     }
 
-    @Override
-    public List<TextOperation> fetchRevisionLog(String actorEmail, UUID noteId) {
-        Note note = notePolicyService.findNoteById(noteId);
-
-        if (notePolicyService.resolveRole(actorEmail, note) == null) {
-            if (!note.getVisibility().equals(NoteVisibility.PUBLIC)) {
-                log.warn("Note with id={} visibility is not public", noteId);
-                throw new BadRequestException("Note is not visible to the public");
-            }
-        }
-
-        return note.getRevisionLog();
-    }
-
     @Transactional
     @Override
     public NoteDto createNote(String actorEmail, CreateNotePayload payload) {
@@ -146,11 +126,11 @@ public class NoteServiceImpl implements NoteService {
                 newNote,
                 initialDelta,
                 0,
-                "Note copy",
+                "Internal Note Copy",
                 0
         );
-        noteCopyVersion  = noteVersionRepository.save(noteCopyVersion );
-        newNote.getNoteVersions().add(noteCopyVersion );
+        noteCopyVersion  = noteVersionRepository.save(noteCopyVersion);
+        newNote.getNoteVersions().add(noteCopyVersion);
 
         if (hasContent) {
             NoteVersion importedVersion = new NoteVersion(
@@ -245,11 +225,6 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public void changeCursor(CursorDto cursorDto, UUID noteId, String actorEmail) {
-        cursorNotifier.notifyCursorChange(noteId, new CursorPayload(actorEmail, cursorDto.position()));
-    }
-
-    @Override
     public void startReview(String actorEmail, UUID noteId) {
         notePolicyService.validateOwner(actorEmail,noteId);
         redisService.setReviewInProgress(noteId, actorEmail, "true");
@@ -285,6 +260,8 @@ public class NoteServiceImpl implements NoteService {
         noteVersion.setMasterDelta(newMasterDelta);
 
         noteVersionRepository.save(noteVersion);
+
+        redisService.refreshNoteContent(actorEmail, noteId);
     }
 
     @Override
@@ -304,6 +281,7 @@ public class NoteServiceImpl implements NoteService {
     public void deleteNote(String actorEmail, UUID noteId) {
         Note note = notePolicyService.validateOwner(actorEmail, noteId);
         noteRepository.delete(note);
+        redisService.deleteNote(noteId);
     }
 
     @Override
@@ -315,30 +293,6 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public int soloSyncFromJoinedSession(String actorEmail, UUID noteId, TextOperation operation) {
-        return applySoloSync(actorEmail, noteId, operation);
-    }
-
-    private Delta rebuildLiveMasterDeltaFromRevisionLog(List<TextOperation> revisionLog) {
-        Delta delta = QuillDeltaUtils.emptyDocument();
-
-        List<TextOperation> liveOps = revisionLog.stream()
-                .filter(this::shouldIncludeInLiveMaster)
-                .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                .toList();
-
-        for (TextOperation op : liveOps) {
-            delta = delta.compose(new Delta(op.getDelta().ops));
-        }
-
-        return QuillDeltaUtils.ensureTerminalNewline(delta);
-    }
-
-    private boolean shouldIncludeInLiveMaster(TextOperation op) {
-        return op.getState().equals(OpState.COMMITTED)
-                || op.getState().equals(OpState.PENDING);
-    }
-
-    private int applySoloSync(String actorEmail, UUID noteId, TextOperation operation) {
         if (operation == null || operation.getDelta() == null) {
             throw new BadRequestException("Solo sync operation is required");
         }
@@ -369,18 +323,8 @@ public class NoteServiceImpl implements NoteService {
 
                 messageProducer.sendMessage(payload, noteId);
 
-                /*
-                 * Do NOT send success SOLO_SYNC_ACK here.
-                 * The queue has accepted the op, but it has not processed it yet.
-                 * The real ack is the OPERATION relay.
-                 */
                 return 0;
             }
-//            if (redisService.isCollaborativeMode(noteId)) {
-//                throw new BadRequestException(
-//                        "Note is currently in collaborative mode. Use operation queue."
-//                );
-//            }
 
             NoteDto note = redisService.getNote(noteId);
             NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
@@ -391,8 +335,7 @@ public class NoteServiceImpl implements NoteService {
 
             String opId = operation.getOpId();
 
-            TextOperation alreadyProcessed =
-                    redisService.getProcessedOperation(noteId, opId);
+            TextOperation alreadyProcessed = redisService.getProcessedOperation(noteId, opId);
 
             if (alreadyProcessed != null) {
                 return alreadyProcessed.getRevision();
@@ -405,8 +348,7 @@ public class NoteServiceImpl implements NoteService {
                 throw new BadRequestException("Solo sync is stale. Please reload note.");
             }
 
-            Delta currentMasterDelta =
-                    QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+            Delta currentMasterDelta = QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
 
             Delta changeDelta = operation.getDelta();
 
@@ -455,14 +397,32 @@ public class NoteServiceImpl implements NoteService {
 
             redisService.compactTransformRevisionLogIfNeeded(
                     noteId,
-                    updatedNote,
-                    1000,
-                    300
+                    updatedNote
             );
 
             return newRevision;
         } finally {
             redisService.releaseOperationLock(noteId, lockOwner);
         }
+    }
+
+    private Delta rebuildLiveMasterDeltaFromRevisionLog(List<TextOperation> revisionLog) {
+        Delta delta = QuillDeltaUtils.emptyDocument();
+
+        List<TextOperation> liveOps = revisionLog.stream()
+                .filter(this::shouldIncludeInLiveMaster)
+                .sorted(Comparator.comparingInt(TextOperation::getRevision))
+                .toList();
+
+        for (TextOperation op : liveOps) {
+            delta = delta.compose(new Delta(op.getDelta().ops));
+        }
+
+        return QuillDeltaUtils.ensureTerminalNewline(delta);
+    }
+
+    private boolean shouldIncludeInLiveMaster(TextOperation op) {
+        return op.getState().equals(OpState.COMMITTED)
+                || op.getState().equals(OpState.PENDING);
     }
 }

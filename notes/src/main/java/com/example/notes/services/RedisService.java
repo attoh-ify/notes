@@ -15,6 +15,7 @@ public interface RedisService {
     void updateNote(NoteDto note, NoteVersionDto noteVersion);
     NoteDto getNote(UUID noteId);
     void deleteNote(UUID noteId);
+    void refreshNoteContent(String actorEmail, UUID noteId);
 
     NoteVersionDto getNoteVersion(UUID noteId);
     int getInitialRevision(UUID noteId);
@@ -42,7 +43,7 @@ public interface RedisService {
     TextOperation getProcessedOperation(UUID noteId, String opId);
     void saveProcessedOperation(UUID noteId, TextOperation operation);
 
-    void compactTransformRevisionLogIfNeeded(UUID noteId, NoteDto note, int maxLogSize, int keepLatest);
+    void compactTransformRevisionLogIfNeeded(UUID noteId, NoteDto note);
     void appendPendingHistoryOperation(UUID noteId, TextOperation operation);
     List<TextOperation> getPendingHistoryOperations(UUID noteId);
     void clearPendingHistoryOperationsUpToRevision(UUID noteId, int savedRevision);
