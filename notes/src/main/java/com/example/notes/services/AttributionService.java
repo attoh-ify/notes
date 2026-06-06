@@ -14,6 +14,7 @@ public interface AttributionService {
             UUID noteId,
             List<TextOperation> baseTextOps,
             List<TextOperation> changeTextOps,
+            List<TextOperation> mutableRevisionLog,
             AttributionViewMode mode
     );
 }

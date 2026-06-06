@@ -29,6 +29,7 @@ public class AttributionServiceImpl implements AttributionService {
             UUID noteId,
             List<TextOperation> baseTextOps,
             List<TextOperation> changeTextOps,
+            List<TextOperation> mutableRevisionLog,
             AttributionViewMode mode
     ) {
 
@@ -1088,8 +1089,14 @@ public class AttributionServiceImpl implements AttributionService {
         boolean revisionLogChanged = false;
 
         if (mode == AttributionViewMode.REVIEW && !accumulator.isEmpty()) {
+            if (mutableRevisionLog == null) {
+                throw new IllegalStateException(
+                        "mutableRevisionLog is required when REVIEW mode flushes attribution cancellations."
+                );
+            }
+
             revisionLogChanged =
-                    accumulator.flushCancellationsAndReturnChanged(changeTextOps);
+                    accumulator.flushCancellationsAndReturnChanged(mutableRevisionLog);
         }
 
         // ── PHASE 7 ───────────────────────────────────────────────────────────

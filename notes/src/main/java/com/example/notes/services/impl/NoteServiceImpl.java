@@ -16,7 +16,6 @@ import com.example.notes.entities.noteVersion.NoteVersion;
 import com.example.notes.entities.user.User;
 import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.mappers.NoteMapper;
-import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.notifier.ReviewInProgressNotifier;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
@@ -34,9 +33,6 @@ import java.util.*;
 
 @Service
 public class NoteServiceImpl implements NoteService {
-    @Autowired
-    private CollaboratorCountNotifier collaboratorCountNotifier;
-
     @Autowired
     private ReviewInProgressNotifier reviewInProgressNotifier;
 
@@ -227,13 +223,13 @@ public class NoteServiceImpl implements NoteService {
                 noteId,
                 committedTextOps,
                 pendingTextOps,
+                note.getRevisionLog(),
                 AttributionViewMode.REVIEW
         );
 
         if (result.revisionLogChanged()) {
-            Delta newMasterDelta = rebuildLiveMasterDeltaFromRevisionLog(
-                    note.getRevisionLog()
-            );
+            Delta newMasterDelta =
+                    rebuildLiveMasterDeltaFromRevisionLog(note.getRevisionLog());
 
             noteVersion.setMasterDelta(newMasterDelta);
 

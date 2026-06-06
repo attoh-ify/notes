@@ -179,6 +179,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                     noteId,
                     new ArrayList<>(),
                     changeTextOps,
+                    new ArrayList<>(),
                     AttributionViewMode.AUDIT
             ).projection();
         }
@@ -212,6 +213,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 noteId,
                 baseTextOps,
                 changeTextOps,
+                new ArrayList<>(),
                 AttributionViewMode.AUDIT
         ).projection();
     }
