@@ -1,9 +1,7 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.config.activeMq.MessageProducer;
-import com.example.notes.dto.attribution.ReviewDecisionReference;
-import com.example.notes.dto.attribution.ReviewOperationAccumulator;
-import com.example.notes.dto.attribution.ReviewProjection;
+import com.example.notes.dto.attribution.*;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.*;
@@ -210,18 +208,42 @@ public class NoteServiceImpl implements NoteService {
         );
     }
 
+    @Transactional
     @Override
     public ReviewProjection buildAttribution(String actorEmail, UUID noteId) {
         Note note = notePolicyService.validateOwner(actorEmail, noteId);
+        NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
 
         List<TextOperation> committedTextOps = note.getRevisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.COMMITTED))
                 .toList();
+
         List<TextOperation> pendingTextOps = note.getRevisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.PENDING))
                 .toList();
 
-        return attributionService.buildReviewProjection(actorEmail, noteId, committedTextOps, pendingTextOps);
+        AttributionBuildResult result = attributionService.buildReviewProjection(
+                actorEmail,
+                noteId,
+                committedTextOps,
+                pendingTextOps,
+                AttributionViewMode.REVIEW
+        );
+
+        if (result.revisionLogChanged()) {
+            Delta newMasterDelta = rebuildLiveMasterDeltaFromRevisionLog(
+                    note.getRevisionLog()
+            );
+
+            noteVersion.setMasterDelta(newMasterDelta);
+
+            noteRepository.save(note);
+            noteVersionRepository.save(noteVersion);
+
+            redisService.refreshNoteContent(actorEmail, noteId);
+        }
+
+        return result.projection();
     }
 
     @Override
@@ -231,6 +253,7 @@ public class NoteServiceImpl implements NoteService {
         reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
     }
 
+    @Transactional
     @Override
     public void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload) {
         Note note = notePolicyService.validateOwner(actorEmail, noteId);

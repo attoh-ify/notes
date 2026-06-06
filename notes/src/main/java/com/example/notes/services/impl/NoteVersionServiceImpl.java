@@ -1,7 +1,7 @@
 package com.example.notes.services.impl;
 
+import com.example.notes.dto.attribution.AttributionViewMode;
 import com.example.notes.dto.attribution.ReviewProjection;
-import com.example.notes.dto.note.NoteDto;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
@@ -14,7 +14,6 @@ import com.example.notes.mappers.NoteVersionMapper;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.AttributionService;
-import com.example.notes.services.NoteService;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
 import com.example.notes.utils.QuillDeltaUtils;
@@ -30,7 +29,6 @@ import java.util.UUID;
 
 @Service
 public class NoteVersionServiceImpl implements NoteVersionService {
-    private final NoteService noteService;
     private final NoteRepository noteRepository;
     private final NoteVersionRepository noteVersionRepository;
     private final NotePolicyService notePolicyService;
@@ -41,8 +39,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     private static final Logger log =
             LoggerFactory.getLogger(NoteVersionServiceImpl.class);
 
-    public NoteVersionServiceImpl(NoteService noteService, NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService) {
-        this.noteService = noteService;
+    public NoteVersionServiceImpl(NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService) {
         this.noteRepository = noteRepository;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
@@ -69,6 +66,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         );
     }
 
+    @Transactional
     @Override
     public NoteVersionDto createVersion(
             String actorEmail,
@@ -96,6 +94,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                     new Delta(textOp.getDelta().ops)
             );
         }
+
         newMasterDelta = QuillDeltaUtils.ensureTerminalNewline(newMasterDelta);
 
         int newRevision = committedOps.stream()
@@ -103,20 +102,28 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 .max()
                 .orElse(oldNoteVersion.getRevision());
 
+        int nextVersionNumber =
+                noteVersionRepository.findMaxVersionByNoteId(noteId) + 1;
+
         NoteVersion newNoteVersion = new NoteVersion(
                 null,
                 note,
                 newMasterDelta,
                 newRevision,
                 payload.comment(),
-                noteVersionRepository.findMaxVersionByNoteId(noteId) + 1
+                nextVersionNumber
         );
+
+        note.setCurrentNoteVersionNumber(nextVersionNumber);
+
+        noteRepository.save(note);
+
+        NoteVersion savedVersion = noteVersionRepository.save(newNoteVersion);
 
         redisService.setReviewInProgress(noteId, actorEmail, "false");
+        redisService.refreshNoteContent(actorEmail, noteId);
 
-        return noteVersionMapper.toDto(
-                noteVersionRepository.save(newNoteVersion)
-        );
+        return noteVersionMapper.toDto(savedVersion);
     }
 
     @Transactional
@@ -141,6 +148,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         return noteVersionMapper.toDto(noteVersionRepository.save(noteVersion));
     }
 
+    @Transactional(readOnly = true)
     @Override
     public ReviewProjection auditVersion(String actorEmail, UUID noteId, UUID versionId) {
         Note note = notePolicyService.validateSuper(actorEmail, noteId);
@@ -170,8 +178,9 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                     actorEmail,
                     noteId,
                     new ArrayList<>(),
-                    changeTextOps
-            );
+                    changeTextOps,
+                    AttributionViewMode.AUDIT
+            ).projection();
         }
 
         int baseVersionNumber = targetVersion.getVersionNumber() - 1;
@@ -202,7 +211,8 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 actorEmail,
                 noteId,
                 baseTextOps,
-                changeTextOps
-        );
+                changeTextOps,
+                AttributionViewMode.AUDIT
+        ).projection();
     }
 }

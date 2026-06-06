@@ -1,13 +1,10 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.*;
-import com.example.notes.dto.note.NoteDto;
-import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
 import com.example.notes.dto.ot.Op;
 import com.example.notes.dto.ot.TextOperation;
 import com.example.notes.services.AttributionService;
-import com.example.notes.services.RedisService;
 import com.example.notes.utils.QuillDeltaUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,27 +16,20 @@ import static com.example.notes.utils.AttributionHelpers.*;
 @Slf4j
 @Service
 public class AttributionServiceImpl implements AttributionService {
-    private final RedisService redisService;
-    private final NotePersistenceService notePersistenceService;
 
-    public AttributionServiceImpl(
-            RedisService redisService,
-            NotePersistenceService notePersistenceService
-    ) {
-        this.redisService = redisService;
-        this.notePersistenceService = notePersistenceService;
-    }
+    public AttributionServiceImpl() {}
 
     // ─────────────────────────────────────────────────────────────────────────
     // Main method
     // ─────────────────────────────────────────────────────────────────────────
 
     @Override
-    public ReviewProjection buildReviewProjection(
+    public AttributionBuildResult buildReviewProjection(
             String actorEmail,
             UUID noteId,
             List<TextOperation> baseTextOps,
-            List<TextOperation> changeTextOps
+            List<TextOperation> changeTextOps,
+            AttributionViewMode mode
     ) {
 
         resetGroupCounter();
@@ -1095,21 +1085,20 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         // ── PHASE 6 ───────────────────────────────────────────────────────────
-        if (!accumulator.isEmpty()) {
-            NoteDto freshNote = redisService.getNote(noteId);
-            NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
-            boolean changed = accumulator.flushCancellationsAndReturnChanged(
-                    freshNote.revisionLog()
-            );
+        boolean revisionLogChanged = false;
 
-            if (changed) {
-                redisService.updateNote(freshNote, noteVersion);
-                notePersistenceService.saveRedisNoteToDatabase(actorEmail, noteId);
-            }
+        if (mode == AttributionViewMode.REVIEW && !accumulator.isEmpty()) {
+            revisionLogChanged =
+                    accumulator.flushCancellationsAndReturnChanged(changeTextOps);
         }
 
         // ── PHASE 7 ───────────────────────────────────────────────────────────
         classifyNewlineSuggestions(runs);
+
+        attachStandaloneNewlineDependenciesToBlockSuggestions(
+                runs,
+                blockFormatSuggestions
+        );
 
         normalizeContinuingBlockFormatGroups(
                 runs,
@@ -1121,19 +1110,21 @@ public class AttributionServiceImpl implements AttributionService {
                 blockFormatSuggestions
         );
 
-        Delta visualDelta = buildVisualDelta(runs);
+        Delta visualDelta = buildVisualDelta(runs, mode);
 
         for (TextOperation textOp : changeTextOps) {
             baseDelta = baseDelta.compose(new Delta(textOp.getDelta().ops));
         }
         baseDelta = QuillDeltaUtils.ensureTerminalNewline(baseDelta);
 
-        return new ReviewProjection(
+        ReviewProjection projection = new ReviewProjection(
                 baseDelta,
                 visualDelta,
                 formatSuggestions,
                 blockFormatSuggestions
         );
+
+        return new AttributionBuildResult(projection, revisionLogChanged);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1159,7 +1150,7 @@ public class AttributionServiceImpl implements AttributionService {
         return type;
     }
 
-    private Delta buildVisualDelta(List<ReviewRun> runs) {
+    private Delta buildVisualDelta(List<ReviewRun> runs, AttributionViewMode mode) {
         List<ReviewRun> collapsed = new ArrayList<>();
 
         for (ReviewRun run : runs) {
@@ -1406,7 +1397,8 @@ public class AttributionServiceImpl implements AttributionService {
              * The actual newline is still retained and owns the source references.
              */
             if (
-                    run.getNewlineSuggestion() != null
+                    mode == AttributionViewMode.REVIEW
+                            && run.getNewlineSuggestion() != null
                             && run.isText()
                             && "\n".equals(run.getText())
                             && !isTerminalDocumentNewline(collapsed, run)
@@ -1567,5 +1559,80 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         return false;
+    }
+
+    private void attachStandaloneNewlineDependenciesToBlockSuggestions(
+            List<ReviewRun> runs,
+            List<BlockFormatSuggestionItem> blockFormatSuggestions
+    ) {
+        if (runs == null || runs.isEmpty()) return;
+        if (blockFormatSuggestions == null || blockFormatSuggestions.isEmpty()) return;
+
+        Map<Integer, String> standaloneNewlineGroupByStart = new LinkedHashMap<>();
+
+        for (ReviewRun run : runs) {
+            if (!isNewlineRun(run)) continue;
+            if (run.getNewlineSuggestion() == null) continue;
+
+            NewlineSuggestion suggestion = run.getNewlineSuggestion();
+
+            if (suggestion.getType() != NewlineSuggestionType.STANDALONE) {
+                continue;
+            }
+
+            if (suggestion.getGroupId() == null || suggestion.getGroupId().isBlank()) {
+                continue;
+            }
+
+            standaloneNewlineGroupByStart.put(
+                    run.getLogicalStart(),
+                    suggestion.getGroupId()
+            );
+        }
+
+        if (standaloneNewlineGroupByStart.isEmpty()) return;
+
+        for (BlockFormatSuggestionItem item : blockFormatSuggestions) {
+            if (item.getReferences() == null || item.getReferences().isEmpty()) {
+                continue;
+            }
+
+            for (Reference ref : item.getReferences()) {
+                int start = ref.getReviewStart();
+
+                addNearbyStandaloneNewlineDependency(
+                        item,
+                        standaloneNewlineGroupByStart,
+                        start
+                );
+            }
+        }
+    }
+
+    private void addNearbyStandaloneNewlineDependency(
+            BlockFormatSuggestionItem item,
+            Map<Integer, String> standaloneNewlineGroupByStart,
+            int blockRefStart
+    ) {
+        addNewlineDependency(item, standaloneNewlineGroupByStart.get(blockRefStart - 1));
+        addNewlineDependency(item, standaloneNewlineGroupByStart.get(blockRefStart));
+        addNewlineDependency(item, standaloneNewlineGroupByStart.get(blockRefStart + 1));
+    }
+
+    private void addNewlineDependency(
+            BlockFormatSuggestionItem item,
+            String newlineGroupId
+    ) {
+        if (item == null || newlineGroupId == null || newlineGroupId.isBlank()) {
+            return;
+        }
+
+        if (item.getDependsOnNewlineGroupIds() == null) {
+            item.setDependsOnNewlineGroupIds(new ArrayList<>());
+        }
+
+        if (!item.getDependsOnNewlineGroupIds().contains(newlineGroupId)) {
+            item.getDependsOnNewlineGroupIds().add(newlineGroupId);
+        }
     }
 }

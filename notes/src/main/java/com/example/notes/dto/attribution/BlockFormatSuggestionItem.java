@@ -30,4 +30,6 @@ public class BlockFormatSuggestionItem {
     private List<String> dependsOnInsertGroupIds = new ArrayList<>();
     @Builder.Default
     private List<String> dependsOnDeleteGroupIds = new ArrayList<>();
+    @Builder.Default
+    private List<String> dependsOnNewlineGroupIds = new ArrayList<>();
 }

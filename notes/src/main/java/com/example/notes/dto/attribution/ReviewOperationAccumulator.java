@@ -145,7 +145,7 @@ public class ReviewOperationAccumulator {
             boolean hasCancelled = hasEffectiveOps(cancelled);
             boolean hasPending = hasEffectiveOps(pending);
 
-            if (!hasCancelled) {
+            if (!hasCancelled && !hasPending) {
                 continue;
             }
 
@@ -205,7 +205,7 @@ public class ReviewOperationAccumulator {
             boolean hasRejected = hasEffectiveOps(rejected);
             boolean hasPending = hasEffectiveOps(pending);
 
-            if (!hasAccepted && !hasRejected) {
+            if (!hasAccepted && !hasRejected && !hasPending) {
                 continue;
             }
 
@@ -272,10 +272,30 @@ public class ReviewOperationAccumulator {
             }
 
             else if (op.isInsert() && op.getInsert() instanceof String text) {
-                List<CharRange> acceptedRanges = clampRanges(decision.acceptedInsertRanges.get(i), text.length());
-                List<CharRange> rejectedRanges = clampRanges(decision.rejectedInsertRanges.get(i), text.length());
+                List<CharRange> acceptedRanges =
+                        clampRanges(decision.acceptedInsertRanges.get(i), text.length());
 
-                splitInsert(text, op.getAttributes(), acceptedRanges, rejectedRanges, accepted, rejected, pending);
+                List<CharRange> rejectedRanges =
+                        clampRanges(decision.rejectedInsertRanges.get(i), text.length());
+
+                Map<String, List<CharRange>> acceptedFormats =
+                        decision.acceptedFormatRanges.getOrDefault(i, Collections.emptyMap());
+
+                Map<String, List<CharRange>> rejectedFormats =
+                        decision.rejectedFormatRanges.getOrDefault(i, Collections.emptyMap());
+
+                splitInsert(
+                        text,
+                        op.getAttributes(),
+                        acceptedRanges,
+                        rejectedRanges,
+                        acceptedFormats,
+                        rejectedFormats,
+                        accepted,
+                        rejected,
+                        pending
+                );
+
                 continue;
             }
 
@@ -364,27 +384,55 @@ public class ReviewOperationAccumulator {
             Map<String, Object> attrs,
             List<CharRange> acceptedRanges,
             List<CharRange> rejectedRanges,
+            Map<String, List<CharRange>> acceptedFormats,
+            Map<String, List<CharRange>> rejectedFormats,
             Delta accepted,
             Delta rejected,
             Delta pending
     ) {
+        Map<String, Object> safeAttrs =
+                attrs != null ? new LinkedHashMap<>(attrs) : new LinkedHashMap<>();
+
+        Map<Integer, Set<String>> acceptedFormatAt =
+                buildFormatPositionMap(text.length(), acceptedFormats);
+
+        Map<Integer, Set<String>> rejectedFormatAt =
+                buildFormatPositionMap(text.length(), rejectedFormats);
+
         int cursor = 0;
-        List<SliceDecision> decisions = buildSliceDecisions(text.length(), acceptedRanges, rejectedRanges);
+        List<SliceDecision> decisions =
+                buildSliceDecisions(text.length(), acceptedRanges, rejectedRanges);
 
         for (SliceDecision decision : decisions) {
             if (decision.start() > cursor) {
-                appendPendingInsert(text.substring(cursor, decision.start()), attrs, accepted, rejected, pending);
+                appendPendingInsertWithFormatDecisions(
+                        text.substring(cursor, decision.start()),
+                        cursor,
+                        safeAttrs,
+                        acceptedFormatAt,
+                        rejectedFormatAt,
+                        accepted,
+                        rejected,
+                        pending
+                );
             }
 
             String part = text.substring(decision.start(), decision.end());
 
             if (decision.type() == DecisionType.ACCEPTED) {
-                accepted.insert(part, attrs);
-                rejected.retain(part.length(), null);
-                pending.retain(part.length(), null);
+                appendAcceptedInsertWithFormatDecisions(
+                        part,
+                        decision.start(),
+                        safeAttrs,
+                        acceptedFormatAt,
+                        rejectedFormatAt,
+                        accepted,
+                        rejected,
+                        pending
+                );
             } else {
                 accepted.retain(part.length(), null);
-                rejected.insert(part, attrs);
+                rejected.insert(part, safeAttrs.isEmpty() ? null : safeAttrs);
                 // Rejected insert should disappear from pending/base.
             }
 
@@ -392,22 +440,169 @@ public class ReviewOperationAccumulator {
         }
 
         if (cursor < text.length()) {
-            appendPendingInsert(text.substring(cursor), attrs, accepted, rejected, pending);
+            appendPendingInsertWithFormatDecisions(
+                    text.substring(cursor),
+                    cursor,
+                    safeAttrs,
+                    acceptedFormatAt,
+                    rejectedFormatAt,
+                    accepted,
+                    rejected,
+                    pending
+            );
         }
     }
 
-    private void appendPendingInsert(
+    private void appendAcceptedInsertWithFormatDecisions(
             String text,
+            int absoluteStart,
             Map<String, Object> attrs,
+            Map<Integer, Set<String>> acceptedFormatAt,
+            Map<Integer, Set<String>> rejectedFormatAt,
             Delta accepted,
             Delta rejected,
             Delta pending
     ) {
-        if (text.isEmpty()) return;
+        appendInsertByFormatDecision(
+                text,
+                absoluteStart,
+                attrs,
+                acceptedFormatAt,
+                rejectedFormatAt,
+                true,
+                accepted,
+                rejected,
+                pending
+        );
+    }
 
-        accepted.retain(text.length(), null);
-        rejected.retain(text.length(), null);
-        pending.insert(text, attrs);
+    private void appendPendingInsertWithFormatDecisions(
+            String text,
+            int absoluteStart,
+            Map<String, Object> attrs,
+            Map<Integer, Set<String>> acceptedFormatAt,
+            Map<Integer, Set<String>> rejectedFormatAt,
+            Delta accepted,
+            Delta rejected,
+            Delta pending
+    ) {
+        appendInsertByFormatDecision(
+                text,
+                absoluteStart,
+                attrs,
+                acceptedFormatAt,
+                rejectedFormatAt,
+                false,
+                accepted,
+                rejected,
+                pending
+        );
+    }
+
+    private void appendInsertByFormatDecision(
+            String text,
+            int absoluteStart,
+            Map<String, Object> attrs,
+            Map<Integer, Set<String>> acceptedFormatAt,
+            Map<Integer, Set<String>> rejectedFormatAt,
+            boolean textAccepted,
+            Delta accepted,
+            Delta rejected,
+            Delta pending
+    ) {
+        int local = 0;
+
+        while (local < text.length()) {
+            int absoluteIndex = absoluteStart + local;
+
+            Set<String> acceptedKeys =
+                    acceptedFormatAt.getOrDefault(absoluteIndex, Collections.emptySet());
+
+            Set<String> rejectedKeys =
+                    rejectedFormatAt.getOrDefault(absoluteIndex, Collections.emptySet());
+
+            int end = local + 1;
+
+            while (end < text.length()) {
+                int nextAbsolute = absoluteStart + end;
+
+                if (!Objects.equals(
+                        acceptedFormatAt.getOrDefault(nextAbsolute, Collections.emptySet()),
+                        acceptedKeys
+                )) {
+                    break;
+                }
+
+                if (!Objects.equals(
+                        rejectedFormatAt.getOrDefault(nextAbsolute, Collections.emptySet()),
+                        rejectedKeys
+                )) {
+                    break;
+                }
+
+                end++;
+            }
+
+            String part = text.substring(local, end);
+            int len = part.length();
+
+            Map<String, Object> acceptedAttrs = new LinkedHashMap<>(attrs);
+            Map<String, Object> pendingAttrs = new LinkedHashMap<>(attrs);
+
+            /*
+             * Rejected format attrs must not appear in accepted/pending live content.
+             */
+            for (String key : rejectedKeys) {
+                acceptedAttrs.remove(key);
+                pendingAttrs.remove(key);
+            }
+
+            /*
+             * If text is accepted but some attrs are still pending format suggestions,
+             * do not commit those attrs with the inserted text.
+             * Keep them as a pending retain over the newly accepted text.
+             */
+            if (textAccepted) {
+                for (String key : attrs.keySet()) {
+                    boolean explicitlyAccepted = acceptedKeys.contains(key);
+                    boolean explicitlyRejected = rejectedKeys.contains(key);
+
+                    if (!explicitlyAccepted && !explicitlyRejected) {
+                        acceptedAttrs.remove(key);
+                    }
+                }
+
+                accepted.insert(part, acceptedAttrs.isEmpty() ? null : acceptedAttrs);
+                rejected.retain(len, null);
+
+                Map<String, Object> pendingOnlyAttrs = new LinkedHashMap<>();
+
+                for (String key : attrs.keySet()) {
+                    boolean explicitlyAccepted = acceptedKeys.contains(key);
+                    boolean explicitlyRejected = rejectedKeys.contains(key);
+
+                    if (!explicitlyAccepted && !explicitlyRejected) {
+                        pendingOnlyAttrs.put(key, attrs.get(key));
+                    }
+                }
+
+                if (pendingOnlyAttrs.isEmpty()) {
+                    pending.retain(len, null);
+                } else {
+                    pending.retain(len, pendingOnlyAttrs);
+                }
+            } else {
+                /*
+                 * Text is still pending, so pending keeps the insert.
+                 * But rejected format attrs are removed from that pending insert.
+                 */
+                accepted.retain(len, null);
+                rejected.retain(len, null);
+                pending.insert(part, pendingAttrs.isEmpty() ? null : pendingAttrs);
+            }
+
+            local = end;
+        }
     }
 
     private void splitDelete(
