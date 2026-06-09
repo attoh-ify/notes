@@ -109,6 +109,7 @@ public class RedisServiceImpl implements RedisService {
                 note.getVisibility(),
                 null,
                 note.getCurrentNoteVersionNumber(),
+                note.isReviewing(),
                 note.getCreatedAt(),
                 note.getUpdatedAt()
         );
@@ -193,7 +194,6 @@ public class RedisServiceImpl implements RedisService {
         String noteCollaboratorKey = getNoteCollaboratorsKey(noteId);
         String noteCollaboratorSessionsKey = getNoteCollaboratorSessionsKey(noteId);
         String noteInitialRevisionKey = getInitialRevisionKey(noteId);
-        String reviewInProgressKey = getReviewInProgressKey(noteId);
         String persistenceLockKey = getPersistenceLockKey(noteId);
         String operationLockKey = getOperationLockKey(noteId);
         String processedOpsKey = getProcessedOperationsKey(noteId);
@@ -205,7 +205,6 @@ public class RedisServiceImpl implements RedisService {
                 noteCollaboratorKey,
                 noteCollaboratorSessionsKey,
                 noteInitialRevisionKey,
-                reviewInProgressKey,
                 persistenceLockKey,
                 operationLockKey,
                 processedOpsKey,
@@ -748,21 +747,6 @@ public class RedisServiceImpl implements RedisService {
     }
 
     @Override
-    public void setReviewInProgress(UUID noteId, String ownerEmail, String value) {
-        if ("true".equalsIgnoreCase(value)) {
-            redisTemplate.opsForHash().put(getReviewInProgressKey(noteId), ownerEmail, "true");
-        } else {
-            redisTemplate.opsForHash().delete(getReviewInProgressKey(noteId), ownerEmail);
-        }
-    }
-
-    @Override
-    public boolean isReviewInProgress(UUID noteId, String ownerEmail) {
-        Object val = redisTemplate.opsForHash().get(getReviewInProgressKey(noteId), ownerEmail);
-        return "true".equals(val);
-    }
-
-    @Override
     public int getInitialRevision(UUID noteId) {
         String val = redisTemplate.opsForValue().get(getInitialRevisionKey(noteId));
         return val != null ? Integer.parseInt(val) : 0;
@@ -792,10 +776,6 @@ public class RedisServiceImpl implements RedisService {
 
     private String getInitialRevisionKey(UUID noteId) {
         return "note-initial-revision:" + noteId;
-    }
-
-    private String getReviewInProgressKey(UUID noteId) {
-        return "note-review-in-progress:" + noteId;
     }
 
     private String getNoteCollaboratorSessionsKey(UUID noteId) {

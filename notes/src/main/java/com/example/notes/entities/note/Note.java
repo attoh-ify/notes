@@ -48,6 +48,9 @@ public class Note {
 
     @OneToMany(mappedBy = "note", cascade = {CascadeType.REMOVE, CascadeType.PERSIST}, fetch = FetchType.LAZY)
     private List<NoteVersion> noteVersions = new ArrayList<>();
+    
+    @Column(name = "is_reviewing", nullable = false)
+    private boolean isReviewing = false;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -57,7 +60,7 @@ public class Note {
 
     public Note() {}
 
-    public Note(UUID id, User user, String title, List<TextOperation> revisionLog, NoteVisibility visibility,  List<NoteAccess> noteAccesses, int currentNoteVersionNumber, List<NoteVersion> noteVersions) {
+    public Note(UUID id, User user, String title, List<TextOperation> revisionLog, NoteVisibility visibility,  List<NoteAccess> noteAccesses, int currentNoteVersionNumber, List<NoteVersion> noteVersions, boolean isReviewing) {
         this.id = id;
         this.user = user;
         this.title = title;
@@ -66,6 +69,7 @@ public class Note {
         this.noteAccesses = noteAccesses != null ? noteAccesses : new ArrayList<>();
         this.currentNoteVersionNumber = currentNoteVersionNumber;
         this.noteVersions = noteVersions != null ? noteVersions : new ArrayList<>();
+        this.isReviewing = isReviewing;
     }
 
     @PrePersist
@@ -89,6 +93,7 @@ public class Note {
                 ", noteAccesses=" + noteAccesses +
                 ", currentNoteVersionNumber=" + currentNoteVersionNumber +
                 ", noteVersions=" + noteVersions +
+                ", isReviewing=" + isReviewing +
                 ", createdAt=" + createdAt +
                 ", updatedAt=" + updatedAt +
                 '}';

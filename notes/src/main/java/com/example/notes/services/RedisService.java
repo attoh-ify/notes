@@ -25,9 +25,6 @@ public interface RedisService {
     void removeCollaboratorFromNote(UUID noteId, String actorEmail);
     Map<Object, Object> getCollaborators(UUID noteId);
 
-    void setReviewInProgress(UUID noteId, String ownerEmail, String value);
-    boolean isReviewInProgress(UUID noteId, String ownerEmail);
-
     void addCollaboratorSession(UUID noteId, String actorEmail, String sessionId);
     boolean removeCollaboratorSession(UUID noteId, String sessionId);
 

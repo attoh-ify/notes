@@ -52,6 +52,12 @@ public record NoteDto(
         int currentNoteVersionNumber,
 
         @Schema(
+                description = "States if a note is being reviewed or not",
+                example = "true"
+        )
+        Boolean isReviewing,
+
+        @Schema(
                 description = "Timestamp when the note was created",
                 example = "2026-01-07T11:15:30"
         )

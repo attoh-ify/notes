@@ -5,6 +5,7 @@ import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
 import com.example.notes.dto.ot.OpState;
 import com.example.notes.dto.ot.TextOperation;
+import com.example.notes.exceptions.BadRequestException;
 import com.example.notes.notifier.OperationRelayer;
 import com.example.notes.dto.enqueue.OperationQueueInPayload;
 import com.example.notes.services.OperationQueueService;
@@ -34,6 +35,14 @@ public class OperationQueueServiceImpl implements OperationQueueService {
     @Override
     public void enqueue(OperationQueueInPayload message) {
         UUID noteId = message.getNoteId();
+
+        NoteDto redisNote = redisService.getNote(noteId);
+        boolean isOwner = redisNote.ownerEmail().equals(message.getFrom());
+
+        if (!redisNote.isReviewing() && !isOwner) {
+            throw new BadRequestException("Note is currently under review by the owner.");
+        }
+
         String lockOwner = UUID.randomUUID().toString();
 
         boolean acquiredLock = redisService.tryAcquireOperationLock(
@@ -185,6 +194,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 note.visibility(),
                 note.accessRole(),
                 note.currentNoteVersionNumber(),
+                note.isReviewing(),
                 note.createdAt(),
                 note.updatedAt()
         );

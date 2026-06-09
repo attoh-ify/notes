@@ -115,12 +115,12 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         );
 
         note.setCurrentNoteVersionNumber(nextVersionNumber);
+        note.setReviewing(false);
 
         noteRepository.save(note);
 
         NoteVersion savedVersion = noteVersionRepository.save(newNoteVersion);
 
-        redisService.setReviewInProgress(noteId, actorEmail, "false");
         redisService.refreshNoteContent(actorEmail, noteId);
 
         return noteVersionMapper.toDto(savedVersion);
