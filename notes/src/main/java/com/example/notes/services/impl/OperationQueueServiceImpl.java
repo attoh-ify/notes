@@ -39,7 +39,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         NoteDto redisNote = redisService.getNote(noteId);
         boolean isOwner = redisNote.ownerEmail().equals(message.getFrom());
 
-        if (!redisNote.isReviewing() && !isOwner) {
+        if (redisNote.isReviewing() && !isOwner) {
             throw new BadRequestException("Note is currently under review by the owner.");
         }
 

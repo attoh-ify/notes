@@ -106,7 +106,7 @@ public class AttributionServiceImpl implements AttributionService {
 
         List<FormatSuggestionItem> formatSuggestions = new ArrayList<>();
         List<BlockFormatSuggestionItem> blockFormatSuggestions = new ArrayList<>();
-        ReviewOperationAccumulator accumulator = new ReviewOperationAccumulator();
+        AttributionCancellationAccumulator accumulator = new AttributionCancellationAccumulator();
 
         for (TextOperation textOp : changeTextOps) {
             String opId = textOp.getOpId();

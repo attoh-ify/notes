@@ -14,6 +14,7 @@ import com.example.notes.mappers.NoteVersionMapper;
 import com.example.notes.repositories.NoteRepository;
 import com.example.notes.repositories.NoteVersionRepository;
 import com.example.notes.services.AttributionService;
+import com.example.notes.services.NoteService;
 import com.example.notes.services.NoteVersionService;
 import com.example.notes.services.RedisService;
 import com.example.notes.utils.QuillDeltaUtils;
@@ -35,17 +36,19 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     private final NoteVersionMapper noteVersionMapper;
     private final RedisService redisService;
     private final AttributionService attributionService;
+    private final NoteService noteService;
 
     private static final Logger log =
             LoggerFactory.getLogger(NoteVersionServiceImpl.class);
 
-    public NoteVersionServiceImpl(NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService) {
+    public NoteVersionServiceImpl(NoteRepository noteRepository, NoteVersionRepository noteVersionRepository, NotePolicyService notePolicyService, NoteVersionMapper noteVersionMapper, RedisService redisService, AttributionService attributionService, NoteService noteService) {
         this.noteRepository = noteRepository;
         this.noteVersionRepository = noteVersionRepository;
         this.notePolicyService = notePolicyService;
         this.noteVersionMapper = noteVersionMapper;
         this.redisService = redisService;
         this.attributionService = attributionService;
+        this.noteService = noteService;
     }
 
     @Transactional(readOnly = true)
@@ -121,6 +124,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
         NoteVersion savedVersion = noteVersionRepository.save(newNoteVersion);
 
+//        noteService.buildAttribution(actorEmail, noteId);
         redisService.refreshNoteContent(actorEmail, noteId);
 
         return noteVersionMapper.toDto(savedVersion);
@@ -142,6 +146,10 @@ public class NoteVersionServiceImpl implements NoteVersionService {
             log.warn("Note and Note version conflicts");
             throw new BadRequestException("Note and Note version conflicts");
         }
+
+        NoteVersion noteCopy = notePolicyService.findNoteCopy(noteId);
+        noteCopy.setMasterDelta(noteVersion.getMasterDelta());
+        // need to update the revision
 
         note.setCurrentNoteVersionNumber(noteVersion.getVersionNumber());
         noteRepository.save(note);

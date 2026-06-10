@@ -204,7 +204,7 @@ public class NoteServiceImpl implements NoteService {
 
     @Transactional
     @Override
-    public ReviewProjection buildAttribution(String actorEmail, UUID noteId) {
+    public void buildAttribution(String actorEmail, UUID noteId) {
         Note note = notePolicyService.validateOwner(actorEmail, noteId);
         NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
 
@@ -236,8 +236,6 @@ public class NoteServiceImpl implements NoteService {
 
             redisService.refreshNoteContent(actorEmail, noteId);
         }
-
-        return result.projection();
     }
 
     @Override
@@ -247,40 +245,6 @@ public class NoteServiceImpl implements NoteService {
         noteRepository.save(note);
         redisService.refreshNoteContent(actorEmail, noteId);
         reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
-    }
-
-    @Transactional
-    @Override
-    public void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload) {
-        Note note = notePolicyService.validateOwner(actorEmail, noteId);
-        NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
-
-        ReviewOperationAccumulator accumulator = new ReviewOperationAccumulator();
-
-        if (payload.acceptedReferences() != null) {
-            for (ReviewDecisionReference ref : payload.acceptedReferences()) {
-                accumulator.recordAcceptedReference(ref);
-            }
-        }
-
-        if (payload.rejectedReferences() != null) {
-            for (ReviewDecisionReference ref : payload.rejectedReferences()) {
-                accumulator.recordRejectedReference(ref);
-            }
-        }
-
-        ReviewOperationAccumulator.ReviewApplyResult result =
-                accumulator.applyReviewDecisionsToRevisionLog(note.getRevisionLog());
-
-        if (!result.changed()) return;
-
-        Delta newMasterDelta =
-                rebuildLiveMasterDeltaFromRevisionLog(note.getRevisionLog());
-        noteVersion.setMasterDelta(newMasterDelta);
-
-        noteVersionRepository.save(noteVersion);
-
-        redisService.refreshNoteContent(actorEmail, noteId);
     }
 
     @Override
@@ -327,7 +291,7 @@ public class NoteServiceImpl implements NoteService {
         NoteDto redisNote = redisService.getNote(noteId);
         boolean isOwner = redisNote.ownerEmail().equals(actorEmail);
 
-        if (!redisNote.isReviewing() && !isOwner) {
+        if (redisNote.isReviewing() && !isOwner) {
             throw new BadRequestException("Note is currently under review by the owner.");
         }
 

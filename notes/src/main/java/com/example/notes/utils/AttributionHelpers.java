@@ -1777,7 +1777,7 @@ public class AttributionHelpers {
     public void applyBlockAttributeToNewlineRun(
             List<ReviewRun> runs,
             List<BlockFormatSuggestionItem> blockFormatSuggestions,
-            ReviewOperationAccumulator accumulator,
+            AttributionCancellationAccumulator accumulator,
             ReviewRun target,
             String attrKey,
             Object attrValue,
@@ -1889,7 +1889,7 @@ public class AttributionHelpers {
 
     public void cancelBlockSuggestionsForDeletedNewline(
             List<BlockFormatSuggestionItem> blockFormatSuggestions,
-            ReviewOperationAccumulator accumulator,
+            AttributionCancellationAccumulator accumulator,
             ReviewRun deletedRun
     ) {
         if (!isBlockTargetRun(deletedRun)) return;

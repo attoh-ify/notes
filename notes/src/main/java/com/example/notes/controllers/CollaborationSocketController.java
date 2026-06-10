@@ -68,7 +68,7 @@ public class CollaborationSocketController {
 
         cursorNotifier.notifyCursorChange(
                 noteId,
-                new CursorPayload(principal.getName(), payload.getPosition())
+                new CursorPayload(principal.getName(), payload.getPosition(), payload.getLength())
         );
     }
 
