@@ -367,11 +367,6 @@ public class AttributionCancellationAccumulator {
             Map<String, Object> cancelledAttrs = new LinkedHashMap<>(attrs);
             Map<String, Object> pendingAttrs = new LinkedHashMap<>(attrs);
 
-            /*
-             * If text is cancelled but some attrs are still pending format suggestions,
-             * do not commit those attrs with the inserted text.
-             * Keep them as a pending retain over the newly cancelled text.
-             */
             if (textCancelled) {
                 for (String key : attrs.keySet()) {
                     boolean explicitlyCancelled = cancelledKeys.contains(key);

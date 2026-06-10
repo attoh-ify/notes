@@ -1,7 +1,7 @@
 package com.example.notes.services.impl;
 
 import com.example.notes.dto.attribution.AttributionViewMode;
-import com.example.notes.dto.attribution.ReviewProjection;
+import com.example.notes.dto.attribution.AuditProjection;
 import com.example.notes.dto.noteVersion.CreateNoteVersionPayload;
 import com.example.notes.dto.noteVersion.NoteVersionDto;
 import com.example.notes.dto.ot.Delta;
@@ -158,7 +158,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
 
     @Transactional(readOnly = true)
     @Override
-    public ReviewProjection auditVersion(String actorEmail, UUID noteId, UUID versionId) {
+    public AuditProjection auditVersion(String actorEmail, UUID noteId, UUID versionId) {
         Note note = notePolicyService.validateSuper(actorEmail, noteId);
 
         NoteVersion targetVersion = noteVersionRepository.findByNote_IdAndId(noteId, versionId)

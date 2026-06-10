@@ -1,7 +1,10 @@
 package com.example.notes.dto.attribution;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,17 +14,18 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class NewlineSuggestion {
+public class FormatChangeItem {
     private String groupId;
     private String actorEmail;
     private String createdAt;
-
+    private String attributeKey;
+    private Object attributeValue;
     @Builder.Default
     private List<Reference> references = new ArrayList<>();
-
     @Builder.Default
-    private List<String> dependsOnReviewRunIds = new ArrayList<>();
-
+    private String previewText = "";
     @Builder.Default
-    private NewlineSuggestionType type = NewlineSuggestionType.STANDALONE;
+    private List<String> dependsOnInsertGroupIds = new ArrayList<>();
+    @Builder.Default
+    private List<String> dependsOnDeleteGroupIds = new ArrayList<>();
 }

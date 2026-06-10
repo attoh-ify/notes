@@ -1,6 +1,5 @@
 package com.example.notes.controllers;
 
-import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;

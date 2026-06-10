@@ -8,8 +8,16 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class InsertSuggestion {
+public class DeleteChange {
     private String groupId;
     private String actorEmail;
     private String createdAt;
+    @Builder.Default
+    private DeleteChangeType type = DeleteChangeType.TEXT;
+
+    public enum DeleteChangeType {
+        TEXT,
+        SINGLE_LINE,
+        MULTI_LINE
+    }
 }

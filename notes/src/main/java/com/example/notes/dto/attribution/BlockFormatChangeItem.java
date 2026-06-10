@@ -14,12 +14,14 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class FormatSuggestionItem {
+public class BlockFormatChangeItem {
     private String groupId;
     private String actorEmail;
     private String createdAt;
     private String attributeKey;
     private Object attributeValue;
+    private BlockFormatBehavior behavior;
+    private BlockFormatConflictGroup conflictGroup;
     @Builder.Default
     private List<Reference> references = new ArrayList<>();
     @Builder.Default

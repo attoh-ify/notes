@@ -78,12 +78,12 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static Map<String, Object> getEffectiveAttrs(ReviewRun run) {
+    public static Map<String, Object> getEffectiveAttrs(ChangeSegment run) {
         if (run == null) return Collections.emptyMap();
 
         Map<String, Object> out = new LinkedHashMap<>(
                 run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
-        out.putAll(run.getSuggestionAttributes());
+        out.putAll(run.getChangeAttributes());
         return out;
     }
 
@@ -92,21 +92,21 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Locate a logical document position inside the ReviewRun list.
-     * logicalPos ignores deleted-suggestion runs because deleted runs are visible
-     * in review mode but do not count as live document text.
+     * Locate a logical document position inside the ChangeSegment list.
+     * logicalPos ignores deleted-change runs because deleted runs are visible
+     * in audit mode but do not count as live document text.
      * absPos tracks the visual/runtime position, including deleted runs.
      */
-    public static RunPosition findRunPos(List<ReviewRun> runs, int logicalPos) {
+    public static RunPosition findRunPos(List<ChangeSegment> runs, int logicalPos) {
         int pos = 0;
         int absPos = 0;
 
         for (int i = 0; i < runs.size(); i++) {
-            ReviewRun r = runs.get(i);
+            ChangeSegment r = runs.get(i);
 
             int runLen = r.length();
 
-            if (r.getDeleteSuggestion() != null) {
+            if (r.getDeleteChange() != null) {
                 absPos += runLen;
                 continue;
             }
@@ -135,12 +135,12 @@ public class AttributionHelpers {
      * Split a run at a specific offset.
      * Returns the index of the RIGHT half (the run starting at the split point).
      */
-    public static int splitAt(List<ReviewRun> runs, int idx, int offset) {
+    public static int splitAt(List<ChangeSegment> runs, int idx, int offset) {
         if (idx >= runs.size()) {
             return idx;
         }
 
-        ReviewRun r = runs.get(idx);
+        ChangeSegment r = runs.get(idx);
 
         if (r.isEmbed()) {
             return idx;
@@ -152,30 +152,28 @@ public class AttributionHelpers {
 
         int splitAbsPos = r.getLogicalStart() + offset;
 
-        SuggestionReferenceSplit split = splitSuggestionReferences(r.getReferences(), splitAbsPos);
+        ReferenceSplit split = splitReferences(r.getReferences(), splitAbsPos);
 
-        ReviewRun left = ReviewRun.builder()
+        ChangeSegment left = ChangeSegment.builder()
                 .id(r.getId() != null ? r.getId() + "_L_" + splitAbsPos : null)
                 .text(r.getText().substring(0, offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
-                .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
+                .changeAttributes(new LinkedHashMap<>(r.getChangeAttributes() != null ? r.getChangeAttributes() : Collections.emptyMap()))
                 .references(split.left())
                 .logicalStart(r.getLogicalStart())
-                .insertSuggestion(copyInsertSuggestion(r.getInsertSuggestion()))
-                .newlineSuggestion(copyNewlineSuggestion(r.getNewlineSuggestion()))
-                .deleteSuggestion(copyDeleteSuggestion(r.getDeleteSuggestion()))
+                .insertChange(copyInsertChange(r.getInsertChange()))
+                .deleteChange(copyDeleteChange(r.getDeleteChange()))
                 .build();
 
-        ReviewRun right = ReviewRun.builder()
+        ChangeSegment right = ChangeSegment.builder()
                 .id(r.getId() != null ? r.getId() + "_R_" + splitAbsPos : null)
                 .text(r.getText().substring(offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
-                .suggestionAttributes(new LinkedHashMap<>(r.getSuggestionAttributes() != null ? r.getSuggestionAttributes() : Collections.emptyMap()))
+                .changeAttributes(new LinkedHashMap<>(r.getChangeAttributes() != null ? r.getChangeAttributes() : Collections.emptyMap()))
                 .references(split.right())
                 .logicalStart(splitAbsPos)
-                .insertSuggestion(copyInsertSuggestion(r.getInsertSuggestion()))
-                .newlineSuggestion(copyNewlineSuggestion(r.getNewlineSuggestion()))
-                .deleteSuggestion(copyDeleteSuggestion(r.getDeleteSuggestion()))
+                .insertChange(copyInsertChange(r.getInsertChange()))
+                .deleteChange(copyDeleteChange(r.getDeleteChange()))
                 .build();
 
         runs.set(idx, left);
@@ -189,7 +187,7 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static boolean isOnlyNewlineRetain(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             int logicalStart,
             int retainLength
     ) {
@@ -200,8 +198,8 @@ public class AttributionHelpers {
         boolean sawOverlap = false;
 
         for (int i = runIdx; i < runs.size() && remaining > 0; i++) {
-            ReviewRun run = runs.get(i);
-            if (run.getDeleteSuggestion() != null) continue;
+            ChangeSegment run = runs.get(i);
+            if (run.getDeleteChange() != null) continue;
 
             sawOverlap = true;
             int lenToCheck = Math.min(run.length() - offset, remaining);
@@ -262,7 +260,7 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static InsertGroupCollection collectInsertGroupRunsWithAttrs(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             String groupId,
             Map<String, Object> attrs
     ) {
@@ -271,10 +269,10 @@ public class AttributionHelpers {
         int end = Integer.MIN_VALUE;
 
         for (int i = 0; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
-            if (run.getInsertSuggestion() == null
-                    || !run.getInsertSuggestion().getGroupId().equals(groupId)) continue;
+            if (run.getInsertChange() == null
+                    || !run.getInsertChange().getGroupId().equals(groupId)) continue;
 
             Map<String, Object> effectiveAttrs = getEffectiveAttrs(run);
             Map<String, Object> carried = intersectAttrs(effectiveAttrs, attrs);
@@ -293,8 +291,8 @@ public class AttributionHelpers {
         return new InsertGroupCollection(indices, start, end);
     }
 
-    public static void moveAttrsFromBaseToSuggestionForRuns(
-            List<ReviewRun> runs,
+    public static void moveAttrsFromBaseToChangeForRuns(
+            List<ChangeSegment> runs,
             List<Integer> indices,
             Map<String, Object> attrs
     ) {
@@ -305,9 +303,9 @@ public class AttributionHelpers {
                 continue;
             }
 
-            ReviewRun run = runs.get(idx);
+            ChangeSegment run = runs.get(idx);
             Map<String, Object> base = new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
-            Map<String, Object> suggestion = new LinkedHashMap<>(run.getSuggestionAttributes() != null ? run.getSuggestionAttributes() : Collections.emptyMap());
+            Map<String, Object> change = new LinkedHashMap<>(run.getChangeAttributes() != null ? run.getChangeAttributes() : Collections.emptyMap());
 
             for (Map.Entry<String, Object> entry : attrs.entrySet()) {
                 String key = entry.getKey();
@@ -315,26 +313,26 @@ public class AttributionHelpers {
                 if (Objects.equals(base.get(key), value)) {
                     base.remove(key);
                 }
-                suggestion.put(key, value);
+                change.put(key, value);
             }
 
             run.setBaseAttributes(base);
-            run.setSuggestionAttributes(suggestion);
+            run.setChangeAttributes(change);
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Format suggestion find/create
+    // Format change find/create
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static FormatSuggestionItem findOrCreateFormatSuggestionByIdentity(
-            List<FormatSuggestionItem> formatSuggestions,
+    public static FormatChangeItem findOrCreateFormatChangeByIdentity(
+            List<FormatChangeItem> formatChanges,
             String actorEmail,
             String createdAt,
             String attrKey,
             Object attrValue
     ) {
-        FormatSuggestionItem existing = formatSuggestions.stream()
+        FormatChangeItem existing = formatChanges.stream()
                 .filter(f -> actorEmail.equals(f.getActorEmail()))
                 .filter(f -> attrKey.equals(f.getAttributeKey()))
                 .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
@@ -348,7 +346,7 @@ public class AttributionHelpers {
             return existing;
         }
 
-        FormatSuggestionItem created = FormatSuggestionItem.builder()
+        FormatChangeItem created = FormatChangeItem.builder()
                 .groupId(nextId())
                 .actorEmail(actorEmail)
                 .createdAt(createdAt)
@@ -360,11 +358,11 @@ public class AttributionHelpers {
                 .dependsOnDeleteGroupIds(new ArrayList<>())
                 .build();
 
-        formatSuggestions.add(created);
+        formatChanges.add(created);
         return created;
     }
 
-    public static void addInsertDependency(FormatSuggestionItem item, String insertGroupId) {
+    public static void addInsertDependency(FormatChangeItem item, String insertGroupId) {
         if (item == null || insertGroupId == null) return;
         if (!item.getDependsOnInsertGroupIds().contains(insertGroupId)) {
             item.getDependsOnInsertGroupIds().add(insertGroupId);
@@ -375,7 +373,7 @@ public class AttributionHelpers {
     // Reference helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static List<Reference> cloneSuggestionReferences(List<Reference> references) {
+    public static List<Reference> cloneReferences(List<Reference> references) {
         if (references == null) return new ArrayList<>();
         return references.stream().map(AttributionHelpers::cloneReference)
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -398,7 +396,7 @@ public class AttributionHelpers {
      * Right run keeps references at or after splitAbsPos.
      * References straddling splitAbsPos are split into left and right pieces.
      */
-    public static SuggestionReferenceSplit splitSuggestionReferences(
+    public static ReferenceSplit splitReferences(
             List<Reference> references,
             int splitAbsPos
     ) {
@@ -406,7 +404,7 @@ public class AttributionHelpers {
         List<Reference> right = new ArrayList<>();
 
         if (references == null || references.isEmpty()) {
-            return new SuggestionReferenceSplit(left, right);
+            return new ReferenceSplit(left, right);
         }
 
         for (Reference reference : references) {
@@ -445,46 +443,46 @@ public class AttributionHelpers {
             }
         }
 
-        return new SuggestionReferenceSplit(left, right);
+        return new ReferenceSplit(left, right);
     }
 
-    public static List<Reference> appendSuggestionReferences(
+    public static List<Reference> appendReferences(
             List<Reference> base,
             List<Reference> incoming
     ) {
         List<Reference> out = new ArrayList<>();
-        if (base != null) for (Reference s : base) out = appendAndCoalesceSuggestionReference(out, s);
-        if (incoming != null) for (Reference s : incoming) out = appendAndCoalesceSuggestionReference(out, s);
+        if (base != null) for (Reference s : base) out = appendAndCoalesceReference(out, s);
+        if (incoming != null) for (Reference s : incoming) out = appendAndCoalesceReference(out, s);
         return out;
     }
 
-    public static InsertSuggestion copyInsertSuggestion(InsertSuggestion src) {
+    public static InsertChange copyInsertChange(InsertChange src) {
         if (src == null) return null;
-        return InsertSuggestion.builder()
+        return InsertChange.builder()
                 .groupId(src.getGroupId())
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
                 .build();
     }
 
-    public static DeleteSuggestion copyDeleteSuggestion(DeleteSuggestion src) {
+    public static DeleteChange copyDeleteChange(DeleteChange src) {
         if (src == null) return null;
-        return DeleteSuggestion.builder()
+        return DeleteChange.builder()
                 .groupId(src.getGroupId())
                 .actorEmail(src.getActorEmail())
                 .createdAt(src.getCreatedAt())
                 .type(src.getType() != null
                         ? src.getType()
-                        : DeleteSuggestion.DeleteSuggestionType.TEXT)
+                        : DeleteChange.DeleteChangeType.TEXT)
                 .build();
     }
 
     /**
-     * Add a provenance reference for a suggestion.
+     * Add a provenance reference for a change.
      * reviewStart    = where this slice appears in the runtime review document.
      * componentStart = where this slice starts inside the original op component text.
      */
-    public static List<Reference> addSuggestionReference(
+    public static List<Reference> addReference(
             List<Reference> references,
             int reviewStart,
             int componentStart,
@@ -492,7 +490,7 @@ public class AttributionHelpers {
             String opId,
             int componentIndex
     ) {
-        List<Reference> out = cloneSuggestionReferences(references);
+        List<Reference> out = cloneReferences(references);
 
         if (length <= 0) {
             return out;
@@ -506,20 +504,20 @@ public class AttributionHelpers {
                 .componentIndex(componentIndex)
                 .build();
 
-        return appendAndCoalesceSuggestionReference(out, incoming);
+        return appendAndCoalesceReference(out, incoming);
     }
 
-    public static List<Reference> appendAndCoalesceSuggestionReference(
+    public static List<Reference> appendAndCoalesceReference(
             List<Reference> references,
             Reference incoming
     ) {
-        List<Reference> out = cloneSuggestionReferences(references);
+        List<Reference> out = cloneReferences(references);
 
         if (incoming == null || incoming.getLength() <= 0) return out;
 
         if (!out.isEmpty()) {
             Reference last = out.get(out.size() - 1);
-            if (canCoalesceSuggestionReferences(last, incoming)) {
+            if (canCoalesceReferences(last, incoming)) {
                 last.setLength(last.getLength() + incoming.getLength());
                 return out;
             }
@@ -535,7 +533,7 @@ public class AttributionHelpers {
      *   - original component space (componentStart)
      * And come from the same op and component.
      */
-    public static boolean canCoalesceSuggestionReferences(Reference left, Reference right) {
+    public static boolean canCoalesceReferences(Reference left, Reference right) {
         if (left == null || right == null) return false;
 
         boolean sameRef = Objects.equals(left.getOpId(), right.getOpId())
@@ -547,12 +545,12 @@ public class AttributionHelpers {
     }
 
     /**
-     * When new text is inserted, existing suggestion references after the insert
+     * When new text is inserted, existing change references after the insert
      * point must move forward.
      * References belonging to the newly inserted group are skipped.
      */
-    public void shiftSuggestionReferenceReviewStarts(
-            List<ReviewRun> runs,
+    public void shiftChangeReferenceReviewStarts(
+            List<ChangeSegment> runs,
             int insertPos,
             int shiftLen,
             String insertedGroupId
@@ -561,21 +559,16 @@ public class AttributionHelpers {
             return;
         }
 
-        for (ReviewRun run : runs) {
+        for (ChangeSegment run : runs) {
             boolean belongsToInsertedGroup =
-                    run.getInsertSuggestion() != null
-                            && Objects.equals(insertedGroupId, run.getInsertSuggestion().getGroupId());
+                    run.getInsertChange() != null
+                            && Objects.equals(insertedGroupId, run.getInsertChange().getGroupId());
 
-            boolean belongsToInsertedNewlineGroup =
-                    run.getNewlineSuggestion() != null
-                            && Objects.equals(insertedGroupId, run.getNewlineSuggestion().getGroupId());
+            boolean hasChangeRefs =
+                    run.getInsertChange() != null
+                            || run.getDeleteChange() != null;
 
-            boolean hasSuggestionRefs =
-                    run.getInsertSuggestion() != null
-                            || run.getNewlineSuggestion() != null
-                            || run.getDeleteSuggestion() != null;
-
-            if (!hasSuggestionRefs || belongsToInsertedGroup || belongsToInsertedNewlineGroup) {
+            if (!hasChangeRefs || belongsToInsertedGroup) {
                 continue;
             }
 
@@ -606,11 +599,11 @@ public class AttributionHelpers {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Format suggestion range checks
+    // Format change range checks
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static boolean formatSuggestionCoversRange(
-            FormatSuggestionItem item,
+    public static boolean formatChangeCoversRange(
+            FormatChangeItem item,
             int targetStart,
             int targetLength
     ) {
@@ -629,8 +622,8 @@ public class AttributionHelpers {
         return false;
     }
 
-    public static boolean formatSuggestionOverlapsRange(
-            FormatSuggestionItem item,
+    public static boolean formatChangeOverlapsRange(
+            FormatChangeItem item,
             int targetStart,
             int targetEnd
     ) {
@@ -648,8 +641,8 @@ public class AttributionHelpers {
         return false;
     }
 
-    public static boolean formatSuggestionTouchesOrOverlapsRange(
-            FormatSuggestionItem item,
+    public static boolean formatChangeTouchesOrOverlapsRange(
+            FormatChangeItem item,
             int targetStart,
             int targetEnd
     ) {
@@ -668,11 +661,11 @@ public class AttributionHelpers {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Format suggestion find/create (compatibility)
+    // Format change find/create (compatibility)
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static FormatSuggestionItem findOrCreateCompatibleFormatSuggestion(
-            List<FormatSuggestionItem> formatSuggestions,
+    public static FormatChangeItem findOrCreateCompatibleFormatChange(
+            List<FormatChangeItem> formatChanges,
             String actorEmail,
             String createdAt,
             String attrKey,
@@ -680,15 +673,15 @@ public class AttributionHelpers {
             int rangeStart,
             int rangeEnd
     ) {
-        List<FormatSuggestionItem> matches = formatSuggestions.stream()
+        List<FormatChangeItem> matches = formatChanges.stream()
                 .filter(f -> actorEmail.equals(f.getActorEmail()))
                 .filter(f -> attrKey.equals(f.getAttributeKey()))
                 .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
-                .filter(f -> formatSuggestionTouchesOrOverlapsRange(f, rangeStart, rangeEnd))
+                .filter(f -> formatChangeTouchesOrOverlapsRange(f, rangeStart, rangeEnd))
                 .toList();
 
         if (matches.isEmpty()) {
-            FormatSuggestionItem created = FormatSuggestionItem.builder()
+            FormatChangeItem created = FormatChangeItem.builder()
                     .groupId(nextId())
                     .actorEmail(actorEmail)
                     .createdAt(createdAt)
@@ -700,16 +693,16 @@ public class AttributionHelpers {
                     .dependsOnDeleteGroupIds(new ArrayList<>())
                     .build();
 
-            formatSuggestions.add(created);
+            formatChanges.add(created);
             return created;
         }
 
-        FormatSuggestionItem primary = matches.get(0);
+        FormatChangeItem primary = matches.get(0);
 
         for (int i = 1; i < matches.size(); i++) {
-            FormatSuggestionItem other = matches.get(i);
+            FormatChangeItem other = matches.get(i);
 
-            primary.setReferences(appendSuggestionReferences(primary.getReferences(), other.getReferences()));
+            primary.setReferences(appendReferences(primary.getReferences(), other.getReferences()));
 
             for (String dep : other.getDependsOnInsertGroupIds()) {
                 if (!primary.getDependsOnInsertGroupIds().contains(dep)) primary.getDependsOnInsertGroupIds().add(dep);
@@ -721,17 +714,17 @@ public class AttributionHelpers {
 
             if (other.getCreatedAt().compareTo(primary.getCreatedAt()) > 0) primary.setCreatedAt(other.getCreatedAt());
 
-            formatSuggestions.removeIf(f -> f.getGroupId().equals(other.getGroupId()));
+            formatChanges.removeIf(f -> f.getGroupId().equals(other.getGroupId()));
         }
         return primary;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Format suggestion inherit insert
+    // Format change inherit insert
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static boolean formatSuggestionShouldInheritInsert(
-            FormatSuggestionItem group,
+    public static boolean formatChangeShouldInheritInsert(
+            FormatChangeItem group,
             int insertPos
     ) {
         if (group == null) return false;
@@ -748,7 +741,7 @@ public class AttributionHelpers {
     }
 
     public static void extendFormatGroupForInheritedInsert(
-            FormatSuggestionItem group,
+            FormatChangeItem group,
             int insertPos,
             int insertLength,
             String opId,
@@ -757,11 +750,9 @@ public class AttributionHelpers {
     ) {
         if (group == null || insertLength <= 0) return;
 
-        List<Reference> before = cloneSuggestionReferences(group.getReferences());
+        group.setReferences(shiftReferencesForInsert(group.getReferences(), insertPos, insertLength));
 
-        group.setReferences(shiftSuggestionReferencesForInsert(group.getReferences(), insertPos, insertLength));
-
-        group.setReferences(addSuggestionReference(
+        group.setReferences(addReference(
                 group.getReferences(), insertPos, 0, insertLength, opId, compIdx));
 
         if (!group.getDependsOnInsertGroupIds().contains(currentInsertGroupId)) {
@@ -773,7 +764,7 @@ public class AttributionHelpers {
     // Reference range manipulation
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static List<Reference> removeRangeFromSuggestionReferencesWithoutShift(
+    public static List<Reference> removeRangeFromReferencesWithoutShift(
             List<Reference> references,
             int removeStart,
             int removeLength
@@ -781,7 +772,7 @@ public class AttributionHelpers {
         List<Reference> out = new ArrayList<>();
 
         if (references == null || references.isEmpty() || removeLength <= 0) {
-            return cloneSuggestionReferences(references);
+            return cloneReferences(references);
         }
 
         int removeEnd = removeStart + removeLength;
@@ -793,7 +784,7 @@ public class AttributionHelpers {
             int referenceEnd = referenceStart + reference.getLength();
 
             if (referenceEnd <= removeStart || referenceStart >= removeEnd) {
-                out = appendAndCoalesceSuggestionReference(out, reference);
+                out = appendAndCoalesceReference(out, reference);
                 continue;
             }
 
@@ -801,7 +792,7 @@ public class AttributionHelpers {
             int rightLen = Math.max(0, referenceEnd - removeEnd);
 
             if (leftLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(referenceStart)
                                 .componentStart(reference.getComponentStart())
@@ -812,7 +803,7 @@ public class AttributionHelpers {
             }
 
             if (rightLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(removeEnd)
                                 .componentStart(reference.getComponentStart() + Math.max(0, removeEnd - referenceStart))
@@ -826,7 +817,7 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static List<Reference> deleteRangeFromSuggestionReferencesAndShift(
+    public static List<Reference> deleteRangeFromReferencesAndShift(
             List<Reference> references,
             int deleteStart,
             int deleteLength
@@ -834,7 +825,7 @@ public class AttributionHelpers {
         List<Reference> out = new ArrayList<>();
 
         if (references == null || references.isEmpty() || deleteLength <= 0) {
-            return cloneSuggestionReferences(references);
+            return cloneReferences(references);
         }
 
         int deleteEnd = deleteStart + deleteLength;
@@ -846,12 +837,12 @@ public class AttributionHelpers {
             int referenceEnd = referenceStart + reference.getLength();
 
             if (referenceEnd <= deleteStart) {
-                out = appendAndCoalesceSuggestionReference(out, reference);
+                out = appendAndCoalesceReference(out, reference);
                 continue;
             }
 
             if (referenceStart >= deleteEnd) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(referenceStart - deleteLength)
                                 .componentStart(reference.getComponentStart())
@@ -866,7 +857,7 @@ public class AttributionHelpers {
             int rightLen = Math.max(0, referenceEnd - deleteEnd);
 
             if (leftLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(referenceStart)
                                 .componentStart(reference.getComponentStart())
@@ -877,7 +868,7 @@ public class AttributionHelpers {
             }
 
             if (rightLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(deleteStart)
                                 .componentStart(reference.getComponentStart() + Math.max(0, deleteEnd - referenceStart))
@@ -891,32 +882,32 @@ public class AttributionHelpers {
         return out;
     }
 
-    public void shiftFormatSuggestionReferences(
-            List<FormatSuggestionItem> formatSuggestions,
+    public void shiftFormatChangeReferences(
+            List<FormatChangeItem> formatChanges,
             int insertPos,
             int shiftLen,
             Set<String> excludedGroupIds
     ) {
-        if (formatSuggestions == null || shiftLen <= 0) {
+        if (formatChanges == null || shiftLen <= 0) {
             return;
         }
 
         Set<String> excluded = excludedGroupIds != null ? excludedGroupIds : Collections.emptySet();
 
-        for (FormatSuggestionItem fmt : formatSuggestions) {
+        for (FormatChangeItem fmt : formatChanges) {
             if (fmt == null || excluded.contains(fmt.getGroupId())) {
                 continue;
             }
 
-            List<Reference> before = cloneSuggestionReferences(fmt.getReferences());
+            List<Reference> before = cloneReferences(fmt.getReferences());
 
-            fmt.setReferences(shiftSuggestionReferencesForInsert(fmt.getReferences(), insertPos, shiftLen));
+            fmt.setReferences(shiftReferencesForInsert(fmt.getReferences(), insertPos, shiftLen));
 
         }
     }
 
     public static List<Reference> collectReferencesForRunIndices(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             List<Integer> indices
     ) {
         List<Reference> refs = new ArrayList<>();
@@ -926,47 +917,47 @@ public class AttributionHelpers {
             if (idx == null || idx < 0 || idx >= runs.size()) {
                 continue;
             }
-            ReviewRun run = runs.get(idx);
-            refs = appendSuggestionReferences(refs, run.getReferences());
+            ChangeSegment run = runs.get(idx);
+            refs = appendReferences(refs, run.getReferences());
         }
 
         return refs;
     }
 
     public static void deleteRangeFromRunReferencesAndShift(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             int deleteStart,
             int deleteLength
     ) {
         if (runs == null || runs.isEmpty() || deleteLength <= 0) return;
 
         int count = 0;
-        for (ReviewRun run : runs) {
+        for (ChangeSegment run : runs) {
             if (run.getReferences() == null || run.getReferences().isEmpty()) continue;
-            List<Reference> before = cloneSuggestionReferences(run.getReferences());
-            run.setReferences(deleteRangeFromSuggestionReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
+            List<Reference> before = cloneReferences(run.getReferences());
+            run.setReferences(deleteRangeFromReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
             if (!run.getReferences().equals(before)) {
                 count++;
             }
         }
     }
 
-    public static void deleteRangeFromFormatSuggestionReferencesAndShift(
-            Collection<FormatSuggestionItem> formatSuggestions,
+    public static void deleteRangeFromFormatChangeReferencesAndShift(
+            Collection<FormatChangeItem> formatChanges,
             int deleteStart,
             int deleteLength
     ) {
-        if (formatSuggestions == null || formatSuggestions.isEmpty() || deleteLength <= 0) return;
+        if (formatChanges == null || formatChanges.isEmpty() || deleteLength <= 0) return;
 
-        for (FormatSuggestionItem fmt : formatSuggestions) {
+        for (FormatChangeItem fmt : formatChanges) {
             if (fmt.getReferences() == null || fmt.getReferences().isEmpty()) continue;
 
-            List<Reference> before = cloneSuggestionReferences(fmt.getReferences());
-            fmt.setReferences(deleteRangeFromSuggestionReferencesAndShift(fmt.getReferences(), deleteStart, deleteLength));
+            List<Reference> before = cloneReferences(fmt.getReferences());
+            fmt.setReferences(deleteRangeFromReferencesAndShift(fmt.getReferences(), deleteStart, deleteLength));
         }
     }
 
-    public static List<Reference> shiftSuggestionReferencesForInsert(
+    public static List<Reference> shiftReferencesForInsert(
             List<Reference> references,
             int insertPos,
             int insertLength
@@ -974,7 +965,7 @@ public class AttributionHelpers {
         List<Reference> out = new ArrayList<>();
 
         if (references == null || references.isEmpty() || insertLength <= 0) {
-            return cloneSuggestionReferences(references);
+            return cloneReferences(references);
         }
 
         for (Reference reference : references) {
@@ -984,12 +975,12 @@ public class AttributionHelpers {
             int referenceEnd = referenceStart + reference.getLength();
 
             if (referenceEnd <= insertPos) {
-                out = appendAndCoalesceSuggestionReference(out, reference);
+                out = appendAndCoalesceReference(out, reference);
                 continue;
             }
 
             if (referenceStart >= insertPos) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(referenceStart + insertLength)
                                 .componentStart(reference.getComponentStart())
@@ -1004,7 +995,7 @@ public class AttributionHelpers {
             int rightLen = referenceEnd - insertPos;
 
             if (leftLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(referenceStart)
                                 .componentStart(reference.getComponentStart())
@@ -1015,7 +1006,7 @@ public class AttributionHelpers {
             }
 
             if (rightLen > 0) {
-                out = appendAndCoalesceSuggestionReference(out,
+                out = appendAndCoalesceReference(out,
                         Reference.builder()
                                 .reviewStart(insertPos + insertLength)
                                 .componentStart(reference.getComponentStart() + leftLen)
@@ -1029,34 +1020,34 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static DeleteSuggestion.DeleteSuggestionType promotedDeleteType(
-            DeleteSuggestion.DeleteSuggestionType current,
+    public static DeleteChange.DeleteChangeType promotedDeleteType(
+            DeleteChange.DeleteChangeType current,
             boolean deletingNewline
     ) {
-        DeleteSuggestion.DeleteSuggestionType safeCurrent =
-                current != null ? current : DeleteSuggestion.DeleteSuggestionType.TEXT;
+        DeleteChange.DeleteChangeType safeCurrent =
+                current != null ? current : DeleteChange.DeleteChangeType.TEXT;
 
         if (!deletingNewline) {
             return safeCurrent;
         }
 
-        if (safeCurrent == DeleteSuggestion.DeleteSuggestionType.TEXT) {
-            return DeleteSuggestion.DeleteSuggestionType.SINGLE_LINE;
+        if (safeCurrent == DeleteChange.DeleteChangeType.TEXT) {
+            return DeleteChange.DeleteChangeType.SINGLE_LINE;
         }
 
-        return DeleteSuggestion.DeleteSuggestionType.MULTI_LINE;
+        return DeleteChange.DeleteChangeType.MULTI_LINE;
     }
 
     public static void applyDeleteTypeToGroupRuns(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             String groupId,
-            DeleteSuggestion.DeleteSuggestionType type
+            DeleteChange.DeleteChangeType type
     ) {
-        for (ReviewRun run : runs) {
-            if (run.getDeleteSuggestion() == null) continue;
-            if (!groupId.equals(run.getDeleteSuggestion().getGroupId())) continue;
+        for (ChangeSegment run : runs) {
+            if (run.getDeleteChange() == null) continue;
+            if (!groupId.equals(run.getDeleteChange().getGroupId())) continue;
 
-            run.getDeleteSuggestion().setType(type);
+            run.getDeleteChange().setType(type);
         }
     }
 
@@ -1072,7 +1063,7 @@ public class AttributionHelpers {
         return new LinkedHashMap<>();
     }
 
-    public static String runTextForLog(ReviewRun run) {
+    public static String runTextForLog(ChangeSegment run) {
         if (run == null) return "null";
         if (run.isEmbed()) return "[embed]";
         if (run.getText() == null) return "[empty-run]";
@@ -1092,332 +1083,19 @@ public class AttributionHelpers {
         return "run_" + opId + "_" + componentIndex + "_" + componentStart + "_" + reviewStart;
     }
 
-    public static boolean isNewlineRun(ReviewRun run) {
+    public static boolean isNewlineRun(ChangeSegment run) {
         return run != null && run.isText() && "\n".equals(run.getText());
     }
 
-    public static boolean isMeaningfulLineContentRun(ReviewRun run) {
+    public static boolean isMeaningfulLineContentRun(ChangeSegment run) {
         if (run == null) return false;
-        if (run.getDeleteSuggestion() != null) return true;
+        if (run.getDeleteChange() != null) return true;
         if (run.isEmbed()) return true;
         return run.isText() && !"\n".equals(run.getText()) && !run.getText().isEmpty();
     }
 
-    public static NewlineSuggestion adjacentNewlineSuggestionSameAuthor(
-            List<ReviewRun> runs,
-            int insertAtIdx,
-            String authorEmail
-    ) {
-        ReviewRun left = insertAtIdx > 0 ? runs.get(insertAtIdx - 1) : null;
-
-        if (isReusableNewlineGroup(left, authorEmail)) {
-            return left.getNewlineSuggestion();
-        }
-
-        ReviewRun right = insertAtIdx < runs.size() ? runs.get(insertAtIdx) : null;
-
-        if (isReusableNewlineGroup(right, authorEmail)) {
-            return right.getNewlineSuggestion();
-        }
-
-        return null;
-    }
-
-    private static boolean isReusableNewlineGroup(
-            ReviewRun run,
-            String authorEmail
-    ) {
-        if (run == null) return false;
-        if (!isNewlineRun(run)) return false;
-        if (run.getNewlineSuggestion() == null) return false;
-
-        NewlineSuggestion suggestion = run.getNewlineSuggestion();
-
-        return authorEmail.equals(suggestion.getActorEmail());
-    }
-
-    public static NewlineSuggestion createNewlineSuggestionForInsertedNewline(
-            String authorEmail,
-            String createdAt,
-            List<Reference> references
-    ) {
-        return NewlineSuggestion.builder()
-                .groupId(nextId())
-                .actorEmail(authorEmail)
-                .createdAt(createdAt)
-                .references(cloneSuggestionReferences(references))
-                .dependsOnReviewRunIds(new ArrayList<>())
-                .type(null)
-                .build();
-    }
-
-    public static void ensureReviewRunIds(List<ReviewRun> runs) {
-        if (runs == null) return;
-
-        int fallback = 0;
-
-        for (ReviewRun run : runs) {
-            if (run == null) continue;
-
-            if (run.getId() != null && !run.getId().isBlank()) {
-                continue;
-            }
-
-            Reference firstRef =
-                    run.getReferences() != null && !run.getReferences().isEmpty()
-                            ? run.getReferences().get(0)
-                            : null;
-
-            if (firstRef != null) {
-                run.setId(
-                        reviewRunIdForReference(
-                                firstRef.getOpId(),
-                                firstRef.getComponentIndex(),
-                                firstRef.getComponentStart(),
-                                run.getLogicalStart()
-                        )
-                );
-            } else {
-                run.setId("base_" + run.getLogicalStart() + "_" + fallback++);
-            }
-        }
-    }
-
-    public static void classifyNewlineSuggestions(List<ReviewRun> runs) {
-        if (runs == null || runs.isEmpty()) return;
-
-        ensureReviewRunIds(runs);
-
-        for (int i = 0; i < runs.size(); i++) {
-            ReviewRun newlineRun = runs.get(i);
-
-            if (!isNewlineRun(newlineRun) || newlineRun.getNewlineSuggestion() == null) continue;
-
-            ReviewRun previousVisible = previousVisibleRun(runs, i);
-            ReviewRun nextVisible = nextVisibleRun(runs, i);
-
-            boolean standalone = isStandaloneInsertedNewline(
-                    previousVisible,
-                    nextVisible
-            );
-
-            NewlineSuggestion suggestion = newlineRun.getNewlineSuggestion();
-
-            if (standalone) {
-                suggestion.setDependsOnReviewRunIds(new ArrayList<>());
-                suggestion.setType(NewlineSuggestionType.STANDALONE);
-                continue;
-            }
-
-            List<String> dependsOn =
-                    collectFollowingLineDependencyRunIdsForNewline(runs, i);
-
-            suggestion.setDependsOnReviewRunIds(dependsOn);
-            suggestion.setType(NewlineSuggestionType.DEPENDENT);
-        }
-
-        mergeAdjacentStandaloneNewlineGroups(runs);
-    }
-
-    private static ReviewRun previousVisibleRun(
-            List<ReviewRun> runs,
-            int index
-    ) {
-        if (runs == null || index <= 0) return null;
-
-        for (int i = index - 1; i >= 0; i--) {
-            ReviewRun run = runs.get(i);
-
-            if (run == null) continue;
-
-            if (run.length() > 0) {
-                return run;
-            }
-        }
-
-        return null;
-    }
-
-    private static ReviewRun nextVisibleRun(
-            List<ReviewRun> runs,
-            int index
-    ) {
-        if (runs == null || index < 0 || index >= runs.size() - 1) {
-            return null;
-        }
-
-        for (int i = index + 1; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
-
-            if (run == null) continue;
-
-            if (run.length() > 0) {
-                return run;
-            }
-        }
-
-        return null;
-    }
-
-    public static boolean isStandaloneInsertedNewline(
-            ReviewRun previousVisible,
-            ReviewRun nextVisible
-    ) {
-        /*
-         * Case:
-         * (note begins)(pending \n)[content]
-         *
-         * This creates a leading blank line, so it is standalone.
-         */
-        if (previousVisible == null) {
-            return true;
-        }
-
-        /*
-         * Case:
-         * [content](pending \n)(end)
-         *
-         * Rare because Quill normally keeps a terminal newline, but if it happens,
-         * it is a trailing blank line.
-         */
-        if (nextVisible == null) {
-            return true;
-        }
-
-        /*
-         * Case:
-         * [content](pending \n)(\n terminal/base/pending)
-         * (\n)(pending \n)(\n)
-         *
-         * This pending newline creates blank-line space.
-         */
-        if (isNewlineRun(nextVisible)) {
-            return true;
-        }
-
-        /*
-         * Case:
-         * [content](pending \n)[content]
-         * (\n)(pending \n)[content]
-         *
-         * The pending newline is needed to position the following content.
-         */
-        return false;
-    }
-
-    public static List<String> collectFollowingLineDependencyRunIdsForNewline(
-            List<ReviewRun> runs,
-            int newlineIndex
-    ) {
-        List<String> deps = new ArrayList<>();
-
-        if (runs == null || newlineIndex < 0 || newlineIndex >= runs.size()) {
-            return deps;
-        }
-
-        for (int i = newlineIndex + 1; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
-
-            if (run == null) continue;
-
-            if (isNewlineRun(run)) {
-                break;
-            }
-
-            if (!isMeaningfulLineContentRun(run)) {
-                continue;
-            }
-
-            String dependencyId = logicalLineDependencyId(run);
-
-            if (dependencyId == null || dependencyId.isBlank()) {
-                continue;
-            }
-
-            if (!deps.contains(dependencyId)) {
-                deps.add(dependencyId);
-            }
-        }
-
-        return deps;
-    }
-
-    public static void mergeAdjacentStandaloneNewlineGroups(
-            List<ReviewRun> runs
-    ) {
-        if (runs == null || runs.isEmpty()) return;
-
-        List<ReviewRun> activeGroupRuns = new ArrayList<>();
-
-        for (ReviewRun run : runs) {
-            if (!isMergeableStandaloneNewline(run)) {
-                applyMergedStandaloneNewlineGroup(activeGroupRuns);
-                activeGroupRuns.clear();
-                continue;
-            }
-
-            if (activeGroupRuns.isEmpty()) {
-                activeGroupRuns.add(run);
-                continue;
-            }
-
-            NewlineSuggestion current = run.getNewlineSuggestion();
-            NewlineSuggestion active = activeGroupRuns.get(0).getNewlineSuggestion();
-
-            boolean sameActor =
-                    Objects.equals(active.getActorEmail(), current.getActorEmail());
-
-            if (!sameActor) {
-                applyMergedStandaloneNewlineGroup(activeGroupRuns);
-                activeGroupRuns.clear();
-            }
-
-            activeGroupRuns.add(run);
-        }
-
-        applyMergedStandaloneNewlineGroup(activeGroupRuns);
-    }
-
-    private static boolean isMergeableStandaloneNewline(ReviewRun run) {
-        return isNewlineRun(run)
-                && run.getNewlineSuggestion() != null
-                && run.getNewlineSuggestion().getType() == NewlineSuggestionType.STANDALONE;
-    }
-
-    private static void applyMergedStandaloneNewlineGroup(
-            List<ReviewRun> groupRuns
-    ) {
-        if (groupRuns == null || groupRuns.isEmpty()) return;
-
-        NewlineSuggestion first = groupRuns.get(0).getNewlineSuggestion();
-
-        String mergedGroupId = first.getGroupId();
-        String actorEmail = first.getActorEmail();
-        String mergedCreatedAt = first.getCreatedAt();
-
-        for (ReviewRun run : groupRuns) {
-            NewlineSuggestion suggestion = run.getNewlineSuggestion();
-
-            if (suggestion.getCreatedAt() != null
-                    && (mergedCreatedAt == null
-                    || suggestion.getCreatedAt().compareTo(mergedCreatedAt) < 0)) {
-                mergedCreatedAt = suggestion.getCreatedAt();
-            }
-        }
-
-        for (ReviewRun run : groupRuns) {
-            NewlineSuggestion suggestion = run.getNewlineSuggestion();
-
-            suggestion.setGroupId(mergedGroupId);
-            suggestion.setActorEmail(actorEmail);
-            suggestion.setCreatedAt(mergedCreatedAt);
-            suggestion.setType(NewlineSuggestionType.STANDALONE);
-            suggestion.setDependsOnReviewRunIds(new ArrayList<>());
-        }
-    }
-
     public static List<String> collectLineDependencyRunIdsForNewline(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             int newlineIndex
     ) {
         List<String> deps = new ArrayList<>();
@@ -1427,7 +1105,7 @@ public class AttributionHelpers {
         }
 
         for (int i = newlineIndex - 1; i >= 0; i--) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
             if (isNewlineRun(run)) {
                 break;
@@ -1451,15 +1129,15 @@ public class AttributionHelpers {
         return deps;
     }
 
-    public static String logicalLineDependencyId(ReviewRun run) {
+    public static String logicalLineDependencyId(ChangeSegment run) {
         if (run == null) return null;
 
-        if (run.getInsertSuggestion() != null) {
-            return "insert:" + run.getInsertSuggestion().getGroupId();
+        if (run.getInsertChange() != null) {
+            return "insert:" + run.getInsertChange().getGroupId();
         }
 
-        if (run.getDeleteSuggestion() != null) {
-            return "delete:" + run.getDeleteSuggestion().getGroupId();
+        if (run.getDeleteChange() != null) {
+            return "delete:" + run.getDeleteChange().getGroupId();
         }
 
         if (run.getId() != null && !run.getId().isBlank()) {
@@ -1578,7 +1256,7 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static boolean isBlockTargetRun(ReviewRun run) {
+    public static boolean isBlockTargetRun(ChangeSegment run) {
         return run != null && run.isText() && "\n".equals(run.getText());
     }
 
@@ -1601,8 +1279,8 @@ public class AttributionHelpers {
         return BlockFormatConflictGroup.EXCLUSIVE_BLOCK_STYLE;
     }
 
-    public static boolean blockSuggestionOverlapsRange(
-            BlockFormatSuggestionItem item,
+    public static boolean blockChangeOverlapsRange(
+            BlockFormatChangeItem item,
             int targetStart,
             int targetEnd
     ) {
@@ -1620,8 +1298,8 @@ public class AttributionHelpers {
         return false;
     }
 
-    private static boolean shouldCancelBlockSuggestion(
-            BlockFormatSuggestionItem existing,
+    private static boolean shouldCancelBlockChange(
+            BlockFormatChangeItem existing,
             String incomingKey,
             Object incomingValue
     ) {
@@ -1641,10 +1319,10 @@ public class AttributionHelpers {
                 && blockConflictGroupFor(incomingKey) == BlockFormatConflictGroup.EXCLUSIVE_BLOCK_STYLE;
     }
 
-    private BlockFormatSuggestionItem findOrCreateCurrentBlockGroup(
-            List<ReviewRun> runs,
-            List<BlockFormatSuggestionItem> blockFormatSuggestions,
-            Map<BlockGroupKey, BlockFormatSuggestionItem> currentBlockGroups,
+    private BlockFormatChangeItem findOrCreateCurrentBlockGroup(
+            List<ChangeSegment> runs,
+            List<BlockFormatChangeItem> blockFormatChanges,
+            Map<BlockGroupKey, BlockFormatChangeItem> currentBlockGroups,
             String actorEmail,
             String createdAt,
             String attrKey,
@@ -1654,11 +1332,11 @@ public class AttributionHelpers {
         BlockGroupKey key = new BlockGroupKey(attrKey, attrValue);
         BlockFormatBehavior behavior = blockBehaviorFor(attrKey);
 
-        BlockFormatSuggestionItem existingInOp = currentBlockGroups.get(key);
+        BlockFormatChangeItem existingInOp = currentBlockGroups.get(key);
 
         if (existingInOp != null) {
             if (behavior != BlockFormatBehavior.CONTINUING
-                    || isContinuingBlockSuggestionAdjacent(
+                    || isContinuingBlockChangeAdjacent(
                     runs,
                     existingInOp,
                     spanStart
@@ -1670,11 +1348,11 @@ public class AttributionHelpers {
         }
 
         if (behavior == BlockFormatBehavior.CONTINUING) {
-            BlockFormatSuggestionItem adjacent = blockFormatSuggestions.stream()
+            BlockFormatChangeItem adjacent = blockFormatChanges.stream()
                     .filter(f -> attrKey.equals(f.getAttributeKey()))
                     .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
                     .filter(f -> f.getBehavior() == BlockFormatBehavior.CONTINUING)
-                    .filter(f -> isContinuingBlockSuggestionAdjacent(
+                    .filter(f -> isContinuingBlockChangeAdjacent(
                             runs,
                             f,
                             spanStart
@@ -1688,7 +1366,7 @@ public class AttributionHelpers {
             }
         }
 
-        BlockFormatSuggestionItem created = BlockFormatSuggestionItem.builder()
+        BlockFormatChangeItem created = BlockFormatChangeItem.builder()
                 .groupId(nextId())
                 .actorEmail(actorEmail)
                 .createdAt(createdAt)
@@ -1702,14 +1380,14 @@ public class AttributionHelpers {
                 .dependsOnDeleteGroupIds(new ArrayList<>())
                 .build();
 
-        blockFormatSuggestions.add(created);
+        blockFormatChanges.add(created);
         currentBlockGroups.put(key, created);
 
         return created;
     }
 
     /**
-     * A CONTINUING block suggestion is "adjacent" to a new newline at spanStart if
+     * A CONTINUING block change is "adjacent" to a new newline at spanStart if
      * any of its references ends exactly at spanStart (i.e. the previous newline
      * was at spanStart-1 and its reference covers [spanStart-1, 1]).
      * We also allow a gap of exactly one character to handle the case where the
@@ -1717,9 +1395,9 @@ public class AttributionHelpers {
      * (e.g. list items with content between them).
      * More precisely: the merged reference range ends at or reaches spanStart.
      */
-    private static boolean isContinuingBlockSuggestionAdjacent(
-            List<ReviewRun> runs,
-            BlockFormatSuggestionItem item,
+    private static boolean isContinuingBlockChangeAdjacent(
+            List<ChangeSegment> runs,
+            BlockFormatChangeItem item,
             int spanStart
     ) {
         if (runs == null || item == null || item.getReferences() == null) {
@@ -1753,7 +1431,7 @@ public class AttributionHelpers {
     }
 
     private static void addBlockInsertDependency(
-            BlockFormatSuggestionItem item,
+            BlockFormatChangeItem item,
             String insertGroupId
     ) {
         if (item == null || insertGroupId == null || insertGroupId.isBlank()) return;
@@ -1764,7 +1442,7 @@ public class AttributionHelpers {
     }
 
     public void addBlockDeleteDependency(
-            BlockFormatSuggestionItem item,
+            BlockFormatChangeItem item,
             String deleteGroupId
     ) {
         if (item == null || deleteGroupId == null) return;
@@ -1775,10 +1453,10 @@ public class AttributionHelpers {
     }
 
     public void applyBlockAttributeToNewlineRun(
-            List<ReviewRun> runs,
-            List<BlockFormatSuggestionItem> blockFormatSuggestions,
+            List<ChangeSegment> runs,
+            List<BlockFormatChangeItem> blockFormatChanges,
             AttributionCancellationAccumulator accumulator,
-            ReviewRun target,
+            ChangeSegment target,
             String attrKey,
             Object attrValue,
             String authorEmail,
@@ -1786,7 +1464,7 @@ public class AttributionHelpers {
             String opId,
             int compIdx,
             int componentStart,
-            Map<BlockGroupKey, BlockFormatSuggestionItem> currentBlockGroups
+            Map<BlockGroupKey, BlockFormatChangeItem> currentBlockGroups
     ) {
         if (!isBlockTargetRun(target)) return;
 
@@ -1798,13 +1476,13 @@ public class AttributionHelpers {
                 ? target.getBaseAttributes().get(attrKey)
                 : null;
 
-        List<BlockFormatSuggestionItem> overlappingBlockSuggestions =
-                blockFormatSuggestions.stream()
-                        .filter(f -> blockSuggestionOverlapsRange(f, spanStart, spanEnd))
+        List<BlockFormatChangeItem> overlappingBlockChanges =
+                blockFormatChanges.stream()
+                        .filter(f -> blockChangeOverlapsRange(f, spanStart, spanEnd))
                         .toList();
 
-        for (BlockFormatSuggestionItem existing : new ArrayList<>(overlappingBlockSuggestions)) {
-            if (!shouldCancelBlockSuggestion(existing, attrKey, attrValue)) {
+        for (BlockFormatChangeItem existing : new ArrayList<>(overlappingBlockChanges)) {
+            if (!shouldCancelBlockChange(existing, attrKey, attrValue)) {
                 continue;
             }
 
@@ -1830,7 +1508,7 @@ public class AttributionHelpers {
             }
 
             existing.setReferences(
-                    removeRangeFromSuggestionReferencesWithoutShift(
+                    removeRangeFromReferencesWithoutShift(
                             existing.getReferences(),
                             spanStart,
                             spanLen
@@ -1838,17 +1516,17 @@ public class AttributionHelpers {
             );
 
             if (existing.getReferences().isEmpty()) {
-                blockFormatSuggestions.remove(existing);
+                blockFormatChanges.remove(existing);
             }
 
-            if (target.getSuggestionAttributes() != null) {
-                target.getSuggestionAttributes().remove(existing.getAttributeKey());
+            if (target.getChangeAttributes() != null) {
+                target.getChangeAttributes().remove(existing.getAttributeKey());
             }
         }
 
         if (attrValue == null) {
-            if (target.getSuggestionAttributes() != null) {
-                target.getSuggestionAttributes().remove(attrKey);
+            if (target.getChangeAttributes() != null) {
+                target.getChangeAttributes().remove(attrKey);
             }
             return;
         }
@@ -1857,16 +1535,16 @@ public class AttributionHelpers {
             return;
         }
 
-        target.setSuggestionAttributes(
+        target.setChangeAttributes(
                 overlayAttrsPreserveNull(
-                        target.getSuggestionAttributes(),
+                        target.getChangeAttributes(),
                         Map.of(attrKey, attrValue)
                 )
         );
 
-        BlockFormatSuggestionItem blockGroup = findOrCreateCurrentBlockGroup(
+        BlockFormatChangeItem blockGroup = findOrCreateCurrentBlockGroup(
                 runs,
-                blockFormatSuggestions,
+                blockFormatChanges,
                 currentBlockGroups,
                 authorEmail,
                 createdAt,
@@ -1876,7 +1554,7 @@ public class AttributionHelpers {
         );
 
         blockGroup.setReferences(
-                addSuggestionReference(
+                addReference(
                         blockGroup.getReferences(),
                         spanStart,
                         componentStart,
@@ -1887,18 +1565,18 @@ public class AttributionHelpers {
         );
     }
 
-    public void cancelBlockSuggestionsForDeletedNewline(
-            List<BlockFormatSuggestionItem> blockFormatSuggestions,
+    public void cancelBlockChangesForDeletedNewline(
+            List<BlockFormatChangeItem> blockFormatChanges,
             AttributionCancellationAccumulator accumulator,
-            ReviewRun deletedRun
+            ChangeSegment deletedRun
     ) {
         if (!isBlockTargetRun(deletedRun)) return;
 
         int deleteStart = deletedRun.getLogicalStart();
         int deleteEnd = deleteStart + 1;
 
-        for (BlockFormatSuggestionItem item : new ArrayList<>(blockFormatSuggestions)) {
-            if (!blockSuggestionOverlapsRange(item, deleteStart, deleteEnd)) continue;
+        for (BlockFormatChangeItem item : new ArrayList<>(blockFormatChanges)) {
+            if (!blockChangeOverlapsRange(item, deleteStart, deleteEnd)) continue;
 
             for (Reference reference : item.getReferences()) {
                 int refStart = reference.getReviewStart();
@@ -1919,7 +1597,7 @@ public class AttributionHelpers {
             }
 
             item.setReferences(
-                    removeRangeFromSuggestionReferencesWithoutShift(
+                    removeRangeFromReferencesWithoutShift(
                             item.getReferences(),
                             deleteStart,
                             1
@@ -1927,13 +1605,13 @@ public class AttributionHelpers {
             );
 
             if (item.getReferences().isEmpty()) {
-                blockFormatSuggestions.remove(item);
+                blockFormatChanges.remove(item);
             }
         }
     }
 
-    public void shiftBlockFormatSuggestionReferences(
-            List<BlockFormatSuggestionItem> items,
+    public void shiftBlockFormatChangeReferences(
+            List<BlockFormatChangeItem> items,
             int insertPos,
             int shiftLen,
             Set<String> excludedGroupIds
@@ -1944,7 +1622,7 @@ public class AttributionHelpers {
                 ? excludedGroupIds
                 : Collections.emptySet();
 
-        for (BlockFormatSuggestionItem item : items) {
+        for (BlockFormatChangeItem item : items) {
             if (excluded.contains(item.getGroupId())) continue;
 
             for (Reference ref : item.getReferences()) {
@@ -1955,16 +1633,16 @@ public class AttributionHelpers {
         }
     }
 
-    public void deleteRangeFromBlockFormatSuggestionReferencesAndShift(
-            List<BlockFormatSuggestionItem> items,
+    public void deleteRangeFromBlockFormatChangeReferencesAndShift(
+            List<BlockFormatChangeItem> items,
             int deleteStart,
             int deleteLen
     ) {
         if (items == null || deleteLen <= 0) return;
 
-        for (BlockFormatSuggestionItem item : items) {
+        for (BlockFormatChangeItem item : items) {
             item.setReferences(
-                    deleteRangeFromSuggestionReferencesAndShift(
+                    deleteRangeFromReferencesAndShift(
                             item.getReferences(),
                             deleteStart,
                             deleteLen
@@ -1975,11 +1653,11 @@ public class AttributionHelpers {
         items.removeIf(item -> item.getReferences() == null || item.getReferences().isEmpty());
     }
 
-    public String getLinePreviewForNewline(List<ReviewRun> runs, int newlinePos) {
+    public String getLinePreviewForNewline(List<ChangeSegment> runs, int newlinePos) {
         StringBuilder line = new StringBuilder();
 
-        for (ReviewRun run : runs) {
-            if (run.getDeleteSuggestion() != null) continue;
+        for (ChangeSegment run : runs) {
+            if (run.getDeleteChange() != null) continue;
 
             int start = run.getLogicalStart();
             int end = start + run.length();
@@ -2012,25 +1690,8 @@ public class AttributionHelpers {
         return out.isBlank() ? "[empty line]" : out;
     }
 
-    public static NewlineSuggestion copyNewlineSuggestion(NewlineSuggestion src) {
-        if (src == null) return null;
-
-        return NewlineSuggestion.builder()
-                .groupId(src.getGroupId())
-                .actorEmail(src.getActorEmail())
-                .createdAt(src.getCreatedAt())
-                .references(cloneSuggestionReferences(src.getReferences()))
-                .dependsOnReviewRunIds(
-                        src.getDependsOnReviewRunIds() != null
-                                ? new ArrayList<>(src.getDependsOnReviewRunIds())
-                                : new ArrayList<>()
-                )
-                .type(src.getType() != null ? src.getType() : NewlineSuggestionType.STANDALONE)
-                .build();
-    }
-
-    public static ReviewRun effectivePreviousRunForInsertGrouping(
-            List<ReviewRun> runs,
+    public static ChangeSegment effectivePreviousRunForInsertGrouping(
+            List<ChangeSegment> runs,
             int insertAtIdx
     ) {
         if (runs == null || insertAtIdx <= 0) {
@@ -2038,9 +1699,9 @@ public class AttributionHelpers {
         }
 
         for (int i = insertAtIdx - 1; i >= 0; i--) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
-            if (isNewlineRun(run) && run.getNewlineSuggestion() != null) {
+            if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
             }
 
@@ -2050,8 +1711,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ReviewRun effectiveNextRunForInsertGrouping(
-            List<ReviewRun> runs,
+    public static ChangeSegment effectiveNextRunForInsertGrouping(
+            List<ChangeSegment> runs,
             int insertAtIdx
     ) {
         if (runs == null || insertAtIdx < 0 || insertAtIdx >= runs.size()) {
@@ -2059,9 +1720,9 @@ public class AttributionHelpers {
         }
 
         for (int i = insertAtIdx; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
-            if (isNewlineRun(run) && run.getNewlineSuggestion() != null) {
+            if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
             }
 
@@ -2071,8 +1732,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ReviewRun effectivePreviousRunForDeleteGrouping(
-            List<ReviewRun> runs,
+    public static ChangeSegment effectivePreviousRunForDeleteGrouping(
+            List<ChangeSegment> runs,
             int deleteAtIdx
     ) {
         if (runs == null || deleteAtIdx <= 0) {
@@ -2080,9 +1741,9 @@ public class AttributionHelpers {
         }
 
         for (int i = deleteAtIdx - 1; i >= 0; i--) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
-            if (isNewlineRun(run) && run.getNewlineSuggestion() != null) {
+            if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
             }
 
@@ -2092,8 +1753,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ReviewRun effectiveNextRunForDeleteGrouping(
-            List<ReviewRun> runs,
+    public static ChangeSegment effectiveNextRunForDeleteGrouping(
+            List<ChangeSegment> runs,
             int deleteAtIdx
     ) {
         if (runs == null || deleteAtIdx < 0 || deleteAtIdx >= runs.size()) {
@@ -2101,9 +1762,9 @@ public class AttributionHelpers {
         }
 
         for (int i = deleteAtIdx; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
 
-            if (isNewlineRun(run) && run.getNewlineSuggestion() != null) {
+            if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
             }
 
@@ -2114,13 +1775,13 @@ public class AttributionHelpers {
     }
 
     public static void syncBlockFormatDependenciesFromTargetNewlines(
-            List<ReviewRun> runs,
-            List<BlockFormatSuggestionItem> blockFormatSuggestions
+            List<ChangeSegment> runs,
+            List<BlockFormatChangeItem> blockFormatChanges
     ) {
         if (runs == null || runs.isEmpty()) return;
-        if (blockFormatSuggestions == null || blockFormatSuggestions.isEmpty()) return;
+        if (blockFormatChanges == null || blockFormatChanges.isEmpty()) return;
 
-        for (BlockFormatSuggestionItem item : blockFormatSuggestions) {
+        for (BlockFormatChangeItem item : blockFormatChanges) {
             if (item == null || item.getReferences() == null) continue;
 
             for (Reference ref : item.getReferences()) {
@@ -2133,7 +1794,7 @@ public class AttributionHelpers {
 
                 if (newlineIndex < 0) continue;
 
-                ReviewRun target = runs.get(newlineIndex);
+                ChangeSegment target = runs.get(newlineIndex);
 
                 if (!isNewlineRun(target)) continue;
 
@@ -2147,8 +1808,8 @@ public class AttributionHelpers {
     }
 
     public static void addBlockDependenciesFromTargetNewline(
-            BlockFormatSuggestionItem item,
-            List<ReviewRun> runs,
+            BlockFormatChangeItem item,
+            List<ChangeSegment> runs,
             int newlineIndex
     ) {
         if (item == null || runs == null) return;
@@ -2179,13 +1840,13 @@ public class AttributionHelpers {
     }
 
     public static int findRunIndexAtReviewStart(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             int reviewStart
     ) {
         if (runs == null) return -1;
 
         for (int i = 0; i < runs.size(); i++) {
-            ReviewRun run = runs.get(i);
+            ChangeSegment run = runs.get(i);
             if (run == null) continue;
 
             int start = run.getLogicalStart();
@@ -2200,7 +1861,7 @@ public class AttributionHelpers {
     }
 
     private static boolean areContinuingBlockTargetsConnected(
-            List<ReviewRun> runs,
+            List<ChangeSegment> runs,
             int previousNewlineStart,
             int currentNewlineStart
     ) {
@@ -2213,8 +1874,8 @@ public class AttributionHelpers {
         if (previousIdx < 0 || currentIdx < 0) return false;
         if (previousIdx >= currentIdx) return false;
 
-        ReviewRun previous = runs.get(previousIdx);
-        ReviewRun current = runs.get(currentIdx);
+        ChangeSegment previous = runs.get(previousIdx);
+        ChangeSegment current = runs.get(currentIdx);
 
         if (!isNewlineRun(previous) || !isNewlineRun(current)) {
             return false;
@@ -2240,16 +1901,16 @@ public class AttributionHelpers {
     }
 
     public static void normalizeContinuingBlockFormatGroups(
-            List<ReviewRun> runs,
-            List<BlockFormatSuggestionItem> blockFormatSuggestions
+            List<ChangeSegment> runs,
+            List<BlockFormatChangeItem> blockFormatChanges
     ) {
         if (runs == null || runs.isEmpty()) return;
-        if (blockFormatSuggestions == null || blockFormatSuggestions.isEmpty()) return;
+        if (blockFormatChanges == null || blockFormatChanges.isEmpty()) return;
 
-        List<BlockFormatSuggestionItem> keep = new ArrayList<>();
+        List<BlockFormatChangeItem> keep = new ArrayList<>();
         Map<BlockGroupKey, List<BlockReferenceOwner>> continuingRefs = new LinkedHashMap<>();
 
-        for (BlockFormatSuggestionItem item : blockFormatSuggestions) {
+        for (BlockFormatChangeItem item : blockFormatChanges) {
             if (item == null) continue;
 
             if (item.getBehavior() != BlockFormatBehavior.CONTINUING) {
@@ -2315,12 +1976,12 @@ public class AttributionHelpers {
                 List<BlockReferenceOwner> chain = chains.get(i);
                 if (chain.isEmpty()) continue;
 
-                BlockFormatSuggestionItem source = chain.get(0).owner();
+                BlockFormatChangeItem source = chain.get(0).owner();
 
-                BlockFormatSuggestionItem normalized =
+                BlockFormatChangeItem normalized =
                         i == 0
                                 ? source
-                                : BlockFormatSuggestionItem.builder()
+                                : BlockFormatChangeItem.builder()
                                 .groupId(nextId())
                                 .actorEmail(source.getActorEmail())
                                 .createdAt(source.getCreatedAt())
@@ -2340,13 +2001,13 @@ public class AttributionHelpers {
 
                 for (BlockReferenceOwner owner : chain) {
                     normalized.setReferences(
-                            appendAndCoalesceSuggestionReference(
+                            appendAndCoalesceReference(
                                     normalized.getReferences(),
                                     owner.reference()
                             )
                     );
 
-                    BlockFormatSuggestionItem original = owner.owner();
+                    BlockFormatChangeItem original = owner.owner();
 
                     if (original.getCreatedAt() != null
                             && normalized.getCreatedAt() != null
@@ -2360,17 +2021,17 @@ public class AttributionHelpers {
             }
         }
 
-        blockFormatSuggestions.clear();
-        blockFormatSuggestions.addAll(keep);
+        blockFormatChanges.clear();
+        blockFormatChanges.addAll(keep);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Records
     // ─────────────────────────────────────────────────────────────────────────
     public record InsertGroupCollection(List<Integer> indices, int start, int end) {}
-    public record SuggestionReferenceSplit(List<Reference> left, List<Reference> right) {}
+    public record ReferenceSplit(List<Reference> left, List<Reference> right) {}
     private record BlockReferenceOwner(
-            BlockFormatSuggestionItem owner,
+            BlockFormatChangeItem owner,
             Reference reference
     ) {}
 }
