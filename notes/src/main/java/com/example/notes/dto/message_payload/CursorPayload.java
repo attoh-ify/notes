@@ -8,10 +8,12 @@ import lombok.Setter;
 public class CursorPayload {
     private String actorEmail;
     private int position;
+    private int length;
 
-    public CursorPayload(String actorEmail, int position) {
+    public CursorPayload(String actorEmail, int position, int length) {
         this.actorEmail = actorEmail;
         this.position = position;
+        this.length = length;
     }
 
     public CursorPayload() {}

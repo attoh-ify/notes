@@ -41,7 +41,8 @@ public class NoteMapperImpl implements NoteMapper {
                 noteDto.visibility(),
                 null,
                 noteDto.currentNoteVersionNumber(),
-                null
+                null,
+                noteDto.isReviewing()
         );
     }
 
@@ -56,6 +57,7 @@ public class NoteMapperImpl implements NoteMapper {
                 note.getVisibility(),
                 accessRole,
                 note.getCurrentNoteVersionNumber(),
+                note.isReviewing(),
                 note.getCreatedAt(),
                 note.getUpdatedAt()
         );
@@ -71,6 +73,7 @@ public class NoteMapperImpl implements NoteMapper {
                 NoteVisibility.PRIVATE,
                 NoteAccessRole.RESTRICTED,
                 0,
+                false,
                 null,
                 null
         );

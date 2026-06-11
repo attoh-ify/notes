@@ -12,7 +12,7 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ReviewRun {
+public class Segment {
     private String id;
     private String text;
     private Object embed;
@@ -21,15 +21,14 @@ public class ReviewRun {
     private Map<String, Object> baseAttributes = new HashMap<>();
 
     @Builder.Default
-    private Map<String, Object> suggestionAttributes = new HashMap<>();
+    private Map<String, Object> changeAttributes = new HashMap<>();
 
     @Builder.Default
     private List<Reference> references = new ArrayList<>();
 
     private int logicalStart;
-    private InsertSuggestion insertSuggestion;
-    private NewlineSuggestion newlineSuggestion;
-    private DeleteSuggestion deleteSuggestion;
+    private InsertChange insertChange;
+    private DeleteChange deleteChange;
 
     public boolean isEmbed() {
         return embed != null;
@@ -43,17 +42,9 @@ public class ReviewRun {
         return isText() && "\n".equals(text);
     }
 
-    public boolean hasInsertLikeSuggestion() {
-        return insertSuggestion != null || newlineSuggestion != null;
-    }
-
     public int length() {
         if (isEmbed()) return 1;
         if (isText()) return text.length();
         return 0;
-    }
-
-    public Object insertValue() {
-        return isEmbed() ? embed : text;
     }
 }

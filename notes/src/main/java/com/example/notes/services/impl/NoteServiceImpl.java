@@ -100,7 +100,8 @@ public class NoteServiceImpl implements NoteService {
                 NoteVisibility.PUBLIC,
                 new ArrayList<>(),
                 0,
-                new ArrayList<>()
+                new ArrayList<>(),
+                false
         );
         newNote = noteRepository.save(newNote);
 
@@ -163,7 +164,7 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public JoinNoteResponse joinNote(UUID userId, String actorEmail, UUID noteId) {
-        notePolicyService.validateEditor(actorEmail, noteId);
+        Note persistedNote = notePolicyService.validateEditor(actorEmail, noteId);
 
         int activeSessionCount = redisService.getActiveSessionCount(noteId);
         CollaborationMode mode = redisService.getCollaborationMode(noteId);
@@ -173,10 +174,7 @@ public class NoteServiceImpl implements NoteService {
         NoteDto note = redisService.getNote(noteId);
         NoteVersionDto noteVersion = redisService.getNoteVersion(noteId);
 
-        boolean isReviewing = redisService.isReviewInProgress(
-                noteId,
-                note.ownerEmail()
-        );
+        boolean isReviewing = persistedNote.isReviewing();
 
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
@@ -206,7 +204,7 @@ public class NoteServiceImpl implements NoteService {
 
     @Transactional
     @Override
-    public ReviewProjection buildAttribution(String actorEmail, UUID noteId) {
+    public void buildAttribution(String actorEmail, UUID noteId) {
         Note note = notePolicyService.validateOwner(actorEmail, noteId);
         NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
 
@@ -238,55 +236,23 @@ public class NoteServiceImpl implements NoteService {
 
             redisService.refreshNoteContent(actorEmail, noteId);
         }
-
-        return result.projection();
     }
 
     @Override
     public void startReview(String actorEmail, UUID noteId) {
-        notePolicyService.validateOwner(actorEmail,noteId);
-        redisService.setReviewInProgress(noteId, actorEmail, "true");
-        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
-    }
-
-    @Transactional
-    @Override
-    public void applyReviewChanges(String actorEmail, UUID noteId, ReviewNotePayload payload) {
-        Note note = notePolicyService.validateOwner(actorEmail, noteId);
-        NoteVersion noteVersion = notePolicyService.findNoteCopy(noteId);
-
-        ReviewOperationAccumulator accumulator = new ReviewOperationAccumulator();
-
-        if (payload.acceptedReferences() != null) {
-            for (ReviewDecisionReference ref : payload.acceptedReferences()) {
-                accumulator.recordAcceptedReference(ref);
-            }
-        }
-
-        if (payload.rejectedReferences() != null) {
-            for (ReviewDecisionReference ref : payload.rejectedReferences()) {
-                accumulator.recordRejectedReference(ref);
-            }
-        }
-
-        ReviewOperationAccumulator.ReviewApplyResult result =
-                accumulator.applyReviewDecisionsToRevisionLog(note.getRevisionLog());
-
-        if (!result.changed()) return;
-
-        Delta newMasterDelta =
-                rebuildLiveMasterDeltaFromRevisionLog(note.getRevisionLog());
-        noteVersion.setMasterDelta(newMasterDelta);
-
-        noteVersionRepository.save(noteVersion);
-
+        Note note = notePolicyService.validateOwner(actorEmail,noteId);
+        note.setReviewing(true);
+        noteRepository.save(note);
         redisService.refreshNoteContent(actorEmail, noteId);
+        reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, true));
     }
 
     @Override
     public void exitReviewNote(String actorEmail, UUID noteId) {
-        notePolicyService.validateOwner(actorEmail,noteId);
-        redisService.setReviewInProgress(noteId, actorEmail, "false");
+        Note note = notePolicyService.validateOwner(actorEmail,noteId);
+        note.setReviewing(false);
+        noteRepository.save(note);
+        redisService.refreshNoteContent(actorEmail, noteId);
         reviewInProgressNotifier.notifyReviewInProgress(noteId, new ReviewInProgressResponsePayload(noteId, false));
     }
 
@@ -321,6 +287,13 @@ public class NoteServiceImpl implements NoteService {
         }
 
         redisService.initializeNote(actorEmail, noteId);
+
+        NoteDto redisNote = redisService.getNote(noteId);
+        boolean isOwner = redisNote.ownerEmail().equals(actorEmail);
+
+        if (redisNote.isReviewing() && !isOwner) {
+            throw new BadRequestException("Note is currently under review by the owner.");
+        }
 
         String lockOwner = UUID.randomUUID().toString();
 
@@ -397,6 +370,7 @@ public class NoteServiceImpl implements NoteService {
                     note.visibility(),
                     note.accessRole(),
                     note.currentNoteVersionNumber(),
+                    note.isReviewing(),
                     note.createdAt(),
                     note.updatedAt()
             );

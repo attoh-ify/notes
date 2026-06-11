@@ -1,6 +1,6 @@
 package com.example.notes.dto.attribution;
 
 public record AttributionBuildResult(
-        ReviewProjection projection,
+        AuditProjection projection,
         boolean revisionLogChanged
 ) {}

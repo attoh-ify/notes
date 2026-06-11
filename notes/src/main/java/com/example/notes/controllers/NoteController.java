@@ -1,6 +1,5 @@
 package com.example.notes.controllers;
 
-import com.example.notes.dto.attribution.ReviewProjection;
 import com.example.notes.dto.note.*;
 import com.example.notes.dto.response.ResponseDto;
 import com.example.notes.entities.note.NoteVisibility;
@@ -47,21 +46,9 @@ public class NoteController {
         );
     }
 
-    @GetMapping("/{noteId}/build-attribution")
-    public ResponseDto buildAttribution(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
-        ReviewProjection reviewProjection = noteService.buildAttribution(currentUser.getEmail(), noteId);
-        return new ResponseDto(true, "ok", reviewProjection);
-    }
-
     @GetMapping("/{noteId}/review")
     public ResponseDto startReview(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId) throws Exception {
         noteService.startReview(currentUser.getEmail(), noteId);
-        return new ResponseDto("ok");
-    }
-
-    @PostMapping("/{noteId}/review")
-    public ResponseDto applyReviewChanges(@CurrentUser UserPrincipal currentUser, @PathVariable UUID noteId, @RequestBody ReviewNotePayload payload) {
-        noteService.applyReviewChanges(currentUser.getEmail(), noteId, payload);
         return new ResponseDto("ok");
     }
 

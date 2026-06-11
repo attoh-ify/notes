@@ -1,7 +1,6 @@
 package com.example.notes.config.websocket;
 
 import com.example.notes.dto.message_payload.CollaboratorsPayload;
-import com.example.notes.dto.message_payload.ReviewInProgressResponsePayload;
 import com.example.notes.dto.note.NoteDto;
 import com.example.notes.notifier.CollaboratorCountNotifier;
 import com.example.notes.notifier.ReviewInProgressNotifier;
@@ -70,14 +69,6 @@ public class SessionDisconnectEventListener implements ApplicationListener<Sessi
                 removedFinalUserSession,
                 collaborators
         );
-
-        if (removedFinalUserSession && redisService.isReviewInProgress(noteId, userEmail)) {
-            redisService.setReviewInProgress(noteId, userEmail, "false");
-            reviewInProgressNotifier.notifyReviewInProgress(
-                    noteId,
-                    new ReviewInProgressResponsePayload(noteId, false)
-            );
-        }
 
         if (note != null) {
             if (!collaborators.isEmpty()) {
