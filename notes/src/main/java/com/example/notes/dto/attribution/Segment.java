@@ -12,7 +12,7 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ChangeSegment {
+public class Segment {
     private String id;
     private String text;
     private Object embed;

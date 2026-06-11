@@ -19,10 +19,6 @@ public class AttributionServiceImpl implements AttributionService {
 
     public AttributionServiceImpl() {}
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Main method
-    // ─────────────────────────────────────────────────────────────────────────
-
     @Override
     public AttributionBuildResult buildReviewProjection(
             String actorEmail,
@@ -43,7 +39,7 @@ public class AttributionServiceImpl implements AttributionService {
         }
 
         // ── PHASE 2 ───────────────────────────────────────────────────────────
-        List<ChangeSegment> runs = new ArrayList<>();
+        List<Segment> runs = new ArrayList<>();
         int seedPos = 0;
 
         for (Op op : baseDelta.ops) {
@@ -60,7 +56,7 @@ public class AttributionServiceImpl implements AttributionService {
                 for (int i = 0; i < parts.length; i++) {
                     if (!parts[i].isEmpty()) {
                         runs.add(
-                                ChangeSegment.builder()
+                                Segment.builder()
                                         .id(reviewRunIdForBase(seedPos))
                                         .text(parts[i])
                                         .baseAttributes(new LinkedHashMap<>(inlineAttrs))
@@ -74,7 +70,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                     if (i < parts.length - 1) {
                         runs.add(
-                                ChangeSegment.builder()
+                                Segment.builder()
                                         .id(reviewRunIdForBase(seedPos))
                                         .text("\n")
                                         .baseAttributes(new LinkedHashMap<>(blockAttrs))
@@ -88,7 +84,7 @@ public class AttributionServiceImpl implements AttributionService {
                 }
             }  else if (op.getInsert() instanceof Map<?, ?> embed) {
                 runs.add(
-                        ChangeSegment.builder()
+                        Segment.builder()
                                 .id(reviewRunIdForBase(seedPos))
                                 .embed(cloneEmbed(embed))
                                 .baseAttributes(new LinkedHashMap<>(onlyInlineAttrs(opAttrs)))
@@ -169,7 +165,7 @@ public class AttributionServiceImpl implements AttributionService {
                         int cursor = blockRunIdx;
 
                         while (remaining > 0 && cursor < runs.size()) {
-                            ChangeSegment run = runs.get(cursor);
+                            Segment run = runs.get(cursor);
 
                             if (run.getDeleteChange() != null) {
                                 cursor++;
@@ -180,7 +176,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 splitAt(runs, cursor, remaining);
                             }
 
-                            ChangeSegment target = runs.get(cursor);
+                            Segment target = runs.get(cursor);
                             int spanLen = target.length();
                             int componentStart = retainLen - remaining;
 
@@ -221,7 +217,7 @@ public class AttributionServiceImpl implements AttributionService {
                         int cursor = runIdx;
 
                         while (remaining > 0 && cursor < runs.size()) {
-                            ChangeSegment run = runs.get(cursor);
+                            Segment run = runs.get(cursor);
 
                             if (run.getDeleteChange() != null || isBlockTargetRun(run)) {
                                 cursor++;
@@ -232,7 +228,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 splitAt(runs, cursor, remaining);
                             }
 
-                            ChangeSegment target = runs.get(cursor);
+                            Segment target = runs.get(cursor);
                             int spanStart = target.getLogicalStart();
                             int spanLen = target.length();
                             int spanEnd = spanStart + spanLen;
@@ -380,10 +376,10 @@ public class AttributionServiceImpl implements AttributionService {
                         insertAtIdx = splitAt(runs, runIndex, insertOffset);
                     }
 
-                    ChangeSegment prevGroupingRun =
+                    Segment prevGroupingRun =
                             effectivePreviousRunForInsertGrouping(runs, insertAtIdx);
 
-                    ChangeSegment nextGroupingRun =
+                    Segment nextGroupingRun =
                             effectiveNextRunForInsertGrouping(runs, insertAtIdx);
 
                     if (currentInsertGroup == null) {
@@ -674,7 +670,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 ? new LinkedHashMap<>(onlyBlockAttrs(component.getAttributes()))
                                 : new LinkedHashMap<>(inheritedChangeAttrs);
 
-                        ChangeSegment.ChangeSegmentBuilder builder = ChangeSegment.builder()
+                        Segment.SegmentBuilder builder = Segment.builder()
                                 .id(reviewRunIdForReference(opId, compIdx, fragment.componentStart(), runPos))
                                 .baseAttributes(fragmentBaseAttributes)
                                 .changeAttributes(fragmentChangeAttributes)
@@ -690,7 +686,7 @@ public class AttributionServiceImpl implements AttributionService {
                             builder.text(fragment.text());
                         }
 
-                        ChangeSegment newRun = builder.build();
+                        Segment newRun = builder.build();
 
                         runs.add(spliceAt++, newRun);
 
@@ -740,10 +736,10 @@ public class AttributionServiceImpl implements AttributionService {
                     }
 
                     if (currentDeleteGroup == null) {
-                        ChangeSegment prevDeleteGroupingRun =
+                        Segment prevDeleteGroupingRun =
                                 effectivePreviousRunForDeleteGrouping(runs, cursor);
 
-                        ChangeSegment nextDeleteGroupingRun =
+                        Segment nextDeleteGroupingRun =
                                 effectiveNextRunForDeleteGrouping(runs, cursor);
 
                         DeleteChange prevAdj =
@@ -768,7 +764,7 @@ public class AttributionServiceImpl implements AttributionService {
                                     currentDeleteGroup.setCreatedAt(nextAdj.getCreatedAt());
                                 }
 
-                                for (ChangeSegment existingRun : runs) {
+                                for (Segment existingRun : runs) {
                                     if (existingRun.getDeleteChange() != null
                                             && nextAdj.getGroupId().equals(existingRun.getDeleteChange().getGroupId())) {
                                         existingRun.setDeleteChange(copyDeleteChange(currentDeleteGroup));
@@ -793,7 +789,7 @@ public class AttributionServiceImpl implements AttributionService {
                     int deleteComponentLength = component.getDelete();
 
                     while (remaining > 0 && cursor < runs.size()) {
-                        ChangeSegment run = runs.get(cursor);
+                        Segment run = runs.get(cursor);
                         int deleteComponentLocalStart = deleteComponentLength - remaining;
 
                         if (run.getDeleteChange() != null) {
@@ -805,7 +801,7 @@ public class AttributionServiceImpl implements AttributionService {
                             splitAt(runs, cursor, remaining);
                         }
 
-                        ChangeSegment target = runs.get(cursor);
+                        Segment target = runs.get(cursor);
                         int len = target.length();
 
                         if (target.getInsertChange() != null) {
@@ -1035,7 +1031,7 @@ public class AttributionServiceImpl implements AttributionService {
                     texts.append(sawNewlineGap ? " ↵ " : " ... ");
                 }
 
-                for (ChangeSegment run : runs) {
+                for (Segment run : runs) {
                     if (run.getDeleteChange() != null) continue;
                     int rs = run.getLogicalStart();
                     int re = rs + run.length();
@@ -1143,15 +1139,15 @@ public class AttributionServiceImpl implements AttributionService {
         return type;
     }
 
-    private Delta buildVisualDelta(List<ChangeSegment> runs, AttributionViewMode mode) {
-        List<ChangeSegment> collapsed = new ArrayList<>();
+    private Delta buildVisualDelta(List<Segment> runs, AttributionViewMode mode) {
+        List<Segment> collapsed = new ArrayList<>();
 
-        for (ChangeSegment run : runs) {
+        for (Segment run : runs) {
             if (run == null || run.length() <= 0) {
                 continue;
             }
 
-            ChangeSegment last = collapsed.isEmpty() ? null : collapsed.get(collapsed.size() - 1);
+            Segment last = collapsed.isEmpty() ? null : collapsed.get(collapsed.size() - 1);
 
             Map<String, Object> lastEffective =
                     last != null ? getEffectiveAttrs(last) : Collections.emptyMap();
@@ -1212,7 +1208,7 @@ public class AttributionServiceImpl implements AttributionService {
                 continue;
             }
 
-            ChangeSegment.ChangeSegmentBuilder builder = ChangeSegment.builder()
+            Segment.SegmentBuilder builder = Segment.builder()
                     .baseAttributes(new LinkedHashMap<>(
                             run.getBaseAttributes() != null
                                     ? run.getBaseAttributes()
@@ -1247,7 +1243,7 @@ public class AttributionServiceImpl implements AttributionService {
 
         Delta delta = new Delta();
 
-        for (ChangeSegment run : collapsed) {
+        for (Segment run : collapsed) {
             if (run == null || run.length() <= 0) {
                 continue;
             }
@@ -1382,7 +1378,7 @@ public class AttributionServiceImpl implements AttributionService {
         EMBED
     }
 
-    private static InsertContentKind kindOfRun(ChangeSegment run) {
+    private static InsertContentKind kindOfRun(Segment run) {
         if (run == null) return null;
         return run.isEmbed() ? InsertContentKind.EMBED : InsertContentKind.TEXT;
     }
@@ -1393,7 +1389,7 @@ public class AttributionServiceImpl implements AttributionService {
     }
 
     private static boolean sameInsertContentKind(
-            ChangeSegment run,
+            Segment run,
             InsertContentKind kind
     ) {
         if (run == null || kind == null) return false;
@@ -1401,7 +1397,7 @@ public class AttributionServiceImpl implements AttributionService {
     }
 
     private static InsertChange compatibleAdjacentInsertChange(
-            ChangeSegment run,
+            Segment run,
             String authorEmail,
             InsertContentKind insertKind
     ) {

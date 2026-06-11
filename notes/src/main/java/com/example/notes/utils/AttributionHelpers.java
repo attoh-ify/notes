@@ -78,7 +78,7 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static Map<String, Object> getEffectiveAttrs(ChangeSegment run) {
+    public static Map<String, Object> getEffectiveAttrs(Segment run) {
         if (run == null) return Collections.emptyMap();
 
         Map<String, Object> out = new LinkedHashMap<>(
@@ -92,17 +92,17 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Locate a logical document position inside the ChangeSegment list.
+     * Locate a logical document position inside the Segment list.
      * logicalPos ignores deleted-change runs because deleted runs are visible
      * in audit mode but do not count as live document text.
      * absPos tracks the visual/runtime position, including deleted runs.
      */
-    public static RunPosition findRunPos(List<ChangeSegment> runs, int logicalPos) {
+    public static RunPosition findRunPos(List<Segment> runs, int logicalPos) {
         int pos = 0;
         int absPos = 0;
 
         for (int i = 0; i < runs.size(); i++) {
-            ChangeSegment r = runs.get(i);
+            Segment r = runs.get(i);
 
             int runLen = r.length();
 
@@ -135,12 +135,12 @@ public class AttributionHelpers {
      * Split a run at a specific offset.
      * Returns the index of the RIGHT half (the run starting at the split point).
      */
-    public static int splitAt(List<ChangeSegment> runs, int idx, int offset) {
+    public static int splitAt(List<Segment> runs, int idx, int offset) {
         if (idx >= runs.size()) {
             return idx;
         }
 
-        ChangeSegment r = runs.get(idx);
+        Segment r = runs.get(idx);
 
         if (r.isEmbed()) {
             return idx;
@@ -154,7 +154,7 @@ public class AttributionHelpers {
 
         ReferenceSplit split = splitReferences(r.getReferences(), splitAbsPos);
 
-        ChangeSegment left = ChangeSegment.builder()
+        Segment left = Segment.builder()
                 .id(r.getId() != null ? r.getId() + "_L_" + splitAbsPos : null)
                 .text(r.getText().substring(0, offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
@@ -165,7 +165,7 @@ public class AttributionHelpers {
                 .deleteChange(copyDeleteChange(r.getDeleteChange()))
                 .build();
 
-        ChangeSegment right = ChangeSegment.builder()
+        Segment right = Segment.builder()
                 .id(r.getId() != null ? r.getId() + "_R_" + splitAbsPos : null)
                 .text(r.getText().substring(offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
@@ -187,7 +187,7 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static boolean isOnlyNewlineRetain(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int logicalStart,
             int retainLength
     ) {
@@ -198,7 +198,7 @@ public class AttributionHelpers {
         boolean sawOverlap = false;
 
         for (int i = runIdx; i < runs.size() && remaining > 0; i++) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
             if (run.getDeleteChange() != null) continue;
 
             sawOverlap = true;
@@ -260,7 +260,7 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
 
     public static InsertGroupCollection collectInsertGroupRunsWithAttrs(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             String groupId,
             Map<String, Object> attrs
     ) {
@@ -269,7 +269,7 @@ public class AttributionHelpers {
         int end = Integer.MIN_VALUE;
 
         for (int i = 0; i < runs.size(); i++) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (run.getInsertChange() == null
                     || !run.getInsertChange().getGroupId().equals(groupId)) continue;
@@ -292,7 +292,7 @@ public class AttributionHelpers {
     }
 
     public static void moveAttrsFromBaseToChangeForRuns(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<Integer> indices,
             Map<String, Object> attrs
     ) {
@@ -303,7 +303,7 @@ public class AttributionHelpers {
                 continue;
             }
 
-            ChangeSegment run = runs.get(idx);
+            Segment run = runs.get(idx);
             Map<String, Object> base = new LinkedHashMap<>(run.getBaseAttributes() != null ? run.getBaseAttributes() : Collections.emptyMap());
             Map<String, Object> change = new LinkedHashMap<>(run.getChangeAttributes() != null ? run.getChangeAttributes() : Collections.emptyMap());
 
@@ -550,7 +550,7 @@ public class AttributionHelpers {
      * References belonging to the newly inserted group are skipped.
      */
     public void shiftChangeReferenceReviewStarts(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int insertPos,
             int shiftLen,
             String insertedGroupId
@@ -559,7 +559,7 @@ public class AttributionHelpers {
             return;
         }
 
-        for (ChangeSegment run : runs) {
+        for (Segment run : runs) {
             boolean belongsToInsertedGroup =
                     run.getInsertChange() != null
                             && Objects.equals(insertedGroupId, run.getInsertChange().getGroupId());
@@ -907,7 +907,7 @@ public class AttributionHelpers {
     }
 
     public static List<Reference> collectReferencesForRunIndices(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<Integer> indices
     ) {
         List<Reference> refs = new ArrayList<>();
@@ -917,7 +917,7 @@ public class AttributionHelpers {
             if (idx == null || idx < 0 || idx >= runs.size()) {
                 continue;
             }
-            ChangeSegment run = runs.get(idx);
+            Segment run = runs.get(idx);
             refs = appendReferences(refs, run.getReferences());
         }
 
@@ -925,14 +925,14 @@ public class AttributionHelpers {
     }
 
     public static void deleteRangeFromRunReferencesAndShift(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int deleteStart,
             int deleteLength
     ) {
         if (runs == null || runs.isEmpty() || deleteLength <= 0) return;
 
         int count = 0;
-        for (ChangeSegment run : runs) {
+        for (Segment run : runs) {
             if (run.getReferences() == null || run.getReferences().isEmpty()) continue;
             List<Reference> before = cloneReferences(run.getReferences());
             run.setReferences(deleteRangeFromReferencesAndShift(run.getReferences(), deleteStart, deleteLength));
@@ -1039,11 +1039,11 @@ public class AttributionHelpers {
     }
 
     public static void applyDeleteTypeToGroupRuns(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             String groupId,
             DeleteChange.DeleteChangeType type
     ) {
-        for (ChangeSegment run : runs) {
+        for (Segment run : runs) {
             if (run.getDeleteChange() == null) continue;
             if (!groupId.equals(run.getDeleteChange().getGroupId())) continue;
 
@@ -1063,7 +1063,7 @@ public class AttributionHelpers {
         return new LinkedHashMap<>();
     }
 
-    public static String runTextForLog(ChangeSegment run) {
+    public static String runTextForLog(Segment run) {
         if (run == null) return "null";
         if (run.isEmbed()) return "[embed]";
         if (run.getText() == null) return "[empty-run]";
@@ -1083,11 +1083,11 @@ public class AttributionHelpers {
         return "run_" + opId + "_" + componentIndex + "_" + componentStart + "_" + reviewStart;
     }
 
-    public static boolean isNewlineRun(ChangeSegment run) {
+    public static boolean isNewlineRun(Segment run) {
         return run != null && run.isText() && "\n".equals(run.getText());
     }
 
-    public static boolean isMeaningfulLineContentRun(ChangeSegment run) {
+    public static boolean isMeaningfulLineContentRun(Segment run) {
         if (run == null) return false;
         if (run.getDeleteChange() != null) return true;
         if (run.isEmbed()) return true;
@@ -1095,7 +1095,7 @@ public class AttributionHelpers {
     }
 
     public static List<String> collectLineDependencyRunIdsForNewline(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int newlineIndex
     ) {
         List<String> deps = new ArrayList<>();
@@ -1105,7 +1105,7 @@ public class AttributionHelpers {
         }
 
         for (int i = newlineIndex - 1; i >= 0; i--) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (isNewlineRun(run)) {
                 break;
@@ -1129,7 +1129,7 @@ public class AttributionHelpers {
         return deps;
     }
 
-    public static String logicalLineDependencyId(ChangeSegment run) {
+    public static String logicalLineDependencyId(Segment run) {
         if (run == null) return null;
 
         if (run.getInsertChange() != null) {
@@ -1256,7 +1256,7 @@ public class AttributionHelpers {
         return out;
     }
 
-    public static boolean isBlockTargetRun(ChangeSegment run) {
+    public static boolean isBlockTargetRun(Segment run) {
         return run != null && run.isText() && "\n".equals(run.getText());
     }
 
@@ -1320,7 +1320,7 @@ public class AttributionHelpers {
     }
 
     private BlockFormatChangeItem findOrCreateCurrentBlockGroup(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<BlockFormatChangeItem> blockFormatChanges,
             Map<BlockGroupKey, BlockFormatChangeItem> currentBlockGroups,
             String actorEmail,
@@ -1396,7 +1396,7 @@ public class AttributionHelpers {
      * More precisely: the merged reference range ends at or reaches spanStart.
      */
     private static boolean isContinuingBlockChangeAdjacent(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             BlockFormatChangeItem item,
             int spanStart
     ) {
@@ -1453,10 +1453,10 @@ public class AttributionHelpers {
     }
 
     public void applyBlockAttributeToNewlineRun(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<BlockFormatChangeItem> blockFormatChanges,
             AttributionCancellationAccumulator accumulator,
-            ChangeSegment target,
+            Segment target,
             String attrKey,
             Object attrValue,
             String authorEmail,
@@ -1568,7 +1568,7 @@ public class AttributionHelpers {
     public void cancelBlockChangesForDeletedNewline(
             List<BlockFormatChangeItem> blockFormatChanges,
             AttributionCancellationAccumulator accumulator,
-            ChangeSegment deletedRun
+            Segment deletedRun
     ) {
         if (!isBlockTargetRun(deletedRun)) return;
 
@@ -1653,10 +1653,10 @@ public class AttributionHelpers {
         items.removeIf(item -> item.getReferences() == null || item.getReferences().isEmpty());
     }
 
-    public String getLinePreviewForNewline(List<ChangeSegment> runs, int newlinePos) {
+    public String getLinePreviewForNewline(List<Segment> runs, int newlinePos) {
         StringBuilder line = new StringBuilder();
 
-        for (ChangeSegment run : runs) {
+        for (Segment run : runs) {
             if (run.getDeleteChange() != null) continue;
 
             int start = run.getLogicalStart();
@@ -1690,8 +1690,8 @@ public class AttributionHelpers {
         return out.isBlank() ? "[empty line]" : out;
     }
 
-    public static ChangeSegment effectivePreviousRunForInsertGrouping(
-            List<ChangeSegment> runs,
+    public static Segment effectivePreviousRunForInsertGrouping(
+            List<Segment> runs,
             int insertAtIdx
     ) {
         if (runs == null || insertAtIdx <= 0) {
@@ -1699,7 +1699,7 @@ public class AttributionHelpers {
         }
 
         for (int i = insertAtIdx - 1; i >= 0; i--) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
@@ -1711,8 +1711,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ChangeSegment effectiveNextRunForInsertGrouping(
-            List<ChangeSegment> runs,
+    public static Segment effectiveNextRunForInsertGrouping(
+            List<Segment> runs,
             int insertAtIdx
     ) {
         if (runs == null || insertAtIdx < 0 || insertAtIdx >= runs.size()) {
@@ -1720,7 +1720,7 @@ public class AttributionHelpers {
         }
 
         for (int i = insertAtIdx; i < runs.size(); i++) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
@@ -1732,8 +1732,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ChangeSegment effectivePreviousRunForDeleteGrouping(
-            List<ChangeSegment> runs,
+    public static Segment effectivePreviousRunForDeleteGrouping(
+            List<Segment> runs,
             int deleteAtIdx
     ) {
         if (runs == null || deleteAtIdx <= 0) {
@@ -1741,7 +1741,7 @@ public class AttributionHelpers {
         }
 
         for (int i = deleteAtIdx - 1; i >= 0; i--) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
@@ -1753,8 +1753,8 @@ public class AttributionHelpers {
         return null;
     }
 
-    public static ChangeSegment effectiveNextRunForDeleteGrouping(
-            List<ChangeSegment> runs,
+    public static Segment effectiveNextRunForDeleteGrouping(
+            List<Segment> runs,
             int deleteAtIdx
     ) {
         if (runs == null || deleteAtIdx < 0 || deleteAtIdx >= runs.size()) {
@@ -1762,7 +1762,7 @@ public class AttributionHelpers {
         }
 
         for (int i = deleteAtIdx; i < runs.size(); i++) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
 
             if (isNewlineRun(run) && run.getInsertChange() != null) {
                 continue;
@@ -1775,7 +1775,7 @@ public class AttributionHelpers {
     }
 
     public static void syncBlockFormatDependenciesFromTargetNewlines(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<BlockFormatChangeItem> blockFormatChanges
     ) {
         if (runs == null || runs.isEmpty()) return;
@@ -1794,7 +1794,7 @@ public class AttributionHelpers {
 
                 if (newlineIndex < 0) continue;
 
-                ChangeSegment target = runs.get(newlineIndex);
+                Segment target = runs.get(newlineIndex);
 
                 if (!isNewlineRun(target)) continue;
 
@@ -1809,7 +1809,7 @@ public class AttributionHelpers {
 
     public static void addBlockDependenciesFromTargetNewline(
             BlockFormatChangeItem item,
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int newlineIndex
     ) {
         if (item == null || runs == null) return;
@@ -1840,13 +1840,13 @@ public class AttributionHelpers {
     }
 
     public static int findRunIndexAtReviewStart(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int reviewStart
     ) {
         if (runs == null) return -1;
 
         for (int i = 0; i < runs.size(); i++) {
-            ChangeSegment run = runs.get(i);
+            Segment run = runs.get(i);
             if (run == null) continue;
 
             int start = run.getLogicalStart();
@@ -1861,7 +1861,7 @@ public class AttributionHelpers {
     }
 
     private static boolean areContinuingBlockTargetsConnected(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             int previousNewlineStart,
             int currentNewlineStart
     ) {
@@ -1874,8 +1874,8 @@ public class AttributionHelpers {
         if (previousIdx < 0 || currentIdx < 0) return false;
         if (previousIdx >= currentIdx) return false;
 
-        ChangeSegment previous = runs.get(previousIdx);
-        ChangeSegment current = runs.get(currentIdx);
+        Segment previous = runs.get(previousIdx);
+        Segment current = runs.get(currentIdx);
 
         if (!isNewlineRun(previous) || !isNewlineRun(current)) {
             return false;
@@ -1901,7 +1901,7 @@ public class AttributionHelpers {
     }
 
     public static void normalizeContinuingBlockFormatGroups(
-            List<ChangeSegment> runs,
+            List<Segment> runs,
             List<BlockFormatChangeItem> blockFormatChanges
     ) {
         if (runs == null || runs.isEmpty()) return;
