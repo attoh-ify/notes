@@ -4,6 +4,7 @@ import com.crowninteractive.notes.services.JwtService;
 import com.crowninteractive.notes.services.RedisService;
 import com.crowninteractive.notes.services.impl.MyUserDetailsService;
 import com.crowninteractive.notes.services.impl.NotePolicyService;
+import com.crowninteractive.notes.utils.Helpers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -104,7 +105,7 @@ public class StompAuthInterceptor implements ChannelInterceptor {
 
                 String sessionId = accessor.getSessionId();
 
-                if (sessionId == null || sessionId.isBlank()) {
+                if (sessionId == null || Helpers.isBlank(sessionId)) {
                     throw new IllegalStateException("WebSocket sessionId is required");
                 }
 

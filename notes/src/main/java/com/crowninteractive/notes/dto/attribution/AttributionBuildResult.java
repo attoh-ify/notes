@@ -1,6 +1,13 @@
 package com.crowninteractive.notes.dto.attribution;
 
-public record AttributionBuildResult(
-        AuditProjection projection,
-        boolean revisionLogChanged
-) {}
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+public class AttributionBuildResult {
+        private AuditProjection projection;
+        private boolean revisionLogChanged;
+}

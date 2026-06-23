@@ -28,22 +28,22 @@ public class NoteMapperImpl implements NoteMapper {
 
     @Override
     public Note fromDto(NoteDto noteDto) {
-        User user = userRepository.findByEmail(noteDto.ownerEmail())
+        User user = userRepository.findByEmail(noteDto.getOwnerEmail())
                 .orElseThrow(() -> {
-                    log.warn("User with email {} not found", noteDto.ownerEmail());
+                    log.warn("User with email {} not found", noteDto.getOwnerEmail());
                     return new BadRequestException("User with email not found");
                 });
         return new Note(
-                noteDto.id(),
-                noteDto.noteId(),
+                noteDto.getId(),
+                noteDto.getNoteId(),
                 user,
-                noteDto.title(),
+                noteDto.getTitle(),
                 null,
-                noteDto.visibility(),
+                noteDto.getVisibility(),
                 null,
-                noteDto.currentNoteVersionNumber(),
+                noteDto.getCurrentNoteVersionNumber(),
                 null,
-                noteDto.isReviewing()
+                noteDto.getIsReviewing()
         );
     }
 

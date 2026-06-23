@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class NoteAccessServiceImpl implements NoteAccessService {
@@ -54,18 +55,18 @@ public class NoteAccessServiceImpl implements NoteAccessService {
     public NoteAccessDto addAccess(String userEmail, String noteId, NoteAccessPayload noteAccess) {
         Note note = notePolicyService.validateSuper(userEmail, noteId);
 
-        if (noteAccess.email().equals(userEmail)) {
+        if (noteAccess.getEmail().equals(userEmail)) {
             log.warn("Owner already has access to this note");
             throw new BadRequestException("Owner already has access to this note");
         }
 
-        if (noteAccess.role().equals(NoteAccessRole.OWNER)) {
+        if (noteAccess.getRole().equals(NoteAccessRole.OWNER)) {
             log.warn("User can not be granted owner role");
             throw new BadRequestException("User can not be granted owner role");
         }
 
-        User newAccessUser = userPolicyService.userExists(noteAccess.email());
-        emailService.sendAccessGrantedEmail(noteAccess.email(), note.getTitle(), noteAccess.role());
+        User newAccessUser = userPolicyService.userExists(noteAccess.getEmail());
+        emailService.sendAccessGrantedEmail(noteAccess.getEmail(), note.getTitle(), noteAccess.getRole());
 
         try {
             return noteAccessMapper.toDto(
@@ -75,12 +76,12 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                                     UUID.randomUUID().toString(),
                                     note,
                                     newAccessUser.getEmail(),
-                                    noteAccess.role()
+                                    noteAccess.getRole()
                             )
                     )
             );
         } catch (DataIntegrityViolationException e) {
-            log.warn("Note access already exists for the email={}", noteAccess.email());
+            log.warn("Note access already exists for the email={}", noteAccess.getEmail());
             throw new BadRequestException("Note access already exists for the provided email");
         }
     }
@@ -96,10 +97,10 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                             "Note access with this id is not registered."
                     );
                 });
-        updateNoteAccess.setRole(noteAccess.role());
+        updateNoteAccess.setRole(noteAccess.getRole());
 
-        if (noteAccess.role() != NoteAccessRole.EDITOR
-                && noteAccess.role() != NoteAccessRole.SUPER) {
+        if (noteAccess.getRole() != NoteAccessRole.EDITOR
+                && noteAccess.getRole() != NoteAccessRole.SUPER) {
             redisService.removeCollaboratorFromNote(noteId, updateNoteAccess.getEmail());
             Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
@@ -108,7 +109,7 @@ public class NoteAccessServiceImpl implements NoteAccessService {
                     new CollaboratorsPayload(collaborators)
             );
         }
-        emailService.sendAccessUpdatedEmail(noteAccess.email(), note.getTitle(), noteAccess.role());
+        emailService.sendAccessUpdatedEmail(noteAccess.getEmail(), note.getTitle(), noteAccess.getRole());
         return noteAccessMapper.toDto(noteAccessRepository.save(updateNoteAccess));
     }
 
@@ -142,6 +143,6 @@ public class NoteAccessServiceImpl implements NoteAccessService {
         return noteAccessRepository.findByNote_NoteId(noteId)
                 .stream()
                 .map(noteAccessMapper::toDto)
-                .toList();
+                .collect(Collectors.toList());
     }
 }

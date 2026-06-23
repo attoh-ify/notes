@@ -19,11 +19,11 @@ public class NoteAccessMapperImpl implements NoteAccessMapper {
     public NoteAccess fromDto(NoteAccessDto noteAccessDto, String noteId) {
         Note note = noteId != null ? notePolicyService.findNoteById(noteId) : null;
         return new NoteAccess(
-                noteAccessDto.id(),
-                noteAccessDto.noteAccessId(),
+                noteAccessDto.getId(),
+                noteAccessDto.getNoteAccessId(),
                 note,
-                noteAccessDto.email(),
-                noteAccessDto.role()
+                noteAccessDto.getEmail(),
+                noteAccessDto.getRole()
         );
     }
 

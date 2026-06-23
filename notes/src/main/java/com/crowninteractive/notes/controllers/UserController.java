@@ -9,9 +9,9 @@ import com.crowninteractive.notes.security.CurrentUser;
 import com.crowninteractive.notes.services.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletResponse;
-import jakarta.validation.Valid;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletResponse;
+import javax.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -54,12 +54,12 @@ public class UserController {
     ) {
         LoginResponseDto result = userService.loginUser(dto);
 
-        Cookie cookie = new Cookie("access_token", result.token());
+        Cookie cookie = new Cookie("access_token", result.getToken());
         cookie.setHttpOnly(true);
         cookie.setSecure(true);
         cookie.setPath("/");
         cookie.setMaxAge(4 * 60 * 60);
-        response.setHeader("Set-Cookie", "access_token=" + result.token() + "; Path=/; HttpOnly; Max-Age=14400; SameSite=None; Secure");
+        response.setHeader("Set-Cookie", "access_token=" + result.getToken() + "; Path=/; HttpOnly; Max-Age=14400; SameSite=None; Secure");
 
         response.addCookie(cookie);
 

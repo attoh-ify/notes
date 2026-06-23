@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletRequest;
 import java.util.Map;
 
 @Component
@@ -19,18 +21,18 @@ public class HandshakeInterceptorImpl implements HandshakeInterceptor {
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Map<String, Object> attributes) {
-        if (!(request instanceof ServletServerHttpRequest servletRequest)) {
+        if (!(request instanceof ServletServerHttpRequest)) {
             return true;
         }
 
-        var httpServletRequest = servletRequest.getServletRequest();
-        var cookies = httpServletRequest.getCookies();
+        HttpServletRequest httpServletRequest = ((ServletServerHttpRequest) request).getServletRequest();
+        Cookie[] cookies = httpServletRequest.getCookies();
 
         if (cookies == null) {
             return true;
         }
 
-        for (var cookie : cookies) {
+        for (Cookie cookie : cookies) {
             if (ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
                 attributes.put(ACCESS_TOKEN_COOKIE, cookie.getValue());
                 return true;

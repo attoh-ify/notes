@@ -7,6 +7,7 @@ import com.crowninteractive.notes.mappers.UserMapper;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Component
 public class UserMapperImpl implements UserMapper {
@@ -19,14 +20,14 @@ public class UserMapperImpl implements UserMapper {
     @Override
     public User fromDto(UserDto userDto) {
         return new User(
-                userDto.id(),
-                userDto.userId(),
-                userDto.email(),
-                userDto.password(),
-                Optional.ofNullable(userDto.notes())
+                userDto.getId(),
+                userDto.getUserId(),
+                userDto.getEmail(),
+                userDto.getPassword(),
+                Optional.ofNullable(userDto.getNotes())
                                 .map(notes -> notes.stream()
                                         .map(noteMapper::fromDto)
-                                        .toList()
+                                        .collect(Collectors.toList())
                                 ).orElse(null)
         );
     }
@@ -41,7 +42,7 @@ public class UserMapperImpl implements UserMapper {
                 Optional.ofNullable(user.getNotes())
                                 .map(notes -> notes.stream()
                                         .map(note -> noteMapper.toDto(note, user.getEmail()))
-                                        .toList()
+                                        .collect(Collectors.toList())
                                 ).orElse(null),
                 user.getCreatedAt(),
                 user.getUpdatedAt()

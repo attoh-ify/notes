@@ -32,10 +32,13 @@ public class Delta {
     // --- Embed type extraction ---
 
     private static Object[] getEmbedTypeAndData(Object a, Object b) {
-        if (!(a instanceof Map<?, ?> aMap))
+        if (!(a instanceof Map<?, ?>))
             throw new IllegalArgumentException("cannot retain a " + (a == null ? "null" : a.getClass()));
-        if (!(b instanceof Map<?, ?> bMap))
+        Map<?, ?> aMap = (Map<?, ?>) a;
+
+        if (!(b instanceof Map<?, ?>))
             throw new IllegalArgumentException("cannot retain a " + (b == null ? "null" : b.getClass()));
+        Map<?, ?> bMap = (Map<?, ?>) b;
 
         String embedType = (String) aMap.keySet().iterator().next();
         if (embedType == null || !embedType.equals(bMap.keySet().iterator().next())) {
@@ -235,8 +238,8 @@ public class Delta {
                             String embedType = (String) parts[0];
                             EmbedHandler handler = getHandler(embedType);
                             Object composed = handler.compose(parts[1], parts[2], action.equals(OpType.RETAIN));
-                            if (action.equals(OpType.INSERT)) newOp.setInsert(Map.of(embedType, composed));
-                            else newOp.setRetain(Map.of(embedType, composed));
+                            if (action.equals(OpType.INSERT)) newOp.setInsert(Collections.singletonMap(embedType, composed));
+                            else newOp.setRetain(Collections.singletonMap(embedType, composed));
                         }
                     }
                     Map<String, Object> attrs = AttributeMap.compose(
@@ -306,7 +309,7 @@ public class Delta {
                 String embedType = (String) parts[0];
                 EmbedHandler handler = getHandler(embedType);
                 inverted.retain(
-                        Map.of(embedType, handler.invert(parts[1], parts[2])),
+                        Collections.singletonMap(embedType, handler.invert(parts[1], parts[2])),
                         AttributeMap.invert(op.getAttributes(), baseOp.getAttributes()));
                 baseIndex[0] += 1;
             }
@@ -346,7 +349,7 @@ public class Delta {
                         if (embedType.equals(((Map<?, ?>) otherData).keySet().iterator().next())) {
                             EmbedHandler handler = handlers.get(embedType);
                             if (handler != null) {
-                                transformedData = Map.of(embedType, handler.transform(
+                                transformedData = Collections.singletonMap(embedType, handler.transform(
                                         ((Map<?, ?>) thisData).get(embedType),
                                         ((Map<?, ?>) otherData).get(embedType),
                                         priority));
@@ -451,9 +454,12 @@ public class Delta {
 
         for (Diff d : diffs) {
             switch (d.op) {
-                case EQUAL -> result.retain(d.text.length(), null);
-                case INSERT -> result.insert(d.text, null);
-                case DELETE -> result.delete(d.text.length());
+                case EQUAL:
+                    result.retain(d.text.length(), null);
+                case INSERT:
+                    result.insert(d.text, null);
+                case DELETE:
+                    result.delete(d.text.length());
             }
         }
 
@@ -463,8 +469,8 @@ public class Delta {
     public String getString() {
         StringBuilder sb = new StringBuilder();
         for (Op op : ops) {
-            if (op.getInsert() instanceof String str) {
-                sb.append(str);
+            if (op.getInsert() instanceof String) {
+                sb.append((String) op.getInsert());
             }
         }
         return sb.toString();

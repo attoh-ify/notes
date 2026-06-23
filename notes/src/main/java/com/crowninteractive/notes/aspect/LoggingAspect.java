@@ -18,7 +18,7 @@ public class LoggingAspect {
     // The (..) means match any number of arguments
 
     // Defines the pointcut: where the aspect would intervein
-    @Pointcut("execution(* com.example.notes.controllers.*.*(..))")
+    @Pointcut("execution(* com.crowninteractive.notes.controllers.*.*(..))")
     public void controllerMethods() {}
 
     @Before("controllerMethods()")

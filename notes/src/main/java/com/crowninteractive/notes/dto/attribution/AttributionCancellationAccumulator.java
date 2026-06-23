@@ -4,14 +4,31 @@ import com.crowninteractive.notes.dto.ot.Delta;
 import com.crowninteractive.notes.dto.ot.Op;
 import com.crowninteractive.notes.dto.ot.OpState;
 import com.crowninteractive.notes.dto.ot.TextOperation;
+import com.crowninteractive.notes.utils.Helpers;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 
 @Slf4j
 public class AttributionCancellationAccumulator {
-    private record CompKey(String opId, int componentIndex) {}
-    private record CharRange(int start, int length) {}
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class CompKey {
+        private String opId;
+        private int componentIndex;
+    }
+
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class CharRange {
+        private int start;
+        private int length;
+    }
 
     private final Map<CompKey, List<CharRange>> cancelledTextRanges = new LinkedHashMap<>();
     private final Map<CompKey, Map<String, List<CharRange>>> cancelledFormatRanges = new LinkedHashMap<>();
@@ -58,7 +75,7 @@ public class AttributionCancellationAccumulator {
         CompKey key = new CompKey(opId, componentIndex);
         CharRange range = new CharRange(componentStart, length);
 
-        if (attributeKey != null && !attributeKey.isBlank()) {
+        if (attributeKey != null && !Helpers.isBlank(attributeKey)) {
             cancelledFormatRanges
                     .computeIfAbsent(key, k -> new LinkedHashMap<>())
                     .computeIfAbsent(attributeKey, k -> new ArrayList<>())
@@ -101,8 +118,8 @@ public class AttributionCancellationAccumulator {
 
             SplitResult split = splitOperation(textOp.getDelta(), decision, opId);
 
-            Delta cancelled = split.cancelled().chop();
-            Delta pending = split.pending().chop();
+            Delta cancelled = split.getCancelled().chop();
+            Delta pending = split.getPending().chop();
 
             boolean hasCancelled = hasEffectiveOps(cancelled);
             boolean hasPending = hasEffectiveOps(pending);
@@ -156,7 +173,8 @@ public class AttributionCancellationAccumulator {
                 continue;
             }
 
-            else if (op.isInsert() && op.getInsert() instanceof String text) {
+            else if (op.isInsert() && op.getInsert() instanceof String) {
+                String text = (String) op.getInsert(); 
                 List<CharRange> cancelledRanges =
                         clampRanges(decision.cancelledInsertRanges.get(i), text.length());
 
@@ -254,9 +272,9 @@ public class AttributionCancellationAccumulator {
                 buildSliceDecisions(text.length(), cancelledRanges);
 
         for (SliceDecision decision : decisions) {
-            if (decision.start() > cursor) {
+            if (decision.getStart() > cursor) {
                 appendPendingInsertWithFormatDecisions(
-                        text.substring(cursor, decision.start()),
+                        text.substring(cursor, decision.getStart()),
                         cursor,
                         safeAttrs,
                         cancelledFormatAt,
@@ -265,18 +283,18 @@ public class AttributionCancellationAccumulator {
                 );
             }
 
-            String part = text.substring(decision.start(), decision.end());
+            String part = text.substring(decision.getStart(), decision.getEnd());
 
             appendCancelledInsertWithFormatDecisions(
                     part,
-                    decision.start(),
+                    decision.getStart(),
                     safeAttrs,
                     cancelledFormatAt,
                     cancelled,
                     pending
             );
 
-            cursor = decision.end();
+            cursor = decision.getEnd();
         }
 
         if (cursor < text.length()) {
@@ -415,17 +433,17 @@ public class AttributionCancellationAccumulator {
         List<SliceDecision> decisions = buildSliceDecisions(len, cancelledRanges);
 
         for (SliceDecision decision : decisions) {
-            if (decision.start() > cursor) {
-                int pendingLen = decision.start() - cursor;
+            if (decision.getStart() > cursor) {
+                int pendingLen = decision.getStart() - cursor;
                 cancelled.retain(pendingLen, null);
                 pending.delete(pendingLen);
             }
 
-            int partLen = decision.end() - decision.start();
+            int partLen = decision.getEnd() - decision.getStart();
 
             cancelled.delete(partLen);
 
-            cursor = decision.end();
+            cursor = decision.getEnd();
         }
 
         if (cursor < len) {
@@ -479,7 +497,7 @@ public class AttributionCancellationAccumulator {
             String attrKey = entry.getKey();
 
             for (CharRange range : clampRanges(entry.getValue(), len)) {
-                for (int i = range.start(); i < range.start() + range.length(); i++) {
+                for (int i = range.getStart(); i < range.getStart() + range.getLength(); i++) {
                     out.computeIfAbsent(i, k -> new LinkedHashSet<>()).add(attrKey);
                 }
             }
@@ -507,10 +525,10 @@ public class AttributionCancellationAccumulator {
         List<SliceDecision> raw = new ArrayList<>();
 
         for (CharRange range : cancelledRanges) {
-            raw.add(new SliceDecision(range.start(), range.start() + range.length()));
+            raw.add(new SliceDecision(range.getStart(), range.getStart() + range.getLength()));
         }
 
-        raw.sort(Comparator.comparingInt(SliceDecision::start));
+        raw.sort(Comparator.comparingInt(SliceDecision::getStart));
 
         return getSliceDecisions(componentLength, raw);
     }
@@ -519,14 +537,14 @@ public class AttributionCancellationAccumulator {
         List<SliceDecision> out = new ArrayList<>();
 
         for (SliceDecision next : raw) {
-            int start = Math.max(0, Math.min(next.start(), componentLength));
-            int end = Math.max(start, Math.min(next.end(), componentLength));
+            int start = Math.max(0, Math.min(next.getStart(), componentLength));
+            int end = Math.max(start, Math.min(next.getEnd(), componentLength));
 
             if (start >= end) continue;
 
             if (!out.isEmpty()) {
                 SliceDecision last = out.get(out.size() - 1);
-                if (start < last.end()) {
+                if (start < last.getEnd()) {
                     throw new IllegalStateException("cancelled review references overlap for the same component.");
                 }
             }
@@ -544,8 +562,8 @@ public class AttributionCancellationAccumulator {
         );
 
         cancelledFormatRanges.forEach((key, ranges) ->
-                grouped.computeIfAbsent(key.opId(), k -> new OpCancellationDecision())
-                        .cancelledFormatRanges.put(key.componentIndex(), mergeFormatRanges(ranges))
+                grouped.computeIfAbsent(key.getOpId(), k -> new OpCancellationDecision())
+                        .cancelledFormatRanges.put(key.getComponentIndex(), mergeFormatRanges(ranges))
         );
 
         return grouped;
@@ -561,35 +579,35 @@ public class AttributionCancellationAccumulator {
             return;
         }
 
-        TextOperation textOp = findOp(logOps, key.opId());
+        TextOperation textOp = findOp(logOps, key.getOpId());
 
         if (
                 textOp == null
                         || textOp.getDelta() == null
                         || textOp.getDelta().ops == null
-                        || key.componentIndex() < 0
-                        || key.componentIndex() >= textOp.getDelta().ops.size()
+                        || key.getComponentIndex() < 0
+                        || key.getComponentIndex() >= textOp.getDelta().ops.size()
         ) {
             return;
         }
 
-        Op op = textOp.getDelta().ops.get(key.componentIndex());
+        Op op = textOp.getDelta().ops.get(key.getComponentIndex());
         List<CharRange> mergedRanges = mergeRanges(ranges);
 
         if (mergedRanges.isEmpty()) {
             return;
         }
 
-        OpCancellationDecision decision = grouped.computeIfAbsent(key.opId(), k -> new OpCancellationDecision());
+        OpCancellationDecision decision = grouped.computeIfAbsent(key.getOpId(), k -> new OpCancellationDecision());
 
         if (op.isInsert()) {
-            decision.cancelledInsertRanges.put(key.componentIndex(), mergedRanges);
+            decision.cancelledInsertRanges.put(key.getComponentIndex(), mergedRanges);
 
             return;
         }
 
         if (op.isDelete()) {
-            decision.cancelledDeleteRanges.put(key.componentIndex(), mergedRanges);
+            decision.cancelledDeleteRanges.put(key.getComponentIndex(), mergedRanges);
         }
     }
 
@@ -609,8 +627,8 @@ public class AttributionCancellationAccumulator {
         List<CharRange> clamped = new ArrayList<>();
 
         for (CharRange range : ranges) {
-            int start = Math.max(0, Math.min(range.start(), maxLength));
-            int end = Math.max(start, Math.min(range.start() + range.length(), maxLength));
+            int start = Math.max(0, Math.min(range.getStart(), maxLength));
+            int end = Math.max(start, Math.min(range.getStart() + range.getLength(), maxLength));
 
             if (start < end) {
                 clamped.add(new CharRange(start, end - start));
@@ -624,7 +642,7 @@ public class AttributionCancellationAccumulator {
         if (ranges == null || ranges.isEmpty()) return Collections.emptyList();
 
         List<CharRange> sorted = new ArrayList<>(ranges);
-        sorted.sort(Comparator.comparingInt(CharRange::start));
+        sorted.sort(Comparator.comparingInt(CharRange::getStart));
 
         List<CharRange> merged = new ArrayList<>();
 
@@ -635,11 +653,11 @@ public class AttributionCancellationAccumulator {
             }
 
             CharRange last = merged.get(merged.size() - 1);
-            int lastEnd = last.start() + last.length();
+            int lastEnd = last.getStart() + last.getLength();
 
-            if (range.start() <= lastEnd) {
-                int newEnd = Math.max(lastEnd, range.start() + range.length());
-                merged.set(merged.size() - 1, new CharRange(last.start(), newEnd - last.start()));
+            if (range.getStart() <= lastEnd) {
+                int newEnd = Math.max(lastEnd, range.getStart() + range.getLength());
+                merged.set(merged.size() - 1, new CharRange(last.getStart(), newEnd - last.getStart()));
             } else {
                 merged.add(range);
             }
@@ -665,7 +683,13 @@ public class AttributionCancellationAccumulator {
                 .orElse(null);
     }
 
-    private record SliceDecision(int start, int end) {}
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class SliceDecision {
+        private int start;
+        private int end;
+    }
 
     private static class OpCancellationDecision {
         Map<Integer, List<CharRange>> cancelledInsertRanges = new HashMap<>();
@@ -673,5 +697,11 @@ public class AttributionCancellationAccumulator {
         Map<Integer, Map<String, List<CharRange>>> cancelledFormatRanges = new HashMap<>();
     }
 
-    private record SplitResult(Delta cancelled, Delta pending) {}
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private static class SplitResult {
+        private Delta cancelled;
+        private Delta pending;
+    }
 }

@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static com.crowninteractive.notes.utils.AttributionHelpers.*;
 
@@ -47,7 +48,8 @@ public class AttributionServiceImpl implements AttributionService {
                     ? new LinkedHashMap<>(op.getAttributes())
                     : new LinkedHashMap<>();
 
-            if (op.getInsert() instanceof String insertStr) {
+            if (op.getInsert() instanceof String) {
+                String insertStr = (String) op.getInsert();
                 Map<String, Object> inlineAttrs = onlyInlineAttrs(opAttrs);
                 Map<String, Object> blockAttrs = onlyBlockAttrs(opAttrs);
 
@@ -82,7 +84,8 @@ public class AttributionServiceImpl implements AttributionService {
                         seedPos += 1;
                     }
                 }
-            }  else if (op.getInsert() instanceof Map<?, ?> embed) {
+            }  else if (op.getInsert() instanceof Map<?, ?>) {
+                Map<?, ?> embed = (Map<?, ?>) op.getInsert();
                 runs.add(
                         Segment.builder()
                                 .id(reviewRunIdForBase(seedPos))
@@ -154,8 +157,8 @@ public class AttributionServiceImpl implements AttributionService {
 
                     if (!blockIncomingAttrs.isEmpty()) {
                         RunPosition blockStartPos = findRunPos(runs, localLogPos);
-                        int blockRunIdx = blockStartPos.idx();
-                        int blockOffset = blockStartPos.offset();
+                        int blockRunIdx = blockStartPos.getIdx();
+                        int blockOffset = blockStartPos.getOffset();
 
                         if (blockOffset > 0 && blockRunIdx < runs.size()) {
                             blockRunIdx = splitAt(runs, blockRunIdx, blockOffset);
@@ -206,8 +209,8 @@ public class AttributionServiceImpl implements AttributionService {
 
                     else if (!inlineIncomingAttrs.isEmpty()) {
                         RunPosition startPos = findRunPos(runs, localLogPos);
-                        int runIdx = startPos.idx();
-                        int startOffset = startPos.offset();
+                        int runIdx = startPos.getIdx();
+                        int startOffset = startPos.getOffset();
 
                         if (startOffset > 0 && runIdx < runs.size()) {
                             runIdx = splitAt(runs, runIdx, startOffset);
@@ -245,7 +248,7 @@ public class AttributionServiceImpl implements AttributionService {
                                 List<FormatChangeItem> coveringFormats = formatChanges.stream()
                                         .filter(f -> attrKey.equals(f.getAttributeKey()))
                                         .filter(f -> formatChangeCoversRange(f, spanStart, spanLen))
-                                        .toList();
+                                        .collect(Collectors.toList());
 
                                 for (FormatChangeItem fmt : new ArrayList<>(coveringFormats)) {
                                     FormatKeyChangeType type = getFormatKeyChangeType(fmt, attrValue, baseValue);
@@ -362,15 +365,15 @@ public class AttributionServiceImpl implements AttributionService {
                     InsertContentKind insertKind = kindOfFragment(fragments.get(0));
 
                     int shiftLen = fragments.stream()
-                            .mapToInt(InsertFragment::length)
+                            .mapToInt(InsertFragment::getLength)
                             .sum();
 
                     RunPosition insertPos = findRunPos(runs, localLogPos);
-                    int runIndex = insertPos.idx();
-                    int insertAbsPos = insertPos.absPos();
+                    int runIndex = insertPos.getIdx();
+                    int insertAbsPos = insertPos.getAbsPos();
 
                     int insertAtIdx = runIndex;
-                    int insertOffset = insertPos.offset();
+                    int insertOffset = insertPos.getOffset();
 
                     if (insertOffset > 0 && runIndex < runs.size()) {
                         insertAtIdx = splitAt(runs, runIndex, insertOffset);
@@ -495,7 +498,7 @@ public class AttributionServiceImpl implements AttributionService {
                                     Object inheritedValue = inheritedEntry.getValue();
 
                                     Map<String, Object> singleInherited =
-                                            new LinkedHashMap<>(Map.of(inheritedKey, inheritedValue));
+                                            new LinkedHashMap<>(Collections.singletonMap(inheritedKey, inheritedValue));
 
                                     FormatChangeItem g = findOrCreateFormatChangeByIdentity(
                                             formatChanges,
@@ -507,7 +510,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                                     List<Reference> prevRefs = collectReferencesForRunIndices(
                                             runs,
-                                            prevGroup.indices()
+                                            prevGroup.getIndices()
                                     );
 
                                     for (Reference ref : prevRefs) {
@@ -539,7 +542,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                                     moveAttrsFromBaseToChangeForRuns(
                                             runs,
-                                            prevGroup.indices(),
+                                            prevGroup.getIndices(),
                                             singleInherited
                                     );
 
@@ -572,7 +575,7 @@ public class AttributionServiceImpl implements AttributionService {
                                     Object inheritedValue = inheritedEntry.getValue();
 
                                     Map<String, Object> singleInherited =
-                                            new LinkedHashMap<>(Map.of(inheritedKey, inheritedValue));
+                                            new LinkedHashMap<>(Collections.singletonMap(inheritedKey, inheritedValue));
 
                                     FormatChangeItem g = findOrCreateFormatChangeByIdentity(
                                             formatChanges,
@@ -584,7 +587,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                                     List<Reference> nextRefs = collectReferencesForRunIndices(
                                             runs,
-                                            nextGroup.indices()
+                                            nextGroup.getIndices()
                                     );
 
                                     for (Reference ref : nextRefs) {
@@ -616,7 +619,7 @@ public class AttributionServiceImpl implements AttributionService {
 
                                     moveAttrsFromBaseToChangeForRuns(
                                             runs,
-                                            nextGroup.indices(),
+                                            nextGroup.getIndices(),
                                             singleInherited
                                     );
 
@@ -656,41 +659,41 @@ public class AttributionServiceImpl implements AttributionService {
                         List<Reference> runRefs = addReference(
                                 new ArrayList<>(),
                                 runPos,
-                                fragment.componentStart(),
-                                fragment.length(),
+                                fragment.getComponentStart(),
+                                fragment.getLength(),
                                 opId,
                                 compIdx
                         );
 
-                        Map<String, Object> fragmentBaseAttributes = fragment.newline()
+                        Map<String, Object> fragmentBaseAttributes = fragment.isNewline()
                                 ? new LinkedHashMap<>()
                                 : new LinkedHashMap<>(onlyInlineAttrs(ownAttrs));
 
-                        Map<String, Object> fragmentChangeAttributes = fragment.newline()
+                        Map<String, Object> fragmentChangeAttributes = fragment.isNewline()
                                 ? new LinkedHashMap<>(onlyBlockAttrs(component.getAttributes()))
                                 : new LinkedHashMap<>(inheritedChangeAttrs);
 
                         Segment.SegmentBuilder builder = Segment.builder()
-                                .id(reviewRunIdForReference(opId, compIdx, fragment.componentStart(), runPos))
+                                .id(reviewRunIdForReference(opId, compIdx, fragment.getComponentStart(), runPos))
                                 .baseAttributes(fragmentBaseAttributes)
                                 .changeAttributes(fragmentChangeAttributes)
                                 .references(runRefs)
                                 .logicalStart(runPos)
                                 .insertChange(copyInsertChange(currentInsertGroup));
 
-                        if (fragment.newline()) {
+                        if (fragment.isNewline()) {
                             builder.text("\n");
                         } else if (fragment.isEmbed()) {
-                            builder.embed(fragment.embed());
+                            builder.embed(fragment.getEmbed());
                         } else {
-                            builder.text(fragment.text());
+                            builder.text(fragment.getText());
                         }
 
                         Segment newRun = builder.build();
 
                         runs.add(spliceAt++, newRun);
 
-                        if (fragment.newline()) {
+                        if (fragment.isNewline()) {
                             Map<String, Object> insertedBlockAttrs = onlyBlockAttrs(component.getAttributes());
 
                             for (Map.Entry<String, Object> entry : insertedBlockAttrs.entrySet()) {
@@ -705,13 +708,13 @@ public class AttributionServiceImpl implements AttributionService {
                                         createdAt,
                                         opId,
                                         compIdx,
-                                        fragment.componentStart(),
+                                        fragment.getComponentStart(),
                                         currentBlockGroups
                                 );
                             }
                         }
 
-                        runPos += fragment.length();
+                        runPos += fragment.getLength();
                     }
 
                     for (int i = spliceAt; i < runs.size(); i++) {
@@ -727,8 +730,8 @@ public class AttributionServiceImpl implements AttributionService {
                     currentFormatGroup = null;
 
                     RunPosition deletePos = findRunPos(runs, localLogPos);
-                    int ri = deletePos.idx();
-                    int deleteOffset = deletePos.offset();
+                    int ri = deletePos.getIdx();
+                    int deleteOffset = deletePos.getOffset();
                     int cursor = ri;
 
                     if (deleteOffset > 0 && ri < runs.size()) {

@@ -10,6 +10,7 @@ import com.crowninteractive.notes.notifier.OperationRelayer;
 import com.crowninteractive.notes.dto.enqueue.OperationQueueInPayload;
 import com.crowninteractive.notes.services.OperationQueueService;
 import com.crowninteractive.notes.services.RedisService;
+import com.crowninteractive.notes.utils.Helpers;
 import com.crowninteractive.notes.utils.QuillDeltaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,9 +38,9 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         String noteId = message.getNoteId();
 
         NoteDto redisNote = redisService.getNote(noteId);
-        boolean isOwner = redisNote.ownerEmail().equals(message.getFrom());
+        boolean isOwner = redisNote.getOwnerEmail().equals(message.getFrom());
 
-        if (redisNote.isReviewing() && !isOwner) {
+        if (redisNote.getIsReviewing() && !isOwner) {
             throw new BadRequestException("Note is currently under review by the owner.");
         }
 
@@ -94,7 +95,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
 
         String opId = message.getOpId();
 
-        if (opId == null || opId.isBlank()) {
+        if (opId == null || Helpers.isBlank(opId)) {
             throw new IllegalArgumentException("Operation opId is required");
         }
 
@@ -114,9 +115,9 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         }
 
         Delta currentMasterDelta =
-                QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+                QuillDeltaUtils.ensureTerminalNewline(noteVersion.getMasterDelta());
 
-        int serverRevision = noteVersion.revision();
+        int serverRevision = noteVersion.getRevision();
         int clientRevision = message.getRevision();
 
         if (clientRevision > serverRevision) {
@@ -137,7 +138,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
             for (int i = clientRevision; i < serverRevision; i++) {
                 int logIndex = i - redisService.getInitialRevision(noteId);
 
-                if (logIndex < 0 || logIndex >= note.revisionLog().size()) {
+                if (logIndex < 0 || logIndex >= note.getRevisionLog().size()) {
                     log.error(
                             "Cannot transform operation because revision log is incomplete. noteId={} opId={} from={} clientRevision={} serverRevision={} requiredRevision={} logIndex={} logSize={} initialRevision={}",
                             noteId,
@@ -147,7 +148,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                             serverRevision,
                             i,
                             logIndex,
-                            note.revisionLog().size(),
+                            note.getRevisionLog().size(),
                             redisService.getInitialRevision(noteId)
                     );
 
@@ -160,7 +161,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                     );
                 }
 
-                TextOperation historyOp = note.revisionLog().get(logIndex);
+                TextOperation historyOp = note.getRevisionLog().get(logIndex);
 
                 boolean serverHasOpPriority = serverHasPriority(message, historyOp);
 
@@ -177,7 +178,7 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 LocalDateTime.now()
         );
 
-        note.revisionLog().add(newTextOperation);
+        note.getRevisionLog().add(newTextOperation);
 
         redisService.appendPendingHistoryOperation(noteId, newTextOperation);
 
@@ -187,17 +188,17 @@ public class OperationQueueServiceImpl implements OperationQueueService {
         );
 
         NoteDto newRedisNote = new NoteDto(
-                note.id(),
-                note.noteId(),
-                note.ownerEmail(),
-                note.title(),
-                note.revisionLog(),
-                note.visibility(),
-                note.accessRole(),
-                note.currentNoteVersionNumber(),
-                note.isReviewing(),
-                note.createdAt(),
-                note.updatedAt()
+                note.getId(),
+                note.getNoteId(),
+                note.getOwnerEmail(),
+                note.getTitle(),
+                note.getRevisionLog(),
+                note.getVisibility(),
+                note.getAccessRole(),
+                note.getCurrentNoteVersionNumber(),
+                note.getIsReviewing(),
+                note.getCreatedAt(),
+                note.getUpdatedAt()
         );
 
         Delta newMasterDelta =
@@ -206,13 +207,13 @@ public class OperationQueueServiceImpl implements OperationQueueService {
                 );
 
         NoteVersionDto newRedisNoteVersion = new NoteVersionDto(
-                noteVersion.id(),
-                noteVersion.noteVersionId(),
+                noteVersion.getId(),
+                noteVersion.getNoteVersionId(),
                 newMasterDelta,
                 serverRevision + 1,
-                noteVersion.comment(),
-                noteVersion.versionNumber(),
-                noteVersion.createdAt()
+                noteVersion.getComment(),
+                noteVersion.getVersionNumber(),
+                noteVersion.getCreatedAt()
         );
 
         redisService.updateNote(newRedisNote, newRedisNoteVersion);

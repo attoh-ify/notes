@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 public class DeltaIterator {
-    private List<Op> ops;
+    private final List<Op> ops;
     private int index;
     private int offset;
 

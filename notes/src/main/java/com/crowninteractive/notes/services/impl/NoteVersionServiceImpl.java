@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class NoteVersionServiceImpl implements NoteVersionService {
@@ -55,7 +56,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
     @Override
     public List<NoteVersionDto> fetchAllVersions(String actorEmail, String noteId) {
         notePolicyService.validateSuper(actorEmail, noteId);
-        return noteVersionRepository.findByNote_NoteIdOrderByVersionNumberAsc(noteId).stream().map(noteVersionMapper::toDto).toList();
+        return noteVersionRepository.findByNote_NoteIdOrderByVersionNumberAsc(noteId).stream().map(noteVersionMapper::toDto).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -90,7 +91,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
         List<TextOperation> committedOps = note.getRevisionLog().stream()
                 .filter(op -> op.getState().equals(OpState.COMMITTED))
                 .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                .toList();
+                .collect(Collectors.toList());
 
         for (TextOperation textOp : committedOps) {
             newMasterDelta = newMasterDelta.compose(
@@ -114,7 +115,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 note,
                 newMasterDelta,
                 newRevision,
-                payload.comment(),
+                payload.getComment(),
                 nextVersionNumber
         );
 
@@ -181,7 +182,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                     .filter(op -> !op.getState().equals(OpState.DEAD))
                     .filter(op -> op.getRevision() <= targetRevision)
                     .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                    .toList();
+                    .collect(Collectors.toList());
 
             return attributionService.buildReviewProjection(
                     actorEmail,
@@ -190,7 +191,7 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                     changeTextOps,
                     new ArrayList<>(),
                     AttributionViewMode.AUDIT
-            ).projection();
+            ).getProjection();
         }
 
         int baseVersionNumber = targetVersion.getVersionNumber() - 1;
@@ -208,14 +209,14 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 .filter(op -> !op.getState().equals(OpState.DEAD))
                 .filter(op -> op.getRevision() <= baseRevision)
                 .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                .toList();
+                .collect(Collectors.toList());
 
         List<TextOperation> changeTextOps = note.getRevisionLog().stream()
                 .filter(op -> !op.getState().equals(OpState.DEAD))
                 .filter(op -> op.getRevision() > baseRevision)
                 .filter(op -> op.getRevision() <= targetRevision)
                 .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                .toList();
+                .collect(Collectors.toList());
 
         return attributionService.buildReviewProjection(
                 actorEmail,
@@ -224,6 +225,6 @@ public class NoteVersionServiceImpl implements NoteVersionService {
                 changeTextOps,
                 new ArrayList<>(),
                 AttributionViewMode.AUDIT
-        ).projection();
+        ).getProjection();
     }
 }

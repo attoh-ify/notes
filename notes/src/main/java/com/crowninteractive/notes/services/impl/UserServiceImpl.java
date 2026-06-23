@@ -47,19 +47,19 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserDto registerUser(UserDto user) {
-        log.info("Registering user email={}", user.email());
+        log.info("Registering user email={}", user.getEmail());
 
         validateUser(user);
         User saved = userRepository.save(
                 new User(
                         null,
                         UUID.randomUUID().toString(),
-                        user.email(),
-                        encoder.encode(user.password()),
+                        user.getEmail(),
+                        encoder.encode(user.getPassword()),
                         null
                 )
         );
-        emailService.sendRegisterEmail(user.email());
+        emailService.sendRegisterEmail(user.getEmail());
 
         log.info("User registered successfully userId={} email={}",
                 saved.getId(), saved.getEmail());
@@ -77,38 +77,38 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public LoginResponseDto loginUser(LoginDto user) {
-        log.info("Login attempt email={}", user.email());
+        log.info("Login attempt email={}", user.getEmail());
 
         Authentication authentication =
                 authenticationManager.authenticate(
                         new UsernamePasswordAuthenticationToken(
-                                user.email(), user.password()
+                                user.getEmail(), user.getPassword()
                         )
                 );
 
         if (authentication.isAuthenticated()) {
-            log.info("Authentication successful email={}", user.email());
+            log.info("Authentication successful email={}", user.getEmail());
             UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
-            String token = jwtService.generateToken(user.email(), principal.getUserId());
+            String token = jwtService.generateToken(user.getEmail(), principal.getUserId());
             return new LoginResponseDto(token, principal.getUserId());
         }
 
-        log.warn("Authentication failed email={}", user.email());
+        log.warn("Authentication failed email={}", user.getEmail());
         throw new BadRequestException("Invalid username or password.");
     }
 
     private void validateUser(UserDto user) {
-        log.debug("Validating user registration email={}", user.email());
+        log.debug("Validating user registration email={}", user.getEmail());
 
-        if (user.id() != null)
+        if (user.getId() != null)
             throw new BadRequestException("User ID is system generated");
-        if (Helpers.isBlank(user.email()))
+        if (Helpers.isBlank(user.getEmail()))
             throw new BadRequestException("Email required");
-        if (Helpers.isBlank(user.password()))
+        if (Helpers.isBlank(user.getPassword()))
             throw new BadRequestException("Password required");
 
-        userRepository.findByEmail(user.email()).ifPresent(existing -> {
-            log.warn("Duplicate user registration email={}", user.email());
+        userRepository.findByEmail(user.getEmail()).ifPresent(existing -> {
+            log.warn("Duplicate user registration email={}", user.getEmail());
             throw new BadRequestException(
                     "This email is already registered to a User."
             );

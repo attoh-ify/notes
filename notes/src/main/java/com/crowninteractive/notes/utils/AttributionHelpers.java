@@ -2,6 +2,9 @@ package com.crowninteractive.notes.utils;
 
 import com.crowninteractive.notes.dto.attribution.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
@@ -159,7 +162,7 @@ public class AttributionHelpers {
                 .text(r.getText().substring(0, offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .changeAttributes(new LinkedHashMap<>(r.getChangeAttributes() != null ? r.getChangeAttributes() : Collections.emptyMap()))
-                .references(split.left())
+                .references(split.getLeft())
                 .logicalStart(r.getLogicalStart())
                 .insertChange(copyInsertChange(r.getInsertChange()))
                 .deleteChange(copyDeleteChange(r.getDeleteChange()))
@@ -170,7 +173,7 @@ public class AttributionHelpers {
                 .text(r.getText().substring(offset))
                 .baseAttributes(new LinkedHashMap<>(r.getBaseAttributes() != null ? r.getBaseAttributes() : Collections.emptyMap()))
                 .changeAttributes(new LinkedHashMap<>(r.getChangeAttributes() != null ? r.getChangeAttributes() : Collections.emptyMap()))
-                .references(split.right())
+                .references(split.getRight())
                 .logicalStart(splitAbsPos)
                 .insertChange(copyInsertChange(r.getInsertChange()))
                 .deleteChange(copyDeleteChange(r.getDeleteChange()))
@@ -192,8 +195,8 @@ public class AttributionHelpers {
             int retainLength
     ) {
         RunPosition pos = findRunPos(runs, logicalStart);
-        int runIdx = pos.idx();
-        int offset = pos.offset();
+        int runIdx = pos.getIdx();
+        int offset = pos.getOffset();
         int remaining = retainLength;
         boolean sawOverlap = false;
 
@@ -228,7 +231,7 @@ public class AttributionHelpers {
 
         List<ReviewRange> sorted = ranges.stream()
                 .sorted(Comparator.comparingInt(ReviewRange::getStart))
-                .toList();
+                .collect(Collectors.toList());
 
         List<ReviewRange> merged = new ArrayList<>();
 
@@ -678,7 +681,7 @@ public class AttributionHelpers {
                 .filter(f -> attrKey.equals(f.getAttributeKey()))
                 .filter(f -> Objects.equals(attrValue, f.getAttributeValue()))
                 .filter(f -> formatChangeTouchesOrOverlapsRange(f, rangeStart, rangeEnd))
-                .toList();
+                .collect(Collectors.toList());
 
         if (matches.isEmpty()) {
             FormatChangeItem created = FormatChangeItem.builder()
@@ -1052,7 +1055,8 @@ public class AttributionHelpers {
     }
 
     public static Map<String, Object> cloneEmbed(Object embed) {
-        if (embed instanceof Map<?, ?> map) {
+        if (embed instanceof Map<?, ?>) {
+            Map<?, ?> map = (Map<?, ?>) embed;
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 out.put(String.valueOf(entry.getKey()), entry.getValue());
@@ -1061,13 +1065,6 @@ public class AttributionHelpers {
         }
 
         return new LinkedHashMap<>();
-    }
-
-    public static String runTextForLog(Segment run) {
-        if (run == null) return "null";
-        if (run.isEmbed()) return "[embed]";
-        if (run.getText() == null) return "[empty-run]";
-        return run.getText().replace("\n", "\\n");
     }
 
     public static String reviewRunIdForBase(int logicalStart) {
@@ -1117,7 +1114,7 @@ public class AttributionHelpers {
 
             String dependencyId = logicalLineDependencyId(run);
 
-            if (dependencyId == null || dependencyId.isBlank()) {
+            if (dependencyId == null || Helpers.isBlank(dependencyId)) {
                 continue;
             }
 
@@ -1140,7 +1137,7 @@ public class AttributionHelpers {
             return "delete:" + run.getDeleteChange().getGroupId();
         }
 
-        if (run.getId() != null && !run.getId().isBlank()) {
+        if (run.getId() != null && !Helpers.isBlank(run.getId())) {
             return "run:" + run.getId();
         }
 
@@ -1150,7 +1147,8 @@ public class AttributionHelpers {
     public static List<InsertFragment> buildInsertFragments(Object insertValue) {
         List<InsertFragment> fragments = new ArrayList<>();
 
-        if (insertValue instanceof String text) {
+        if (insertValue instanceof String) {
+            String text = (String) insertValue;
             int componentCursor = 0;
             String[] parts = text.split("\n", -1);
 
@@ -1187,7 +1185,8 @@ public class AttributionHelpers {
             return fragments;
         }
 
-        if (insertValue instanceof Map<?, ?> embed) {
+        if (insertValue instanceof Map<?, ?>) {
+            Map<?, ?> embed = (Map<?, ?>) insertValue;
             fragments.add(
                     new InsertFragment(
                             null,
@@ -1202,21 +1201,30 @@ public class AttributionHelpers {
         return fragments;
     }
 
-    public record InsertFragment(
-            String text,
-            Object embed,
-            int length,
-            int componentStart,
-            boolean newline
-    ) {
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class InsertFragment {
+            private String text;
+            private Object embed;
+            private int length;
+            private int componentStart;
+            private boolean newline;
+
         public boolean isEmbed() {
             return embed != null;
         }
     }
 
-    public record BlockGroupKey(String attributeKey, Object attributeValue) {}
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class BlockGroupKey {
+        private String attributeKey;
+        private Object attributeValue;
+    }
 
-    private static final Set<String> BLOCK_ATTR_KEYS = Set.of(
+    private static final Set<String> BLOCK_ATTR_KEYS = new HashSet<>(Arrays.asList(
             "header",
             "list",
             "indent",
@@ -1224,7 +1232,7 @@ public class AttributionHelpers {
             "blockquote",
             "code-block",
             "direction"
-    );
+    ));
 
     private static boolean isBlockAttribute(String key) {
         return key != null && BLOCK_ATTR_KEYS.contains(key);
@@ -1434,7 +1442,7 @@ public class AttributionHelpers {
             BlockFormatChangeItem item,
             String insertGroupId
     ) {
-        if (item == null || insertGroupId == null || insertGroupId.isBlank()) return;
+        if (item == null || insertGroupId == null || Helpers.isBlank(insertGroupId)) return;
 
         if (!item.getDependsOnInsertGroupIds().contains(insertGroupId)) {
             item.getDependsOnInsertGroupIds().add(insertGroupId);
@@ -1479,7 +1487,7 @@ public class AttributionHelpers {
         List<BlockFormatChangeItem> overlappingBlockChanges =
                 blockFormatChanges.stream()
                         .filter(f -> blockChangeOverlapsRange(f, spanStart, spanEnd))
-                        .toList();
+                        .collect(Collectors.toList());
 
         for (BlockFormatChangeItem existing : new ArrayList<>(overlappingBlockChanges)) {
             if (!shouldCancelBlockChange(existing, attrKey, attrValue)) {
@@ -1538,7 +1546,7 @@ public class AttributionHelpers {
         target.setChangeAttributes(
                 overlayAttrsPreserveNull(
                         target.getChangeAttributes(),
-                        Map.of(attrKey, attrValue)
+                        Collections.singletonMap(attrKey, attrValue)
                 )
         );
 
@@ -1687,7 +1695,7 @@ public class AttributionHelpers {
         }
 
         String out = line.toString().trim();
-        return out.isBlank() ? "[empty line]" : out;
+        return Helpers.isBlank(out) ? "[empty line]" : out;
     }
 
     public static Segment effectivePreviousRunForInsertGrouping(
@@ -1939,7 +1947,7 @@ public class AttributionHelpers {
         for (Map.Entry<BlockGroupKey, List<BlockReferenceOwner>> entry : continuingRefs.entrySet()) {
             List<BlockReferenceOwner> refs = entry.getValue();
 
-            refs.sort(Comparator.comparingInt(o -> o.reference().getReviewStart()));
+            refs.sort(Comparator.comparingInt(o -> o.getReference().getReviewStart()));
 
             List<List<BlockReferenceOwner>> chains = new ArrayList<>();
             List<BlockReferenceOwner> currentChain = new ArrayList<>();
@@ -1955,8 +1963,8 @@ public class AttributionHelpers {
 
                 boolean connected = areContinuingBlockTargetsConnected(
                         runs,
-                        previous.reference().getReviewStart(),
-                        owner.reference().getReviewStart()
+                        previous.getReference().getReviewStart(),
+                        owner.getReference().getReviewStart()
                 );
 
                 if (connected) {
@@ -1976,7 +1984,7 @@ public class AttributionHelpers {
                 List<BlockReferenceOwner> chain = chains.get(i);
                 if (chain.isEmpty()) continue;
 
-                BlockFormatChangeItem source = chain.get(0).owner();
+                BlockFormatChangeItem source = chain.get(0).getOwner();
 
                 BlockFormatChangeItem normalized =
                         i == 0
@@ -2003,11 +2011,11 @@ public class AttributionHelpers {
                     normalized.setReferences(
                             appendAndCoalesceReference(
                                     normalized.getReferences(),
-                                    owner.reference()
+                                    owner.getReference()
                             )
                     );
 
-                    BlockFormatChangeItem original = owner.owner();
+                    BlockFormatChangeItem original = owner.getOwner();
 
                     if (original.getCreatedAt() != null
                             && normalized.getCreatedAt() != null
@@ -2028,10 +2036,28 @@ public class AttributionHelpers {
     // ─────────────────────────────────────────────────────────────────────────
     // Records
     // ─────────────────────────────────────────────────────────────────────────
-    public record InsertGroupCollection(List<Integer> indices, int start, int end) {}
-    public record ReferenceSplit(List<Reference> left, List<Reference> right) {}
-    private record BlockReferenceOwner(
-            BlockFormatChangeItem owner,
-            Reference reference
-    ) {}
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class InsertGroupCollection {
+        private List<Integer> indices;
+        private int start;
+        private int end;
+    }
+
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public class ReferenceSplit {
+        private List<Reference> left;
+        private List<Reference> right;
+    }
+
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    private class BlockReferenceOwner {
+        private BlockFormatChangeItem owner;
+        private Reference reference;
+    }
 }

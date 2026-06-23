@@ -4,11 +4,9 @@ import com.crowninteractive.notes.entities.noteAccess.NoteAccess;
 import com.crowninteractive.notes.entities.noteVersion.NoteVersion;
 import com.crowninteractive.notes.entities.user.User;
 import com.crowninteractive.notes.dto.ot.TextOperation;
-import jakarta.persistence.*;
+import javax.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -34,8 +32,8 @@ public class Note {
     @Column(name = "title", nullable = false)
     private String title;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "revision_log", nullable = false)
+    @Lob
+    @Column(name = "revision_log", nullable = false, columnDefinition = "TEXT")
     private List<TextOperation> revisionLog = new ArrayList<>();
 
     @Enumerated(EnumType.STRING)

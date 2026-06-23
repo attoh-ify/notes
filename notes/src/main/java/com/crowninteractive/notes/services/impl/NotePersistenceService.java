@@ -8,6 +8,7 @@ import com.crowninteractive.notes.entities.noteVersion.NoteVersion;
 import com.crowninteractive.notes.repositories.NoteRepository;
 import com.crowninteractive.notes.repositories.NoteVersionRepository;
 import com.crowninteractive.notes.services.RedisService;
+import com.crowninteractive.notes.utils.Helpers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -54,15 +55,15 @@ public class NotePersistenceService {
             return;
         }
 
-        if (storedNoteVersion.revision() >= noteVersion.getRevision()) {
-            noteVersion.setMasterDelta(storedNoteVersion.masterDelta());
-            noteVersion.setRevision(storedNoteVersion.revision());
+        if (storedNoteVersion.getRevision() >= noteVersion.getRevision()) {
+            noteVersion.setMasterDelta(storedNoteVersion.getMasterDelta());
+            noteVersion.setRevision(storedNoteVersion.getRevision());
             noteVersionRepository.save(noteVersion);
         } else {
             log.warn(
                     "Skipping noteVersion update because Redis revision is older than DB revision. noteId={} redisRevision={} dbRevision={}",
                     noteId,
-                    storedNoteVersion.revision(),
+                    storedNoteVersion.getRevision(),
                     noteVersion.getRevision()
             );
         }
@@ -78,7 +79,7 @@ public class NotePersistenceService {
             log.info(
                     "Persisted Redis note snapshot. No pending history ops. noteId={} redisRevision={}",
                     noteId,
-                    storedNoteVersion.revision()
+                    storedNoteVersion.getRevision()
             );
             return;
         }
@@ -87,7 +88,7 @@ public class NotePersistenceService {
 
         for (TextOperation existing : note.getRevisionLog()) {
             if (existing == null) continue;
-            if (existing.getOpId() == null || existing.getOpId().isBlank()) continue;
+            if (existing.getOpId() == null || Helpers.isBlank(existing.getOpId())) continue;
 
             existingOpIds.add(existing.getOpId());
         }
@@ -97,7 +98,7 @@ public class NotePersistenceService {
 
         for (TextOperation pendingOp : pendingHistory) {
             if (pendingOp == null) continue;
-            if (pendingOp.getOpId() == null || pendingOp.getOpId().isBlank()) continue;
+            if (pendingOp.getOpId() == null || Helpers.isBlank(pendingOp.getOpId())) continue;
 
             if (existingOpIds.add(pendingOp.getOpId())) {
                 note.getRevisionLog().add(pendingOp);
@@ -124,7 +125,7 @@ public class NotePersistenceService {
         log.info(
                 "Persisted Redis note to DB. noteId={} redisRevision={} pendingOps={} appendedOps={} highestSavedRevision={}",
                 noteId,
-                storedNoteVersion.revision(),
+                storedNoteVersion.getRevision(),
                 pendingHistory.size(),
                 appended,
                 highestSavedRevision

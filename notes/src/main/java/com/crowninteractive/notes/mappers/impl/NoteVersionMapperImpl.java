@@ -10,13 +10,13 @@ public class NoteVersionMapperImpl implements NoteVersionMapper {
     @Override
     public NoteVersion fromDto(NoteVersionDto noteVersionDto) {
         return new NoteVersion(
-                noteVersionDto.id(),
-                noteVersionDto.noteVersionId(),
+                noteVersionDto.getId(),
+                noteVersionDto.getNoteVersionId(),
                 null,
-                noteVersionDto.masterDelta(),
-                noteVersionDto.revision(),
-                noteVersionDto.comment(),
-                noteVersionDto.versionNumber()
+                noteVersionDto.getMasterDelta(),
+                noteVersionDto.getRevision(),
+                noteVersionDto.getComment(),
+                noteVersionDto.getVersionNumber()
         );
     }
 

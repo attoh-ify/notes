@@ -65,7 +65,7 @@ public class CollaboratorSessionCleanupScheduler {
             return;
         }
 
-        persistAndDeleteInactiveNote(noteId, note.ownerEmail());
+        persistAndDeleteInactiveNote(noteId, note.getOwnerEmail());
     }
 
     private void persistAndDeleteInactiveNote(String noteId, String ownerEmail) {

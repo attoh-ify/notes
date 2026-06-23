@@ -60,7 +60,7 @@ public class DirtyNotePersistenceScheduler {
                 return;
             }
 
-            int revisionBeforeSave = noteVersion.revision();
+            int revisionBeforeSave = noteVersion.getRevision();
 
             log.info(
                     "Persisting dirty note. noteId={} revision={}",
@@ -69,7 +69,7 @@ public class DirtyNotePersistenceScheduler {
             );
 
             notePersistenceService.saveRedisNoteToDatabase(
-                    note.ownerEmail(),
+                    note.getOwnerEmail(),
                     noteId
             );
 

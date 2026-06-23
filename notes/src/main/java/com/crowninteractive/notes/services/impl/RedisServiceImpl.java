@@ -7,6 +7,7 @@ import com.crowninteractive.notes.dto.ot.TextOperation;
 import com.crowninteractive.notes.entities.note.Note;
 import com.crowninteractive.notes.entities.noteVersion.NoteVersion;
 import com.crowninteractive.notes.services.RedisService;
+import com.crowninteractive.notes.utils.Helpers;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class RedisServiceImpl implements RedisService {
@@ -143,34 +145,33 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void updateNote(NoteDto note, NoteVersionDto noteVersion) {
-        String noteKey = getNoteKey(note.noteId());
-        String noteVersionKey = getNoteVersionKey(note.noteId());
+        String noteKey = getNoteKey(note.getNoteId());
+        String noteVersionKey = getNoteVersionKey(note.getNoteId());
 
         if (redisTemplate.opsForValue().get(noteKey) == null) return;
 
         try {
             String jsonNote = objectMapper.writeValueAsString(note);
             String jsonNoteVersion = objectMapper.writeValueAsString(noteVersion);
-            String noteId = note.id().toString();
+            String noteId = note.getNoteId();
             String dirtyTimestamp = String.valueOf(System.currentTimeMillis());
 
-            String script = """
-                redis.call('set', KEYS[1], ARGV[1])
-                redis.call('set', KEYS[2], ARGV[2])
-                redis.call('zadd', KEYS[3], ARGV[3], ARGV[4])
-                return 1
-                """;
+            String script =
+                "redis.call('set', KEYS[1], ARGV[1])" +
+                "redis.call('set', KEYS[2], ARGV[2])" +
+                "redis.call('zadd', KEYS[3], ARGV[3], ARGV[4])" +
+                "return 1";
 
             redisTemplate.execute(
                     new DefaultRedisScript<>(script, Long.class),
-                    List.of(noteKey, noteVersionKey, DIRTY_NOTES_KEY),
+                    Arrays.asList(noteKey, noteVersionKey, DIRTY_NOTES_KEY),
                     jsonNote,
                     jsonNoteVersion,
                     dirtyTimestamp,
                     noteId
             );
         } catch (Exception e) {
-            log.error("Failed to update note atomically: {}", note.id(), e);
+            log.error("Failed to update note atomically: {}", note.getNoteId(), e);
             throw new RuntimeException(e);
         }
     }
@@ -201,7 +202,7 @@ public class RedisServiceImpl implements RedisService {
         String processedOpsKey = getProcessedOperationsKey(noteId);
         String pendingHistoryKey = getPendingHistoryKey(noteId);
 
-        redisTemplate.delete(List.of(
+        redisTemplate.delete(Arrays.asList(
                 noteKey,
                 noteVersionKey,
                 noteCollaboratorKey,
@@ -219,7 +220,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void refreshNoteContent(String actorEmail, String noteId) {
-        if (noteId == null || actorEmail == null || actorEmail.isBlank()) {
+        if (noteId == null || actorEmail == null || Helpers.isBlank(actorEmail)) {
             return;
         }
 
@@ -227,7 +228,7 @@ public class RedisServiceImpl implements RedisService {
         String noteVersionKey = getNoteVersionKey(noteId);
         String noteInitialRevisionKey = getInitialRevisionKey(noteId);
 
-        redisTemplate.delete(List.of(
+        redisTemplate.delete(Arrays.asList(
                 noteKey,
                 noteVersionKey,
                 noteInitialRevisionKey
@@ -264,7 +265,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void addCollaboratorSession(String noteId, String actorEmail, String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
+        if (sessionId == null || Helpers.isBlank(sessionId)) {
             throw new IllegalArgumentException("WebSocket sessionId is required");
         }
 
@@ -287,7 +288,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public boolean removeCollaboratorSession(String noteId, String sessionId) {
-        if (noteId == null || sessionId == null || sessionId.isBlank()) {
+        if (noteId == null || sessionId == null || Helpers.isBlank(sessionId)) {
             return false;
         }
 
@@ -352,7 +353,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public boolean tryAcquirePersistenceLock(String noteId, String owner) {
-        if (noteId == null || owner == null || owner.isBlank()) {
+        if (noteId == null || owner == null || Helpers.isBlank(owner)) {
             return false;
         }
 
@@ -369,19 +370,18 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void releasePersistenceLock(String noteId, String owner) {
-        if (noteId == null || owner == null || owner.isBlank()) {
+        if (noteId == null || owner == null || Helpers.isBlank(owner)) {
             return;
         }
 
         String key = getPersistenceLockKey(noteId);
 
-        String script = """
-            if redis.call('get', KEYS[1]) == ARGV[1] then
-                return redis.call('del', KEYS[1])
-            else
-                return 0
-            end
-            """;
+        String script =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then" +
+            "    return redis.call('del', KEYS[1])" +
+            "else" +
+            "    return 0" +
+            "end";
 
         redisTemplate.execute(
                 new DefaultRedisScript<>(script, Long.class),
@@ -401,7 +401,7 @@ public class RedisServiceImpl implements RedisService {
             return;
         }
 
-        if (latestVersion.revision() == persistedRevision) {
+        if (latestVersion.getRevision() == persistedRevision) {
             redisTemplate.opsForZSet().remove(DIRTY_NOTES_KEY, noteId);
             return;
         }
@@ -411,7 +411,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public boolean tryAcquireOperationLock(String noteId, String owner, long ttlSeconds) {
-        if (noteId == null || owner == null || owner.isBlank()) {
+        if (noteId == null || owner == null || Helpers.isBlank(owner)) {
             return false;
         }
 
@@ -428,19 +428,18 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void releaseOperationLock(String noteId, String owner) {
-        if (noteId == null || owner == null || owner.isBlank()) {
+        if (noteId == null || owner == null || Helpers.isBlank(owner)) {
             return;
         }
 
         String key = getOperationLockKey(noteId);
 
-        String script = """
-            if redis.call('get', KEYS[1]) == ARGV[1] then
-                return redis.call('del', KEYS[1])
-            else
-                return 0
-            end
-            """;
+        String script =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then" +
+            "    return redis.call('del', KEYS[1])" +
+            "else" +
+            "    return 0" +
+            "end";
 
         redisTemplate.execute(
                 new org.springframework.data.redis.core.script.DefaultRedisScript<>(script, Long.class),
@@ -451,7 +450,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public TextOperation getProcessedOperation(String noteId, String opId) {
-        if (noteId == null || opId == null || opId.isBlank()) {
+        if (noteId == null || opId == null || Helpers.isBlank(opId)) {
             return null;
         }
 
@@ -484,7 +483,7 @@ public class RedisServiceImpl implements RedisService {
 
         String opId = operation.getOpId();
 
-        if (opId == null || opId.isBlank()) {
+        if (opId == null || Helpers.isBlank(opId)) {
             return;
         }
 
@@ -507,11 +506,11 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void compactTransformRevisionLogIfNeeded(String noteId, NoteDto note) {
-        if (noteId == null || note == null || note.revisionLog() == null) {
+        if (noteId == null || note == null || note.getRevisionLog() == null) {
             return;
         }
 
-        int currentSize = note.revisionLog().size();
+        int currentSize = note.getRevisionLog().size();
 
         if (currentSize <= MAX_REVISION_LOG_SIZE) {
             return;
@@ -523,10 +522,10 @@ public class RedisServiceImpl implements RedisService {
         int newInitialRevision = oldInitialRevision + removeCount;
 
         List<TextOperation> compactedLog =
-                new ArrayList<>(note.revisionLog().subList(removeCount, currentSize));
+                new ArrayList<>(note.getRevisionLog().subList(removeCount, currentSize));
 
-        note.revisionLog().clear();
-        note.revisionLog().addAll(compactedLog);
+        note.getRevisionLog().clear();
+        note.getRevisionLog().addAll(compactedLog);
 
         setInitialRevision(noteId, newInitialRevision);
 
@@ -536,7 +535,7 @@ public class RedisServiceImpl implements RedisService {
                 oldInitialRevision,
                 newInitialRevision,
                 removeCount,
-                note.revisionLog().size()
+                note.getRevisionLog().size()
         );
     }
 
@@ -613,7 +612,7 @@ public class RedisServiceImpl implements RedisService {
 
         List<TextOperation> remaining = pending.stream()
                 .filter(op -> op.getRevision() > savedRevision)
-                .toList();
+                .collect(Collectors.toList());
 
         redisTemplate.delete(key);
 
@@ -632,7 +631,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public void refreshCollaboratorSessionHeartbeat(String noteId, String sessionId, String actorEmail) {
-        if (noteId == null || sessionId == null || sessionId.isBlank()) return;
+        if (noteId == null || sessionId == null || Helpers.isBlank(sessionId)) return;
 
         String key = getCollaboratorSessionHeartbeatKey(noteId, sessionId);
 
@@ -645,7 +644,7 @@ public class RedisServiceImpl implements RedisService {
 
     @Override
     public boolean collaboratorSessionHeartbeatExists(String noteId, String sessionId) {
-        if (noteId == null || sessionId == null || sessionId.isBlank()) {
+        if (noteId == null || sessionId == null || Helpers.isBlank(sessionId)) {
             return false;
         }
 
@@ -802,7 +801,7 @@ public class RedisServiceImpl implements RedisService {
 
             String email = String.valueOf(emailObj);
 
-            if (!email.isBlank()) {
+            if (!Helpers.isBlank(email)) {
                 uniqueEmails.add(email);
             }
         }

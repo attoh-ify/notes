@@ -26,6 +26,7 @@ import com.crowninteractive.notes.repositories.NoteVersionRepository;
 import com.crowninteractive.notes.services.AttributionService;
 import com.crowninteractive.notes.services.NoteService;
 import com.crowninteractive.notes.services.RedisService;
+import com.crowninteractive.notes.utils.Helpers;
 import com.crowninteractive.notes.utils.QuillDeltaUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +35,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class NoteServiceImpl implements NoteService {
@@ -67,9 +69,9 @@ public class NoteServiceImpl implements NoteService {
     @Transactional(readOnly = true)
     @Override
     public List<NoteDto> fetchNotes(String actorEmail) {
-        List<Note> notes = noteRepository.findByActorEmail(actorEmail);
+        List<Note> notes = noteRepository.findAccessibleNotes(actorEmail);
         List<NoteDto> noteDtos = new ArrayList<>();
-        if (notes.isEmpty()) return List.of();
+        if (notes.isEmpty()) return Collections.emptyList();
         for (Note note : notes) {
             NoteDto noteDto = noteMapper.toDto(note, actorEmail);
             noteDtos.add(noteDto);
@@ -100,7 +102,7 @@ public class NoteServiceImpl implements NoteService {
                 null,
                 UUID.randomUUID().toString(),
                 user,
-                payload.title(),
+                payload.getTitle(),
                 new ArrayList<>(),
                 NoteVisibility.PUBLIC,
                 new ArrayList<>(),
@@ -111,7 +113,7 @@ public class NoteServiceImpl implements NoteService {
         newNote = noteRepository.save(newNote);
 
         Delta rawInitialDelta =
-                payload.initialDelta() != null ? payload.initialDelta() : new Delta();
+                payload.getInitialDelta() != null ? payload.getInitialDelta() : new Delta();
 
         boolean hasContent =
                 rawInitialDelta.ops != null && !rawInitialDelta.ops.isEmpty();
@@ -186,16 +188,16 @@ public class NoteServiceImpl implements NoteService {
         Map<Object, Object> collaborators = redisService.getCollaborators(noteId);
 
         Delta normalizedMasterDelta =
-                QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+                QuillDeltaUtils.ensureTerminalNewline(noteVersion.getMasterDelta());
 
         NoteVersionDto normalizedNoteVersion = new NoteVersionDto(
-                noteVersion.id(),
-                noteVersion.noteVersionId(),
+                noteVersion.getId(),
+                noteVersion.getNoteVersionId(),
                 normalizedMasterDelta,
-                noteVersion.revision(),
-                noteVersion.comment(),
-                noteVersion.versionNumber(),
-                noteVersion.createdAt()
+                noteVersion.getRevision(),
+                noteVersion.getComment(),
+                noteVersion.getVersionNumber(),
+                noteVersion.getCreatedAt()
         );
 
         redisService.updateNote(note, normalizedNoteVersion);
@@ -203,7 +205,7 @@ public class NoteServiceImpl implements NoteService {
         return new JoinNoteResponse(
                 collaborators,
                 normalizedMasterDelta,
-                noteVersion.revision(),
+                noteVersion.getRevision(),
                 isReviewing,
                 mode,
                 activeSessionCount
@@ -218,11 +220,11 @@ public class NoteServiceImpl implements NoteService {
 
         List<TextOperation> committedTextOps = note.getRevisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.COMMITTED))
-                .toList();
+                .collect(Collectors.toList());
 
         List<TextOperation> pendingTextOps = note.getRevisionLog().stream()
                 .filter(textOp -> textOp.getState().equals(OpState.PENDING))
-                .toList();
+                .collect(Collectors.toList());
 
         AttributionBuildResult result = attributionService.buildReviewProjection(
                 actorEmail,
@@ -233,7 +235,7 @@ public class NoteServiceImpl implements NoteService {
                 AttributionViewMode.REVIEW
         );
 
-        if (result.revisionLogChanged()) {
+        if (result.isRevisionLogChanged()) {
             Delta newMasterDelta =
                     rebuildLiveMasterDeltaFromRevisionLog(note.getRevisionLog());
 
@@ -290,16 +292,16 @@ public class NoteServiceImpl implements NoteService {
             throw new BadRequestException("Solo sync operation is required");
         }
 
-        if (operation.getOpId() == null || operation.getOpId().isBlank()) {
+        if (operation.getOpId() == null || Helpers.isBlank(operation.getOpId())) {
             throw new BadRequestException("Solo sync opId is required");
         }
 
         redisService.initializeNote(actorEmail, noteId);
 
         NoteDto redisNote = redisService.getNote(noteId);
-        boolean isOwner = redisNote.ownerEmail().equals(actorEmail);
+        boolean isOwner = redisNote.getOwnerEmail().equals(actorEmail);
 
-        if (redisNote.isReviewing() && !isOwner) {
+        if (redisNote.getIsReviewing() && !isOwner) {
             throw new BadRequestException("Note is currently under review by the owner.");
         }
 
@@ -341,14 +343,14 @@ public class NoteServiceImpl implements NoteService {
                 return alreadyProcessed.getRevision();
             }
 
-            int serverRevision = noteVersion.revision();
+            int serverRevision = noteVersion.getRevision();
             int clientRevision = operation.getRevision();
 
             if (clientRevision != serverRevision) {
                 throw new BadRequestException("Solo sync is stale. Please reload note.");
             }
 
-            Delta currentMasterDelta = QuillDeltaUtils.ensureTerminalNewline(noteVersion.masterDelta());
+            Delta currentMasterDelta = QuillDeltaUtils.ensureTerminalNewline(noteVersion.getMasterDelta());
 
             Delta changeDelta = operation.getDelta();
 
@@ -368,30 +370,30 @@ public class NoteServiceImpl implements NoteService {
                     java.time.LocalDateTime.now()
             );
 
-            note.revisionLog().add(newTextOperation);
+            note.getRevisionLog().add(newTextOperation);
 
             NoteDto updatedNote = new NoteDto(
-                    note.id(),
-                    note.noteId(),
-                    note.ownerEmail(),
-                    note.title(),
-                    note.revisionLog(),
-                    note.visibility(),
-                    note.accessRole(),
-                    note.currentNoteVersionNumber(),
-                    note.isReviewing(),
-                    note.createdAt(),
-                    note.updatedAt()
+                    note.getId(),
+                    note.getNoteId(),
+                    note.getOwnerEmail(),
+                    note.getTitle(),
+                    note.getRevisionLog(),
+                    note.getVisibility(),
+                    note.getAccessRole(),
+                    note.getCurrentNoteVersionNumber(),
+                    note.getIsReviewing(),
+                    note.getCreatedAt(),
+                    note.getUpdatedAt()
             );
 
             NoteVersionDto updatedVersion = new NoteVersionDto(
-                    noteVersion.id(),
-                    noteVersion.noteVersionId(),
+                    noteVersion.getId(),
+                    noteVersion.getNoteVersionId(),
                     newMasterDelta,
                     newRevision,
-                    noteVersion.comment(),
-                    noteVersion.versionNumber(),
-                    noteVersion.createdAt()
+                    noteVersion.getComment(),
+                    noteVersion.getVersionNumber(),
+                    noteVersion.getCreatedAt()
             );
 
             redisService.updateNote(updatedNote, updatedVersion);
@@ -415,7 +417,7 @@ public class NoteServiceImpl implements NoteService {
         List<TextOperation> liveOps = revisionLog.stream()
                 .filter(this::shouldIncludeInLiveMaster)
                 .sorted(Comparator.comparingInt(TextOperation::getRevision))
-                .toList();
+                .collect(Collectors.toList());
 
         for (TextOperation op : liveOps) {
             delta = delta.compose(new Delta(op.getDelta().ops));

@@ -21,9 +21,9 @@ public class DiffEngine {
     public static List<Diff> diff(String text1, String text2) {
         if (Objects.equals(text1, text2)) {
             if (!text1.isEmpty()) {
-                return List.of(new Diff(OpType.EQUAL, text1));
+                return Collections.singletonList(new Diff(OpType.EQUAL, text1));
             }
-            return List.of();
+            return Collections.emptyList();
         }
 
         int commonPrefix = commonPrefix(text1, text2);
@@ -52,15 +52,15 @@ public class DiffEngine {
 
     private static List<Diff> compute(String text1, String text2) {
         if (text1.isEmpty()) {
-            return List.of(new Diff(OpType.INSERT, text2));
+            return Collections.singletonList(new Diff(OpType.INSERT, text2));
         }
         if (text2.isEmpty()) {
-            return List.of(new Diff(OpType.DELETE, text1));
+            return Collections.singletonList(new Diff(OpType.DELETE, text1));
         }
 
         int i = text1.indexOf(text2);
         if (i != -1) {
-            return List.of(
+            return Arrays.asList(
                     new Diff(OpType.DELETE, text1.substring(0, i)),
                     new Diff(OpType.EQUAL, text2),
                     new Diff(OpType.DELETE, text1.substring(i + text2.length()))
@@ -68,7 +68,7 @@ public class DiffEngine {
         }
 
         if (text1.length() == 1 || text2.length() == 1) {
-            return List.of(
+            return Arrays.asList(
                     new Diff(OpType.DELETE, text1),
                     new Diff(OpType.INSERT, text2)
             );
@@ -159,7 +159,7 @@ public class DiffEngine {
             }
         }
 
-        return List.of(
+        return Arrays.asList(
                 new Diff(OpType.DELETE, text1),
                 new Diff(OpType.INSERT, text2)
         );

@@ -1,7 +1,7 @@
 package com.crowninteractive.notes.entities.noteAccess;
 
 import com.crowninteractive.notes.entities.note.Note;
-import jakarta.persistence.*;
+import javax.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 

@@ -59,7 +59,8 @@ public final class QuillDeltaUtils {
 
             if (op == null) continue;
 
-            if (op.isInsert() && op.getInsert() instanceof String text) {
+            if (op.isInsert() && op.getInsert() instanceof String) {
+                String text = (String) op.getInsert();
                 return text.endsWith("\n");
             }
 
@@ -91,7 +92,7 @@ public final class QuillDeltaUtils {
             Object retain = last.getRetain();
 
             boolean isRetainOne =
-                    retain instanceof Integer value && value == 1;
+                    retain instanceof Integer && (Integer) retain == 1;
 
             if (!isRetainOne) {
                 break;

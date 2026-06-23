@@ -1,5 +1,9 @@
 package com.crowninteractive.notes.dto.attribution;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 // ─── RunPosition ──────────────────────────────────────────────────────────────
 //
 // Return type of AttributionHelpers.findRunPos().
@@ -10,9 +14,11 @@ package com.crowninteractive.notes.dto.attribution;
 //   offset - how many characters into that run the logical position falls
 //   absPos - the absolute position in visual delta space (includes deleted-text offsets)
 // ──────────────────────────────────────────────────────────────────────────────
-public record RunPosition (
-    int idx,
-    int offset,
-    int absPos
-){
+@Getter
+@NoArgsConstructor
+@AllArgsConstructor
+public class RunPosition {
+    private int idx;
+    private int offset;
+    private int absPos;
 }

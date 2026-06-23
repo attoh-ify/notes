@@ -1,12 +1,11 @@
 package com.crowninteractive.notes.entities.noteVersion;
 
+import com.crowninteractive.notes.converter.DeltaJsonConverter;
 import com.crowninteractive.notes.dto.ot.Delta;
 import com.crowninteractive.notes.entities.note.Note;
-import jakarta.persistence.*;
+import javax.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -36,8 +35,9 @@ public class NoteVersion {
     @JoinColumn(name = "note_id", nullable = false)
     private Note note;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "master_delta", nullable = false)
+    @Convert(converter = DeltaJsonConverter.class)
+    @Lob
+    @Column(name = "master_delta", nullable = false, columnDefinition = "TEXT")
     private Delta masterDelta;
 
     @Column(name = "revision", nullable = false)
