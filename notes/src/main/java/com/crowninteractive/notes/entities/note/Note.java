@@ -1,5 +1,6 @@
 package com.crowninteractive.notes.entities.note;
 
+import com.crowninteractive.notes.converter.TextOperationListConverter;
 import com.crowninteractive.notes.entities.noteAccess.NoteAccess;
 import com.crowninteractive.notes.entities.noteVersion.NoteVersion;
 import com.crowninteractive.notes.entities.user.User;
@@ -32,6 +33,7 @@ public class Note {
     @Column(name = "title", nullable = false)
     private String title;
 
+    @Convert(converter = TextOperationListConverter.class)
     @Lob
     @Column(name = "revision_log", nullable = false, columnDefinition = "TEXT")
     private List<TextOperation> revisionLog = new ArrayList<>();

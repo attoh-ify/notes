@@ -157,9 +157,9 @@ public class RedisServiceImpl implements RedisService {
             String dirtyTimestamp = String.valueOf(System.currentTimeMillis());
 
             String script =
-                "redis.call('set', KEYS[1], ARGV[1])" +
-                "redis.call('set', KEYS[2], ARGV[2])" +
-                "redis.call('zadd', KEYS[3], ARGV[3], ARGV[4])" +
+                "redis.call('set', KEYS[1], ARGV[1]) " +
+                "redis.call('set', KEYS[2], ARGV[2]) " +
+                "redis.call('zadd', KEYS[3], ARGV[3], ARGV[4]) " +
                 "return 1";
 
             redisTemplate.execute(
@@ -377,10 +377,10 @@ public class RedisServiceImpl implements RedisService {
         String key = getPersistenceLockKey(noteId);
 
         String script =
-            "if redis.call('get', KEYS[1]) == ARGV[1] then" +
-            "    return redis.call('del', KEYS[1])" +
-            "else" +
-            "    return 0" +
+            "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+            "    return redis.call('del', KEYS[1]) " +
+            "else " +
+            "    return 0 " +
             "end";
 
         redisTemplate.execute(
@@ -435,10 +435,10 @@ public class RedisServiceImpl implements RedisService {
         String key = getOperationLockKey(noteId);
 
         String script =
-            "if redis.call('get', KEYS[1]) == ARGV[1] then" +
-            "    return redis.call('del', KEYS[1])" +
-            "else" +
-            "    return 0" +
+            "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+            "    return redis.call('del', KEYS[1]) " +
+            "else " +
+            "    return 0 " +
             "end";
 
         redisTemplate.execute(

@@ -482,4 +482,16 @@ public class Delta {
                 "ops=" + ops +
                 '}';
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) return false;
+        Delta delta = (Delta) o;
+        return Objects.equals(ops, delta.ops);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(ops);
+    }
 }
